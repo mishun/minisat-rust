@@ -1,0 +1,9 @@
+[package]
+name = "minisat-rust"
+version = "0.0.1"
+authors = ["Alexander Mishunin <alexander.mishunin@gmail.com>"]
+
+[profile.dev]
+opt-level = 0
+debug = true
+
