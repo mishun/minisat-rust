@@ -161,6 +161,10 @@ impl ClauseAllocator {
         self.wasted
     }
 
+    pub fn numberOfClauses(&self) -> uint {
+        self.clauses.len()
+    }
+
     pub fn reloc(&mut self, to : &mut ClauseAllocator, cr : &mut ClauseRef) {
         let c = &mut self[*cr];
         if c.header.reloced {

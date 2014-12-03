@@ -1,9 +1,8 @@
-use std::num::abs;
+use std::num::{SignedInt};
 use std::io::{Buffer};
-use std::char::{is_whitespace, to_digit};
 use super::literal::{Var, Lit};
 use super::lbool::{LBool};
-use super::core_solver::Solver;
+use super::core_solver::{Solver};
 use super::index_map::{HasIndex};
 
 
@@ -15,7 +14,7 @@ fn parse_clause<B : Buffer>(p : &mut BufferParser<B>) -> Option<Vec<Lit>> {
             None      => { return None; }
             Some(0)   => { return Some(lits); }
             Some(lit) => {
-                let var = abs(lit) as uint - 1;
+                let var = lit.abs() as uint - 1;
                 lits.push(Lit::new(Var::new(var), lit < 0));
             }
         }
@@ -25,13 +24,13 @@ fn parse_clause<B : Buffer>(p : &mut BufferParser<B>) -> Option<Vec<Lit>> {
 pub fn parse_DIMACS<B : Buffer, S : Solver>(buffer : &mut B, solver : &mut S, validate : bool) -> bool {
     let mut p = BufferParser::new(buffer);
 
-    enum ParserState { Waiting, Parsing(uint, uint) }
+    enum State { Waiting, Parsing(uint, uint) }
 
-    let mut state = Waiting;
+    let mut state = State::Waiting;
     loop {
         p.skipWhitespace();
         match state {
-            Waiting => {
+            State::Waiting => {
                 match p.current() {
                     Some('c')      => { p.skipLine(); }
                     Some('p')      => {
@@ -39,15 +38,16 @@ pub fn parse_DIMACS<B : Buffer, S : Solver>(buffer : &mut B, solver : &mut S, va
                         let vars = p.nextUInt();
                         let clauses = p.nextUInt();
                         if vars.is_none() || clauses.is_none() { return false; }
-                        state = Parsing(vars.unwrap(), clauses.unwrap());
+                        state = State::Parsing(vars.unwrap(), clauses.unwrap());
                     }
                     None | Some(_) => { return false; }
                 }
             }
 
-            Parsing(vars, clauses) => {
+            State::Parsing(vars, clauses) => {
                 match p.current() {
                     Some('c') => { p.skipLine(); }
+
                     None      => {
                         if validate && (clauses != solver.nClauses() || vars < solver.nVars()) {
                             println!("PARSE ERROR! DIMACS header mismatch");
@@ -55,6 +55,7 @@ pub fn parse_DIMACS<B : Buffer, S : Solver>(buffer : &mut B, solver : &mut S, va
                         }
                         return true;
                     }
+
                     _         => {
                         match parse_clause(&mut p) {
                             None    => { return false; }
@@ -99,9 +100,9 @@ impl<'r, R : Buffer> BufferParser<'r, R> {
     pub fn skipWhitespace(&mut self) {
         loop {
             match self.cur {
-                None                         => break,
-                Some(c) if !is_whitespace(c) => break,
-                _                            => self.next()
+                None                          => break,
+                Some(c) if !c.is_whitespace() => break,
+                _                             => self.next()
             }
         }
     }
@@ -131,7 +132,7 @@ impl<'r, R : Buffer> BufferParser<'r, R> {
         let mut len : uint = 0;
         let mut value = 0;
         loop {
-            match self.cur.and_then(|c| { to_digit(c, 10) }) {
+            match self.cur.and_then(|c| { c.to_digit(10) }) {
                 Some(d)      => {
                     value = value * 10 + d;
                     len += 1;

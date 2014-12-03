@@ -21,11 +21,11 @@ fn main() {
         let print_usage = || {
             let program = std::os::args()[0].clone();
             let brief = format!("USAGE: {} [options] <input-file> <result-output-file>\n\n  where input may be either in plain or gzipped DIMACS.\n", program);
-            println!("{}", getopts::usage(brief.as_slice(), opts));
+            println!("{}", getopts::usage(brief.as_slice(), &opts));
         };
 
         let matches =
-            match getopts::getopts(std::os::args().tail(), opts) {
+            match getopts::getopts(std::os::args().tail(), &opts) {
                 Ok(m)  => { m }
                 Err(f) => { panic!(f.to_string()) }
             };
@@ -57,13 +57,13 @@ fn main() {
     }
 
     if verbosity > 0 {
-        println!("|  Number of variables:  {:12u}                                         |", s.nVars());
-        println!("|  Number of clauses:    {:12u}                                         |", s.nClauses());
+        println!("|  Number of variables:  {:12}                                         |", s.nVars());
+        println!("|  Number of clauses:    {:12}                                         |", s.nClauses());
     }
         
     let parsed_time = time::precise_time_s();
     if verbosity > 0 {
-        println!("|  Parse time:           {:12.2f} s                                       |", parsed_time - initial_time);
+        println!("|  Parse time:           {:12.2} s                                       |", parsed_time - initial_time);
         println!("|                                                                             |");
     }
 
@@ -78,7 +78,7 @@ fn main() {
         return;
     }
 
-    let ret = s.solveLimited([]);
+    let ret = s.solveLimited(&[]);
     if verbosity > 0 {
         s.stats.print();
         println!("");

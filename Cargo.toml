@@ -7,3 +7,6 @@ authors = ["Alexander Mishunin <alexander.mishunin@gmail.com>"]
 opt-level = 0
 debug = true
 
+[dependencies]
+time = "*"
+

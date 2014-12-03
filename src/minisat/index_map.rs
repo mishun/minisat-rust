@@ -30,17 +30,17 @@ impl<K : HasIndex, V> IndexMap<K, V> {
 
     #[inline]
     pub fn insert(&mut self, k : &K, v : V) -> Option<V> {
-        self.map.swap(k.toIndex(), v)
+        self.map.insert(k.toIndex(), v)
     }
 
     #[inline]
-    pub fn remove(&mut self, k : &K) -> bool {
+    pub fn remove(&mut self, k : &K) -> Option<V> {
         self.map.remove(&k.toIndex())
     }
 
     #[inline]
     pub fn get(&self, k : &K) -> Option<&V> {
-        self.map.find(&k.toIndex())
+        self.map.get(&k.toIndex())
     }
 }
 

@@ -1,6 +1,6 @@
 extern crate time;
 use std::default::{Default};
-use std::num::{pow};
+use std::num::{Float, FloatMath};
 use super::lbool::{LBool};
 use super::literal::{Var, Lit};
 use super::clause::{Clause, ClauseRef, ClauseAllocator};
@@ -40,28 +40,29 @@ struct Stats {
     learnts_literals : u64,
     max_literals : u64,
     tot_literals : u64,
+    start_time : f64,
 }
 
 impl Stats {
     fn new() -> Stats {
-        Default::default()
+        Stats { start_time : time::precise_time_s(), ..Default::default() }
     }
 
     pub fn print(&self) {
-        let cpu_time = time::precise_time_s();
+        let cpu_time = time::precise_time_s() - self.start_time;
         //double mem_used = memUsedPeak();
         println!("restarts              : {:12}", self.starts);
-        println!("conflicts             : {:12}   ({:.0f} / sec)", self.conflicts, self.conflicts as f64 / cpu_time);
+        println!("conflicts             : {:12}   ({:.0} / sec)", self.conflicts, self.conflicts as f64 / cpu_time);
 
-        println!("decisions             : {:12}   ({:4.2f} % random) ({:.0f} / sec)",
+        println!("decisions             : {:12}   ({:4.2} % random) ({:.0} / sec)",
             self.decisions,
             self.rnd_decisions as f64 * 100.0 / self.decisions as f64,
             self.decisions as f64 / cpu_time
         );
 
-        println!("propagations          : {:12}   ({:.0f} / sec)", self.propagations, self.propagations as f64 / cpu_time);
+        println!("propagations          : {:12}   ({:.0} / sec)", self.propagations, self.propagations as f64 / cpu_time);
 
-        println!("conflict literals     : {:12}   ({:4.2f} %% deleted)",
+        println!("conflict literals     : {:12}   ({:4.2} %% deleted)",
             self.tot_literals,
             (self.max_literals - self.tot_literals) as f64 * 100.0 / self.max_literals as f64
         );
@@ -348,7 +349,7 @@ impl CoreSolver {
                 let rest_base =
                     match self.luby_restart {
                         true  => { luby(self.restart_inc, curr_restarts) }
-                        false => { pow(self.restart_inc, curr_restarts) }
+                        false => { self.restart_inc.powi(curr_restarts as i32) }
                     };
                 let conflicts_to_go = rest_base * self.restart_first as f64;
                 status = self.search(conflicts_to_go as uint);
@@ -482,7 +483,7 @@ impl CoreSolver {
                         self.max_learnts *= self.learntsize_inc;
 
                         if self.verbosity >= 1 {
-                            println!("| {:9} | {:7} {:8} {:8} | {:8} {:8} {:6.0f} | {:6.3f} % |",
+                            println!("| {:9} | {:7} {:8} {:8} | {:8} {:8} {:6.0} | {:6.3} % |",
                                    self.stats.conflicts,
                                    self.stats.dec_vars as uint - (if self.trail_lim.is_empty() { self.trail.len() } else { self.trail_lim[0] }),
                                    self.nClauses(),
@@ -1075,7 +1076,7 @@ impl CoreSolver {
         for i in range(0, self.decisionLevel() + 1) {
             let beg = if i == 0 { 0 } else { self.trail_lim[i - 1] };
             let end = if i == self.decisionLevel() { self.trail.len() } else { self.trail_lim[i] };
-            progress += pow(F, i) * (end - beg) as f64;
+            progress += F.powi(i as i32) * (end - beg) as f64;
         }
         progress * F
     }
@@ -1099,7 +1100,8 @@ impl CoreSolver {
         let mut to = ClauseAllocator::new(); //self.ca.size() - self.ca.wasted());
         self.relocAll(&mut to);
         if self.verbosity >= 2 {
-            println!("|  Garbage collection:   {:12} bytes => {:12} bytes             |", self.ca.size(), to.size());
+            println!("|  Garbage collection:   {:12} bytes ({:5} clauses) => {:12} bytes  ({:5} clauses)            |",
+                self.ca.size(), self.ca.numberOfClauses(), to.size(), to.numberOfClauses());
         }
         self.ca = to;
     }
@@ -1147,7 +1149,6 @@ impl CoreSolver {
             }
             self.learnts.truncate(j);
         }
-
 
         // All original:
         {
@@ -1200,7 +1201,7 @@ pub fn luby(y : f64, mut x : uint) -> f64 {
         x = x % size;
     }
 
-    pow(y, seq)
+    y.powi(seq)
 }
 
 
