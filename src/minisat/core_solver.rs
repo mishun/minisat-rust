@@ -19,12 +19,6 @@ pub trait Solver {
 }
 
 
-struct VarData {
-    reason : Option<ClauseRef>,
-    level  : uint,
-}
-
-
 #[deriving(Default)]
 struct Stats {
     solves : u64,
@@ -73,37 +67,71 @@ impl Stats {
 }
 
 
-pub struct CoreSolver {
-    pub model : Vec<LBool>,             // If problem is satisfiable, this vector contains the model (if any).
-    conflict : IndexMap<Lit, ()>,
-
-    verbosity : int,
-    var_decay : f64,
-    clause_decay : f64,
-    random_var_freq : f64,
-    rand : Random,
-    luby_restart : bool,
-    ccmin_mode : int,         // Controls conflict clause minimization (0=none, 1=basic, 2=deep).
-    phase_saving : int,       // Controls the level of phase saving (0=none, 1=limited, 2=full).
-    rnd_pol : bool,           // Use random polarities for branching heuristics.
-    rnd_init_act : bool,      // Initialize variable activities with a small random value.
-    garbage_frac : f64,       // The fraction of wasted memory allowed before a garbage collection is triggered.
-    min_learnts_lim : int,    // Minimum number to set the learnts limit to.
-
-    restart_first : int,      // The initial restart limit.                                                                (default 100)
-    restart_inc : f64,        // The factor with which the restart limit is multiplied in each restart.                    (default 1.5)
-    learntsize_factor : f64,  // The intitial limit for learnt clauses is a factor of the original clauses.                (default 1 / 3)
-    learntsize_inc : f64,     // The limit for learnt clauses is multiplied with this factor each restart.                 (default 1.1)
+struct CoreSettings {
+    verbosity         : int,
+    var_decay         : f64,
+    clause_decay      : f64,
+    random_var_freq   : f64,
+    luby_restart      : bool,
+    ccmin_mode        : int,    // Controls conflict clause minimization (0=none, 1=basic, 2=deep).
+    phase_saving      : int,    // Controls the level of phase saving (0=none, 1=limited, 2=full).
+    rnd_pol           : bool,   // Use random polarities for branching heuristics.
+    rnd_init_act      : bool,   // Initialize variable activities with a small random value.
+    garbage_frac      : f64,    // The fraction of wasted memory allowed before a garbage collection is triggered.
+    min_learnts_lim   : int,    // Minimum number to set the learnts limit to.
+    restart_first     : int,    // The initial restart limit.                                                                (default 100)
+    restart_inc       : f64,    // The factor with which the restart limit is multiplied in each restart.                    (default 1.5)
+    learntsize_factor : f64,    // The intitial limit for learnt clauses is a factor of the original clauses.                (default 1 / 3)
+    learntsize_inc    : f64,    // The limit for learnt clauses is multiplied with this factor each restart.                 (default 1.1)
 
     learntsize_adjust_start_confl : int,
     learntsize_adjust_inc : f64,
+}
 
+impl Default for CoreSettings {
+    fn default() -> CoreSettings {
+        CoreSettings {
+            verbosity         : 0,
+            var_decay         : 0.95,
+            clause_decay      : 0.999,
+            random_var_freq   : 0.0,
+            luby_restart      : true,
+            ccmin_mode        : 2,
+            phase_saving      : 2,
+            rnd_pol           : false,
+            rnd_init_act      : false,
+            garbage_frac      : 0.20,
+            min_learnts_lim   : 0,
+            restart_first     : 100,
+            restart_inc       : 2.0,
+            learntsize_factor : 1.0 / 3.0,
+            learntsize_inc    : 1.1,
+            learntsize_adjust_start_confl : 100,
+            learntsize_adjust_inc : 1.5,
+        }
+    }
+}
+
+
+struct VarData {
+    reason : Option<ClauseRef>,
+    level  : uint,
+}
+
+
+pub struct CoreSolver {
+    set : CoreSettings,
+
+    pub model : Vec<LBool>,             // If problem is satisfiable, this vector contains the model (if any).
+    conflict : IndexMap<Lit, ()>,
+
+    rand : Random,
     pub stats : Stats,   // Statistics: (read-only member variable)
 
     // Solver state:
     clauses : Vec<ClauseRef>,    // List of problem clauses.
     learnts : Vec<ClauseRef>,    // List of learnt clauses.
-    trail : Vec<Lit>,            // Assignment stack; stores all assigments made in the order they were made.
+    trail   : Vec<Lit>,            // Assignment stack; stores all assigments made in the order they were made.
     trail_lim : Vec<uint>,       // Separator indices for different decision levels in 'trail'.
     assumptions : Vec<Lit>,      // Current set of assumptions provided to solve by the user.
 
@@ -155,7 +183,7 @@ impl Solver for CoreSolver {
         let v = self.assigns.newVar();
         self.watches.initVar(v);
         self.vardata.insert(&v, VarData { reason : None, level : 0 });
-        self.activity_queue.setActivity(&v, if self.rnd_init_act { self.rand.drand() * 0.00001 } else { 0.0 });
+        self.activity_queue.setActivity(&v, if self.set.rnd_init_act { self.rand.drand() * 0.00001 } else { 0.0 });
         self.seen.insert(&v, 0);
         self.polarity.insert(&v, true);
         self.user_pol.insert(&v, upol);
@@ -208,29 +236,12 @@ impl Solver for CoreSolver {
 impl CoreSolver {
     pub fn new(verbosity : int) -> CoreSolver {
         CoreSolver {
+            set : CoreSettings { verbosity : verbosity, ..Default::default() },
+
             model : Vec::new(),
             conflict : IndexMap::new(),
 
-            verbosity : verbosity,
-            var_decay : 0.95,
-            clause_decay : 0.999,
-            random_var_freq : 0.0,
             rand : Random::new(91648253.0),
-            luby_restart : true,
-            ccmin_mode : 2,
-            phase_saving : 2,
-            rnd_pol : false,
-            rnd_init_act : false,
-            garbage_frac : 0.20,
-            min_learnts_lim : 0,
-
-            restart_first : 100,
-            restart_inc : 2.0,
-            learntsize_factor : 1.0 / 3.0,
-            learntsize_inc : 1.1,
-
-            learntsize_adjust_start_confl : 100,
-            learntsize_adjust_inc : 1.5,
 
             stats : Stats::new(),
 
@@ -289,7 +300,7 @@ impl CoreSolver {
                 let lit = self.trail[c];
                 let x = lit.var();
                 self.assigns.cancel(x);
-                if self.phase_saving > 1 || (self.phase_saving == 1 && c > *self.trail_lim.last().unwrap()) {
+                if self.set.phase_saving > 1 || (self.set.phase_saving == 1 && c > *self.trail_lim.last().unwrap()) {
                     self.polarity[x] = lit.sign();
                 }
                 self.insertVarOrder(x);
@@ -330,12 +341,12 @@ impl CoreSolver {
         if !self.ok { return LBool::False() }
         self.stats.solves += 1;
 
-        self.max_learnts = (self.nClauses() as f64 * self.learntsize_factor).max(self.min_learnts_lim as f64);
-        self.learntsize_adjust_confl   = self.learntsize_adjust_start_confl as f64;
-        self.learntsize_adjust_cnt     = self.learntsize_adjust_start_confl;
+        self.max_learnts = (self.nClauses() as f64 * self.set.learntsize_factor).max(self.set.min_learnts_lim as f64);
+        self.learntsize_adjust_confl   = self.set.learntsize_adjust_start_confl as f64;
+        self.learntsize_adjust_cnt     = self.set.learntsize_adjust_start_confl;
         let mut status = LBool::Undef();
 
-        if self.verbosity >= 1 {
+        if self.set.verbosity >= 1 {
             println!("============================[ Search Statistics ]==============================");
             println!("| Conflicts |          ORIGINAL         |          LEARNT          | Progress |");
             println!("|           |    Vars  Clauses Literals |    Limit  Clauses Lit/Cl |          |");
@@ -347,18 +358,18 @@ impl CoreSolver {
             let mut curr_restarts = 0;
             while status.isUndef() {
                 let rest_base =
-                    match self.luby_restart {
-                        true  => { luby(self.restart_inc, curr_restarts) }
-                        false => { self.restart_inc.powi(curr_restarts as i32) }
+                    match self.set.luby_restart {
+                        true  => { luby(self.set.restart_inc, curr_restarts) }
+                        false => { self.set.restart_inc.powi(curr_restarts as i32) }
                     };
-                let conflicts_to_go = rest_base * self.restart_first as f64;
+                let conflicts_to_go = rest_base * self.set.restart_first as f64;
                 status = self.search(conflicts_to_go as uint);
                 if !self.withinBudget() { break; }
                 curr_restarts += 1;
             }
         }
 
-        if self.verbosity >= 1 {
+        if self.set.verbosity >= 1 {
             println!("===============================================================================");
         }
 
@@ -426,7 +437,7 @@ impl CoreSolver {
             self.released_vars.clear();
         }
 
-        self.checkGarbageDefault();
+        self.checkGarbageDef();
         self.rebuildOrderHeap();
 
         self.simpDB_assigns = self.nAssigns() as int;
@@ -478,11 +489,11 @@ impl CoreSolver {
 
                     self.learntsize_adjust_cnt -= 1;
                     if self.learntsize_adjust_cnt == 0 {
-                        self.learntsize_adjust_confl *= self.learntsize_adjust_inc;
+                        self.learntsize_adjust_confl *= self.set.learntsize_adjust_inc;
                         self.learntsize_adjust_cnt = self.learntsize_adjust_confl as int;
-                        self.max_learnts *= self.learntsize_inc;
+                        self.max_learnts *= self.set.learntsize_inc;
 
-                        if self.verbosity >= 1 {
+                        if self.set.verbosity >= 1 {
                             println!("| {:9} | {:7} {:8} {:8} | {:8} {:8} {:6.0} | {:6.3} % |",
                                    self.stats.conflicts,
                                    self.stats.dec_vars as uint - (if self.trail_lim.is_empty() { self.trail.len() } else { self.trail_lim[0] }),
@@ -701,7 +712,7 @@ impl CoreSolver {
             self.learnts.truncate(j);
         }
 
-        self.checkGarbageDefault();
+        self.checkGarbageDef();
     }
 
     fn rebuildOrderHeap(&mut self) {
@@ -719,7 +730,7 @@ impl CoreSolver {
         let mut next : Option<Var> = None;
 
         // Random decision:
-        if self.rand.chance(self.random_var_freq) && !self.activity_queue.is_empty() {
+        if self.rand.chance(self.set.random_var_freq) && !self.activity_queue.is_empty() {
             let v = self.activity_queue[self.rand.irand(self.activity_queue.len())];
             if self.assigns.undef(v) && self.decision[v] {
                 self.stats.rnd_decisions += 1;
@@ -737,7 +748,7 @@ impl CoreSolver {
         next.map(|v| {
             if !self.user_pol[v].isUndef() {
                 Lit::new(v, self.user_pol[v].isTrue())
-            } else if self.rnd_pol {
+            } else if self.set.rnd_pol {
                 Lit::new(v, self.rand.chance(0.5))
             } else {
                 Lit::new(v, self.polarity[v])
@@ -814,7 +825,7 @@ impl CoreSolver {
         self.analyze_toclear = out_learnt.clone();
         {
             let mut j;
-            match self.ccmin_mode {
+            match self.set.ccmin_mode {
                 2 => {
                     j = 1;
                     for i in range(1, out_learnt.len()) {
@@ -1039,11 +1050,11 @@ impl CoreSolver {
     }
 
     fn varDecayActivity(&mut self) {
-        self.var_inc *= 1.0 / self.var_decay
+        self.var_inc *= 1.0 / self.set.var_decay
     }
 
     fn claDecayActivity(&mut self) {
-        self.cla_inc *= 1.0 / self.clause_decay
+        self.cla_inc *= 1.0 / self.set.clause_decay
     }
 
     // Insert a variable in the decision order priority queue.
@@ -1082,8 +1093,8 @@ impl CoreSolver {
     }
 
 
-    fn checkGarbageDefault(&mut self) {
-        let gf = self.garbage_frac;
+    fn checkGarbageDef(&mut self) {
+        let gf = self.set.garbage_frac;
         self.checkGarbage(gf);
     }
 
@@ -1099,7 +1110,7 @@ impl CoreSolver {
 
         let mut to = ClauseAllocator::new(); //self.ca.size() - self.ca.wasted());
         self.relocAll(&mut to);
-        if self.verbosity >= 2 {
+        if self.set.verbosity >= 2 {
             println!("|  Garbage collection:   {:12} bytes ({:5} clauses) => {:12} bytes  ({:5} clauses)            |",
                 self.ca.size(), self.ca.numberOfClauses(), to.size(), to.numberOfClauses());
         }
