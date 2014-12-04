@@ -1,7 +1,8 @@
+use std::fmt;
 use super::index_map::{HasIndex};
 
 
-#[deriving(PartialEq, Eq, PartialOrd, Ord, Clone, Show)]
+#[deriving(PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct Var(uint);
 
 impl Var {
@@ -19,8 +20,15 @@ impl HasIndex for Var {
     }
 }
 
+impl fmt::Show for Var {
+    fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
+        let Var(ref v) = *self;
+        write!(f, "x{}", v)
+    }
+}
 
-#[deriving(PartialEq, Eq, PartialOrd, Ord, Clone, Show)]
+
+#[deriving(PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct Lit(uint);
 
 impl Lit {
@@ -63,6 +71,12 @@ impl BitXor<bool, Lit> for Lit {
     fn bitxor(&self, b : &bool) -> Lit {
         let Lit(l) = *self;
         Lit(l ^ *b as uint)
+    }
+}
+
+impl fmt::Show for Lit {
+    fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}{}", if self.sign() { "~" } else { "" }, self.var())
     }
 }
 
