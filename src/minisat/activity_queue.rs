@@ -7,7 +7,7 @@ pub struct ActivityQueue<V : HasIndex> {
     activity : IndexMap<V, f64>,
 }
 
-impl<V : HasIndex + Clone> ActivityQueue<V> {
+impl<V : HasIndex> ActivityQueue<V> {
     pub fn new() -> ActivityQueue<V> {
         ActivityQueue {
             heap     : Vec::new(),
@@ -21,6 +21,20 @@ impl<V : HasIndex + Clone> ActivityQueue<V> {
         self.indices.clear();
     }
 
+    pub fn len(&self) -> uint {
+        self.heap.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.heap.is_empty()
+    }
+
+    pub fn contains(&self, v : &V) -> bool {
+        self.indices.contains_key(v)
+    }
+}
+
+impl<V : HasIndex + Clone> ActivityQueue<V> {
     pub fn setActivity(&mut self, v : &V, new : f64) {
         match self.activity.insert(v, new) {
             None      => {}
@@ -38,29 +52,17 @@ impl<V : HasIndex + Clone> ActivityQueue<V> {
         self.setActivity(v, new);
     }
 
-    pub fn len(&self) -> uint {
-        self.heap.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.heap.is_empty()
-    }
-
-    pub fn contains(&self, v : &V) -> bool {
-        self.indices.contains_key(v)
-    }
-
     pub fn insert(&mut self, v : V) {
-        assert!(!self.contains(&v));
+        if !self.contains(&v) {
+            if !self.activity.contains_key(&v) {
+                self.activity.insert(&v, 0.0);
+            }
 
-        if !self.activity.contains_key(&v) {
-            self.activity.insert(&v, 0.0);
+            let i = self.heap.len();
+            self.indices.insert(&v, i);
+            self.heap.push(v);
+            self.sift_up(i);
         }
-
-        let i = self.heap.len();
-        self.indices.insert(&v, i);
-        self.heap.push(v);
-        self.sift_up(i);
     }
 
     pub fn pop(&mut self) -> Option<V>
