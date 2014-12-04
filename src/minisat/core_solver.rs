@@ -413,7 +413,7 @@ impl CoreSolver {
 
             {
                 let seen = &self.seen;
-                self.trail.retain(|l| { seen[l.var()] != 0 });
+                self.trail.retain(|l| { seen[l.var()] == 0 });
             }
 
             self.qhead = self.trail.len();
