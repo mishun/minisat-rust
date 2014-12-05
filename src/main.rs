@@ -3,9 +3,11 @@
 
 extern crate getopts;
 extern crate time;
-use std::io::{File, BufferedReader, Open, Write};
+
+use std::io;
 use minisat::core_solver::{Solver, CoreSolver};
 use minisat::dimacs::{parse_DIMACS};
+use minisat::lbool::{LBool};
 
 mod minisat;
 
@@ -52,8 +54,10 @@ fn main() {
     }
 
     {
-        let mut reader = BufferedReader::new(File::open(&Path::new(in_path.clone())));
-        if !parse_DIMACS(&mut reader, &mut s, validate_DIMACS) { panic!("Failed to parse DIMACS file!"); }
+        let mut reader = io::BufferedReader::new(io::File::open(&Path::new(in_path.clone())));
+        parse_DIMACS(&mut reader, &mut s, validate_DIMACS).unwrap_or_else(|err| {
+            panic!(format!("Failed to parse DIMACS file: {}", err));
+        })
     }
 
     if verbosity > 0 {
@@ -85,38 +89,36 @@ fn main() {
     }
 
     println!("{}",
-        if ret.isTrue() { "SATISFIABLE" }
-        else if ret.isFalse() { "UNSATISFIABLE" }
-        else { "INDETERMINATE" } );
+        match () {
+            _ if ret.isTrue()  => { "SATISFIABLE" }
+            _ if ret.isFalse() => { "UNSATISFIABLE" }
+            _                  => { "INDETERMINATE" }
+        });
 
-    match out_path {
-        None           => (),
-        Some(out_path) => {
-            match File::open_mode(&Path::new(out_path), Open, Write) {
-                Err(err) => {
-                    let msg = format!("failed to open output file: {}", err);
-                    assert!(std::io::stderr().write_line(msg.as_slice()).is_ok());
-                }
-                Ok(file) => {
-                    let mut out = file;
-                    if ret.isTrue() {
-                        assert!(out.write_line("SAT").is_ok());
-                        for i in range(0, s.nVars()) {
-                            let val = s.model[i];
-                            if !val.isUndef() {
-                                let msg = format!("{}{}{}", if i == 0 { "" } else { " " }, if val.isTrue() { "" } else { "-" }, i + 1);
-                                assert!(out.write_str(msg.as_slice()).is_ok());
-                            }
-                        }
-                        assert!(out.write_line(" 0").is_ok());
-                    } else if ret.isFalse() {
-                        assert!(out.write_line("UNSAT").is_ok());
-                    } else {
-                        assert!(out.write_line("INDET").is_ok());
-                    };
-                }
-            };
-        }
-    };
+    out_path.map_or((), |out_path| {
+        writeResult(&out_path, ret, &s).unwrap_or_else(|err| {
+            let _ = writeln!(&mut io::stderr(), "failed to open output file: {}", err);
+        })
+    });
 }
 
+
+fn writeResult(path : &String, ret : LBool, s : &CoreSolver) -> io::IoResult<()> {
+    let mut out = try!(io::File::open_mode(&Path::new(path), io::Open, io::Write));
+    match () {
+        _ if ret.isTrue()  => {
+            try!(writeln!(&mut out, "SAT"));
+            for i in range(0, s.nVars()) {
+                let val = s.model[i];
+                if !val.isUndef() {
+                    if i > 0 { try!(write!(&mut out, " ")); }
+                    try!(write!(&mut out, "{}{}", if val.isTrue() { "" } else { "-" }, i + 1));
+                }
+            }
+            writeln!(&mut out, " 0")
+        }
+
+        _ if ret.isFalse() => { writeln!(&mut out, "UNSAT") }
+        _                  => { writeln!(&mut out, "INDET") }
+    }
+}

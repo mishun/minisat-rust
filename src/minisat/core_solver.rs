@@ -1,4 +1,5 @@
 extern crate time;
+
 use std::default::{Default};
 use std::num::{Float, FloatMath};
 use super::lbool::{LBool};
@@ -476,7 +477,7 @@ impl CoreSolver {
                             let cr = self.ca.alloc(&learnt_clause, true);
                             self.learnts.push(cr);
                             self.attachClause(cr);
-                            self.ca[cr].bumpActivity(self.cla_inc as f32);
+                            claBumpActivity(&mut self.ca, &mut self.learnts, &mut self.cla_inc, cr);
                             self.uncheckedEnqueue(learnt_clause[0], Some(cr));
                         }
                     }
@@ -655,7 +656,6 @@ impl CoreSolver {
                     }
                 }
             }
-
             self.watches[p].truncate(j);
         }
 
@@ -688,7 +688,7 @@ impl CoreSolver {
 
         // Don't delete binary or locked clauses. From the rest, delete clauses from the first half
         // and clauses with activity smaller than 'extra_lim':
-        let extra_lim = (self.cla_inc / self.learnts.len() as f64) as f32; // Remove any clause below this activity
+        let extra_lim = self.cla_inc / self.learnts.len() as f64; // Remove any clause below this activity
         {
             let mut j = 0;
             for i in range(0, self.learnts.len()) {
@@ -712,13 +712,14 @@ impl CoreSolver {
     }
 
     fn rebuildOrderHeap(&mut self) {
-        self.activity_queue.clear();
+        let mut tmp = Vec::new();
         for vi in range(0, self.nVars()) {
             let v = Var::new(vi);
             if self.decision[v] && self.assigns.undef(v) {
-                self.activity_queue.insert(v);
+                tmp.push(v);
             }
         }
+        self.activity_queue.heapifyFrom(tmp);
     }
 
 
@@ -780,7 +781,7 @@ impl CoreSolver {
 
         loop {
             assert!(confl.is_some()); // (otherwise should be UIP)
-            self.ca[confl.unwrap()].bumpActivity(self.cla_inc as f32);
+            claBumpActivity(&mut self.ca, &mut self.learnts, &mut self.cla_inc, confl.unwrap());
 
             let c = &self.ca[confl.unwrap()];
 
@@ -789,7 +790,8 @@ impl CoreSolver {
                 let v = q.var();
 
                 if self.seen[v] == 0 && self.vardata[v].level > 0 {
-                    self.activity_queue.bumpActivity(&v, self.var_inc);
+                    varBumpActivity(&mut self.activity_queue, &mut self.var_inc, v);
+
                     self.seen[v] = 1;
                     if self.vardata[v].level >= self.trail.decisionLevel() {
                         pathC += 1;
@@ -1232,7 +1234,9 @@ fn removeSatisfied(ca : &mut ClauseAllocator, watches : &mut Watches, stats : &m
             // Trim clause:
             let c = &mut ca[cr];
             assert!(assigns.undef(c[0].var()) && assigns.undef(c[1].var()));
-            c.retainSuffix(2, |lit| { !assigns.unsat(*lit) });
+
+            c.retainSuffix(2, |lit| !assigns.unsat(*lit));
+
             cs[j] = cr;
             j += 1;
         }
@@ -1276,3 +1280,33 @@ fn detachClause(ca : &ClauseAllocator, stats : &mut Stats, watches : &mut Watche
     }
 }
 
+fn varBumpActivity(q : &mut ActivityQueue<Var>, var_inc : &mut f64, v : Var) {
+    let new = q.getActivity(&v) + *var_inc;
+    if new > 1e100 {
+        *var_inc *= 1e-100;
+        q.scaleActivity(1e-100);
+        q.setActivity(&v, new * 1e-100);
+    } else {
+        q.setActivity(&v, new);
+    }
+}
+
+fn claBumpActivity(ca : &mut ClauseAllocator, learnts : &mut Vec<ClauseRef>, cla_inc : &mut f64, cr : ClauseRef) {
+    let new = {
+            let c = &mut ca[cr];
+            if !c.learnt() { return; }
+
+            let new = c.activity() + *cla_inc;
+            c.setActivity(new);
+            new
+        };
+
+    if new > 1e20 {
+        *cla_inc *= 1e-20;
+        for cri in learnts.iter() {
+            let c = &mut ca[*cri];
+            let scaled = c.activity() * 1e-10;
+            c.setActivity(scaled);
+        }
+    }
+}

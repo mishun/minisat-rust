@@ -1,3 +1,4 @@
+use std::fmt;
 use super::literal::{Lit};
 use super::index_map::{HasIndex};
 
@@ -43,14 +44,15 @@ impl Clause {
     }
 
     #[inline]
-    pub fn activity(&self) -> f32 {
+    pub fn activity(&self) -> f64 {
         assert!(self.header.has_extra);
-        self.data_act
+        self.data_act as f64
     }
 
     #[inline]
-    pub fn bumpActivity(&mut self, delta : f32) {
-        if self.learnt() { self.data_act += delta; }
+    pub fn setActivity(&mut self, act : f64) {
+        assert!(self.header.has_extra);
+        self.data_act = act as f32;
     }
 
     #[inline]
@@ -92,6 +94,16 @@ impl IndexMut<uint, Lit> for Clause {
     #[inline]
     fn index_mut<'a>(&'a mut self, index : &uint) -> &'a mut Lit {
         self.data.index_mut(index)
+    }
+}
+
+impl fmt::Show for Clause {
+    fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
+        try!(write!(f, "("));
+        for i in range(0, self.len()) {
+            try!(write!(f, "{}{}", if i == 0 { "" } else { " | " }, self[i]));
+        }
+        write!(f, ")")
     }
 }
 
@@ -142,7 +154,11 @@ impl ClauseAllocator {
     }
 
     fn allocCopy(&mut self, that : &Clause) -> ClauseRef {
-        self.alloc(&that.data, that.header.learnt)
+        let mut tmp = Vec::new();
+        for i in range(0, that.len()) {
+            tmp.push(that[i]);
+        }
+        self.alloc(&tmp, that.header.learnt)
     }
 
     pub fn free(&mut self, cr : ClauseRef) {
@@ -192,4 +208,3 @@ impl IndexMut<ClauseRef, Clause> for ClauseAllocator {
         &mut(*self.clauses[*index])
     }
 }
-

@@ -1,4 +1,4 @@
-use std::collections::{VecMap};
+use std::collections::vec_map;
 
 
 pub trait HasIndex {
@@ -7,14 +7,15 @@ pub trait HasIndex {
 
 
 pub struct IndexMap<K : HasIndex, V> {
-    map : VecMap<V>
+    map : vec_map::VecMap<V>
 }
 
 impl<K : HasIndex, V> IndexMap<K, V> {
     pub fn new() -> IndexMap<K, V> {
-        IndexMap { map : VecMap::new() }
+        IndexMap { map : vec_map::VecMap::new() }
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
     }
@@ -42,6 +43,13 @@ impl<K : HasIndex, V> IndexMap<K, V> {
     pub fn get(&self, k : &K) -> Option<&V> {
         self.map.get(&k.toIndex())
     }
+
+    #[inline]
+    pub fn map_in_place(&mut self, f : |&V| -> V) -> () {
+        for (_, v) in self.map.iter_mut() {
+            *v = f(v);
+        }
+    }
 }
 
 impl<K : HasIndex, V : Clone> IndexMap<K, V> {
@@ -64,4 +72,3 @@ impl<K : HasIndex, V> IndexMut<K, V> for IndexMap<K, V> {
         self.map.index_mut(&k.toIndex())
     }
 }
-

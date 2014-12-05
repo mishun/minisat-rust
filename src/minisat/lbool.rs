@@ -1,3 +1,4 @@
+use std::fmt;
 
 #[deriving(Clone)]
 pub struct LBool(u8);
@@ -36,6 +37,16 @@ impl BitXor<bool, LBool> for LBool {
     fn bitxor(&self, b : &bool) -> LBool {
         let LBool(ref a) = *self;
         LBool(*a ^ *b as u8)
+    }
+}
+
+impl fmt::Show for LBool {
+    fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
+        match () {
+            _ if self.isTrue()  => { write!(f, "true") }
+            _ if self.isFalse() => { write!(f, "false") }
+            _                   => { write!(f, "?") }
+        }
     }
 }
 

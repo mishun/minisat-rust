@@ -5,7 +5,7 @@ mod clause;
 pub mod core_solver;
 pub mod dimacs;
 mod index_map;
-mod lbool;
+pub mod lbool;
 mod literal;
 mod propagation_trail;
 mod random;

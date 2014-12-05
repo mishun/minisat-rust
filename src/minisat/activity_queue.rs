@@ -16,21 +16,33 @@ impl<V : HasIndex> ActivityQueue<V> {
         }
     }
 
+    #[inline]
+    pub fn len(&self) -> uint {
+        self.heap.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.heap.is_empty()
+    }
+
+    #[inline]
+    pub fn contains(&self, v : &V) -> bool {
+        self.indices.contains_key(v)
+    }
+
+    #[inline]
+    pub fn getActivity(&self, v : &V) -> f64 {
+        self.activity[*v]
+    }
+
     pub fn clear(&mut self) {
         self.heap.clear();
         self.indices.clear();
     }
 
-    pub fn len(&self) -> uint {
-        self.heap.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.heap.is_empty()
-    }
-
-    pub fn contains(&self, v : &V) -> bool {
-        self.indices.contains_key(v)
+    pub fn scaleActivity(&mut self, factor : f64) {
+        self.activity.map_in_place(|a| *a * factor);
     }
 }
 
@@ -45,11 +57,6 @@ impl<V : HasIndex + Clone> ActivityQueue<V> {
                 }
             }
         }
-    }
-
-    pub fn bumpActivity(&mut self, v : &V, delta : f64) {
-        let new = self.activity[*v] + delta;
-        self.setActivity(v, new);
     }
 
     pub fn insert(&mut self, v : V) {
@@ -84,6 +91,18 @@ impl<V : HasIndex + Clone> ActivityQueue<V> {
                 self.sift_down(0);
                 Some(h)
             }
+        }
+    }
+
+    pub fn heapifyFrom(&mut self, from : Vec<V>) {
+        self.heap = from;
+        self.indices.clear();
+        for i in range(0, self.heap.len()) {
+            self.indices.insert(&self.heap[i], i);
+        }
+
+        for i in range(0, self.heap.len() / 2).rev() {
+            self.sift_down(i);
         }
     }
 
@@ -132,4 +151,3 @@ impl<V : HasIndex> Index<uint, V> for ActivityQueue<V> {
         self.heap.index(i)
     }
 }
-
