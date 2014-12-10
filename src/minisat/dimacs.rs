@@ -1,9 +1,9 @@
 use std::num::{SignedInt};
 use std::io;
+use super::index_map::{HasIndex};
 use super::literal::{Var, Lit};
 use super::lbool::{LBool};
-use super::core_solver::{Solver};
-use super::index_map::{HasIndex};
+use super::solver::{Solver};
 
 
 fn parse_clause<B : Buffer>(p : &mut BufferParser<B>) -> io::IoResult<Vec<Lit>> {
