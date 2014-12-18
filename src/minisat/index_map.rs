@@ -54,8 +54,8 @@ impl<K : HasIndex, V> IndexMap<K, V> {
 
 impl<K : HasIndex, V : Clone> IndexMap<K, V> {
     #[inline]
-    pub fn update(&mut self, k : &K, new : V, ff : |V, V| -> V) -> bool {
-        self.map.update(k.toIndex(), new, ff)
+    pub fn update<F : Fn(V, V) -> V>(&mut self, k : &K, new : V, f : F) -> bool {
+        self.map.update(k.toIndex(), new, f)
     }
 }
 

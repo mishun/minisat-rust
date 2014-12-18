@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[deriving(Clone)]
+#[deriving(Copy, Clone)]
 pub struct LBool(u8);
 
 impl LBool {
@@ -34,9 +34,9 @@ impl LBool {
 
 impl BitXor<bool, LBool> for LBool {
     #[inline]
-    fn bitxor(&self, b : &bool) -> LBool {
-        let LBool(ref a) = *self;
-        LBool(*a ^ *b as u8)
+    fn bitxor(self, b : bool) -> LBool {
+        let LBool(a) = self;
+        LBool(a ^ b as u8)
     }
 }
 
@@ -49,4 +49,3 @@ impl fmt::Show for LBool {
         }
     }
 }
-

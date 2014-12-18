@@ -78,4 +78,3 @@ impl Assignment {
         self.assigns[p.var().toIndex()] ^ p.sign()
     }
 }
-

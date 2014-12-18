@@ -131,8 +131,8 @@ impl ClauseAllocator {
     pub fn alloc(&mut self, ps : &Vec<Lit>, learnt : bool) -> ClauseRef {
         let use_extra = learnt;
         let mut c = box Clause {
-            header : ClauseHeader { mark : 0, learnt : learnt, has_extra : use_extra, reloced : false, size : ps.len() },
-            data : ps.clone(),
+            header   : ClauseHeader { mark : 0, learnt : learnt, has_extra : use_extra, reloced : false, size : ps.len() },
+            data     : ps.clone(),
             data_act : 0.0,
             data_abs : 0,
             data_rel : None,

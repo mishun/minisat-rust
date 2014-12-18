@@ -57,7 +57,7 @@ impl<V> PropagationTrail<V> {
     }
 
     #[inline]
-    pub fn retain(&mut self, f : |&V| -> bool) {
+    pub fn retain<F : Fn(&V) -> bool>(&mut self, f : F) {
         assert!(self.isGroundLevel());
         self.trail.retain(f);
         self.qhead = self.trail.len();

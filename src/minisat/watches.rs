@@ -93,4 +93,3 @@ impl IndexMut<Lit, Vec<Watcher>> for Watches {
         &mut self.watches[*lit].watchers
     }
 }
-
