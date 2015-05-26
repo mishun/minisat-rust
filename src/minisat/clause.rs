@@ -1,9 +1,10 @@
 use std::fmt;
+use std::ops::{Index, IndexMut};
 use super::literal::{Lit};
 use super::index_map::{HasIndex};
 
 
-pub type ClauseRef = uint;
+pub type ClauseRef = usize;
 
 
 struct ClauseHeader {
@@ -11,7 +12,7 @@ struct ClauseHeader {
     learnt : bool,
     has_extra : bool,
     reloced : bool,
-    size : uint
+    size : usize
 }
 
 pub struct Clause {
@@ -24,7 +25,7 @@ pub struct Clause {
 
 impl Clause {
     #[inline]
-    pub fn len(&self) -> uint {
+    pub fn len(&self) -> usize {
         self.header.size
     }
 
@@ -61,7 +62,7 @@ impl Clause {
     }
 
     #[inline]
-    pub fn retainSuffix(&mut self, base : uint, f : |&Lit| -> bool) {
+    pub fn retainSuffix<F : Fn(&Lit) -> bool>(&mut self, base : usize, f : F) {
         let mut i = base;
         while i < self.header.size {
             if f(&self.data[i]) {
@@ -76,31 +77,33 @@ impl Clause {
     fn calcAbstraction(&mut self) {
         assert!(self.header.has_extra);
         let mut abstraction : u32 = 0;
-        for i in range(0, self.header.size) {
+        for i in 0 .. self.header.size {
             abstraction |= 1 << (self.data[i].var().toIndex() & 31);
         }
         self.data_abs = abstraction; //data[header.size].abs = abstraction;
     }
 }
 
-impl Index<uint, Lit> for Clause {
+impl Index<usize> for Clause {
+    type Output = Lit;
+
     #[inline]
-    fn index<'a>(&'a self, index : &uint) -> &'a Lit {
+    fn index<'a>(&'a self, index : usize) -> &'a Lit {
         self.data.index(index)
     }
 }
 
-impl IndexMut<uint, Lit> for Clause {
+impl IndexMut<usize> for Clause {
     #[inline]
-    fn index_mut<'a>(&'a mut self, index : &uint) -> &'a mut Lit {
+    fn index_mut<'a>(&'a mut self, index : usize) -> &'a mut Lit {
         self.data.index_mut(index)
     }
 }
 
-impl fmt::Show for Clause {
+impl fmt::Display for Clause {
     fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
         try!(write!(f, "("));
-        for i in range(0, self.len()) {
+        for i in 0 .. self.len() {
             try!(write!(f, "{}{}", if i == 0 { "" } else { " | " }, self[i]));
         }
         write!(f, ")")
@@ -108,15 +111,15 @@ impl fmt::Show for Clause {
 }
 
 
-fn clauseSize(size : uint, has_extra : bool) -> uint {
-    4 * (1 + size + has_extra as uint)
+fn clauseSize(size : usize, has_extra : bool) -> usize {
+    4 * (1 + size + (has_extra as usize))
 }
 
 
 pub struct ClauseAllocator {
     clauses : Vec<Box<Clause>>,
-    size    : uint,
-    wasted  : uint,
+    size    : usize,
+    wasted  : usize,
 }
 
 impl ClauseAllocator {
@@ -130,13 +133,13 @@ impl ClauseAllocator {
 
     pub fn alloc(&mut self, ps : &Vec<Lit>, learnt : bool) -> ClauseRef {
         let use_extra = learnt;
-        let mut c = box Clause {
+        let mut c = Box::new(Clause {
             header   : ClauseHeader { mark : 0, learnt : learnt, has_extra : use_extra, reloced : false, size : ps.len() },
             data     : ps.clone(),
             data_act : 0.0,
             data_abs : 0,
             data_rel : None,
-        };
+        });
 
         if c.header.has_extra {
             if c.header.learnt {
@@ -155,7 +158,7 @@ impl ClauseAllocator {
 
     fn allocCopy(&mut self, that : &Clause) -> ClauseRef {
         let mut tmp = Vec::new();
-        for i in range(0, that.len()) {
+        for i in 0 .. that.len() {
             tmp.push(that[i]);
         }
         self.alloc(&tmp, that.header.learnt)
@@ -169,15 +172,15 @@ impl ClauseAllocator {
         self.wasted += size;
     }
 
-    pub fn size(&self) -> uint {
+    pub fn size(&self) -> usize {
         self.size
     }
 
-    pub fn wasted(&self) -> uint {
+    pub fn wasted(&self) -> usize {
         self.wasted
     }
 
-    pub fn numberOfClauses(&self) -> uint {
+    pub fn numberOfClauses(&self) -> usize {
         self.clauses.len()
     }
 
@@ -193,18 +196,20 @@ impl ClauseAllocator {
     }
 }
 
-impl Index<ClauseRef, Clause> for ClauseAllocator {
+impl Index<ClauseRef> for ClauseAllocator {
+    type Output = Clause;
+
     #[inline]
-    fn index<'a>(&'a self, index : &ClauseRef) -> &'a Clause {
-        assert!(*index < self.clauses.len());
-        &(*self.clauses[*index])
+    fn index<'a>(&'a self, index : ClauseRef) -> &'a Clause {
+        assert!(index < self.clauses.len());
+        &(*self.clauses[index])
     }
 }
 
-impl IndexMut<ClauseRef, Clause> for ClauseAllocator {
+impl IndexMut<ClauseRef> for ClauseAllocator {
     #[inline]
-    fn index_mut<'a>(&'a mut self, index : &ClauseRef) -> &'a mut Clause {
-        assert!(*index < self.clauses.len());
-        &mut(*self.clauses[*index])
+    fn index_mut<'a>(&'a mut self, index : ClauseRef) -> &'a mut Clause {
+        assert!(index < self.clauses.len());
+        &mut(*self.clauses[index])
     }
 }

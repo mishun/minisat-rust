@@ -1,8 +1,9 @@
+use std::ops::{Index};
 
 pub struct PropagationTrail<V> {
-    pub qhead : uint,
+    pub qhead : usize,
     pub trail : Vec<V>,
-    pub lim   : Vec<uint>,
+    pub lim   : Vec<usize>,
 }
 
 impl<V> PropagationTrail<V> {
@@ -15,12 +16,12 @@ impl<V> PropagationTrail<V> {
     }
 
     #[inline]
-    pub fn totalSize(&self) -> uint {
+    pub fn totalSize(&self) -> usize {
         self.trail.len()
     }
 
     #[inline]
-    pub fn levelSize(&self, level : uint) -> uint {
+    pub fn levelSize(&self, level : usize) -> usize {
         let cl = self.decisionLevel();
         if level > cl {
             0
@@ -32,7 +33,7 @@ impl<V> PropagationTrail<V> {
     }
 
     #[inline]
-    pub fn decisionLevel(&self) -> uint {
+    pub fn decisionLevel(&self) -> usize {
         self.lim.len()
     }
 
@@ -100,9 +101,11 @@ impl<V : Clone> PropagationTrail<V> {
     }
 }
 
-impl<V> Index<uint, V> for PropagationTrail<V> {
+impl<V> Index<usize> for PropagationTrail<V> {
+    type Output = V;
+
     #[inline]
-    fn index(&self, index : &uint) -> &V {
+    fn index(&self, index : usize) -> &V {
         self.trail.index(index)
     }
 }

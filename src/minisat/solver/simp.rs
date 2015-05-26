@@ -8,8 +8,8 @@ use super::{Solver, CoreSolver};
 
 struct SimpSettings {
     grow              : bool, // Allow a variable elimination step to grow by a number of clauses (default to zero).
-    clause_lim        : int,  // Variables are not eliminated if it produces a resolvent with a length above this limit. -1 means no limit.
-    subsumption_lim   : int,  // Do not check if subsumption against a clause larger than this. -1 means no limit.
+    clause_lim        : i32,  // Variables are not eliminated if it produces a resolvent with a length above this limit. -1 means no limit.
+    subsumption_lim   : i32,  // Do not check if subsumption against a clause larger than this. -1 means no limit.
     simp_garbage_frac : f64,  // A different limit for when to issue a GC during simplification (Also see 'garbage_frac').
     use_asymm         : bool, // Shrink clauses by asymmetric branching.
     use_rcheck        : bool, // Check if a clause is already implied. Prett costly, and subsumes subsumptions :)
@@ -38,26 +38,26 @@ struct SimpSolver {
     set                : SimpSettings,
 
     // Statistics:
-    merges             : int,
-    asymm_lits         : int,
-    eliminated_vars    : int,
+    merges             : i32,
+    asymm_lits         : i32,
+    eliminated_vars    : i32,
 
     // Solver state:
-    elimorder          : int,
+    elimorder          : i32,
     use_simplification : bool,
     max_simp_var       : Var,        // Max variable at the point simplification was turned off.
     elimclauses        : Vec<u32>,
     touched            : IndexMap<Var, i8>,
 
     //OccLists<Var, vec<CRef>, ClauseDeleted> occurs;
-    n_occ              : IndexMap<Lit, int>,
+    n_occ              : IndexMap<Lit, i32>,
     //Heap<Var,ElimLt>    elim_heap;
     //Queue<CRef>         subsumption_queue;
     frozen             : IndexMap<Var, i8>,
     frozen_vars        : Vec<Var>,
     eliminated         : IndexMap<Var, i8>,
-    bwdsub_assigns     : int,
-    n_touched          : int,
+    bwdsub_assigns     : i32,
+    n_touched          : i32,
 
     // Temporaries:
     bwdsub_tmpunit     : ClauseRef,
@@ -76,9 +76,9 @@ impl SimpSolver {
                 let v = lit.var();
 
                 // If an assumption has been eliminated, remember it.
-                assert!(!self.isEliminated(v));
+                assert!(!self.isEliminated(&v));
 
-                if self.frozen[v] == 0 {
+                if self.frozen[&v] == 0 {
                     // Freeze and store.
                     //self.setFrozen(v, true);
                     extra_frozen.push(v);
@@ -101,18 +101,18 @@ impl SimpSolver {
         if do_simp {
             // Unfreeze the assumptions that were frozen:
             for v in extra_frozen.iter() {
-                self.setFrozen(*v, false);
+                self.setFrozen(v, false);
             }
         }
 
         result
     }
 
-    fn isEliminated(&self, v : Var) -> bool {
+    fn isEliminated(&self, v : &Var) -> bool {
         self.eliminated[v] != 0
     }
 
-    fn setFrozen(&mut self, v : Var, b : bool) {
+    fn setFrozen(&mut self, v : &Var, b : bool) {
         self.frozen[v] = b as i8;
         if self.use_simplification && !b {
             //self.updateElimHeap(v);

@@ -1,7 +1,7 @@
 extern crate time;
 
 use std::default::{Default};
-use std::num::{Float, FloatMath};
+use std::cmp::Ordering::{Less, Greater};
 use super::lbool::{LBool};
 use super::literal::{Var, Lit};
 use super::clause::{Clause, ClauseRef, ClauseAllocator};
@@ -16,8 +16,8 @@ pub mod simp;
 
 
 pub trait Solver {
-    fn nVars(&self) -> uint;
-    fn nClauses(&self) -> uint;
+    fn nVars(&self) -> usize;
+    fn nClauses(&self) -> usize;
     fn newVar(&mut self, upol : LBool, dvar : bool) -> Var;
     fn addClause(&mut self, clause : &[Lit]) -> bool;
     fn simplify(&mut self) -> bool;
@@ -28,7 +28,7 @@ pub trait Solver {
 }
 
 
-#[deriving(Default)]
+#[derive(Default)]
 struct Stats {
     solves : u64,
     starts : u64,
@@ -77,24 +77,24 @@ impl Stats {
 
 
 struct CoreSettings {
-    verbosity         : int,
+    verbosity         : i32,
     var_decay         : f64,
     clause_decay      : f64,
     random_var_freq   : f64,
     luby_restart      : bool,
-    ccmin_mode        : int,    // Controls conflict clause minimization (0=none, 1=basic, 2=deep).
-    phase_saving      : int,    // Controls the level of phase saving (0=none, 1=limited, 2=full).
+    ccmin_mode        : i32,    // Controls conflict clause minimization (0=none, 1=basic, 2=deep).
+    phase_saving      : i32,    // Controls the level of phase saving (0=none, 1=limited, 2=full).
     rnd_pol           : bool,   // Use random polarities for branching heuristics.
     rnd_init_act      : bool,   // Initialize variable activities with a small random value.
     garbage_frac      : f64,    // The fraction of wasted memory allowed before a garbage collection is triggered.
-    min_learnts_lim   : int,    // Minimum number to set the learnts limit to.
-    restart_first     : int,    // The initial restart limit.                                                                (default 100)
+    min_learnts_lim   : i32,    // Minimum number to set the learnts limit to.
+    restart_first     : i32,    // The initial restart limit.                                                                (default 100)
     restart_inc       : f64,    // The factor with which the restart limit is multiplied in each restart.                    (default 1.5)
     learntsize_factor : f64,    // The intitial limit for learnt clauses is a factor of the original clauses.                (default 1 / 3)
     learntsize_inc    : f64,    // The limit for learnt clauses is multiplied with this factor each restart.                 (default 1.1)
     remove_satisfied  : bool,   // Indicates whether possibly inefficient linear scan for satisfied clauses should be performed in 'simplify'.
 
-    learntsize_adjust_start_confl : int,
+    learntsize_adjust_start_confl : i32,
     learntsize_adjust_inc : f64,
 }
 
@@ -127,7 +127,7 @@ impl Default for CoreSettings {
 
 struct VarData {
     reason : Option<ClauseRef>,
-    level  : uint,
+    level  : usize,
 }
 
 
@@ -157,7 +157,7 @@ pub struct CoreSolver {
     ok : bool,               // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
     cla_inc : f64,           // Amount to bump next clause with.
     var_inc : f64,           // Amount to bump next variable with.
-    simpDB_assigns : int,    // Number of top-level assignments since last execution of 'simplify()'.
+    simpDB_assigns : i32,    // Number of top-level assignments since last execution of 'simplify()'.
     simpDB_props : i64,      // Remaining number of propagations that must be made before next execution of 'simplify()'.
     progress_estimate : f64, // Set by 'search()'.
     ca : ClauseAllocator,
@@ -171,7 +171,7 @@ pub struct CoreSolver {
 
     max_learnts : f64,
     learntsize_adjust_confl : f64,
-    learntsize_adjust_cnt : int,
+    learntsize_adjust_cnt : i32,
 
     // Resource contraints:
     conflict_budget : i64,    // -1 means no budget.
@@ -180,12 +180,12 @@ pub struct CoreSolver {
 }
 
 impl Solver for CoreSolver {
-    fn nVars(&self) -> uint {
+    fn nVars(&self) -> usize {
         self.assigns.nVars()
     }
 
-    fn nClauses(&self) -> uint {
-        self.stats.num_clauses as uint
+    fn nClauses(&self) -> usize {
+        self.stats.num_clauses as usize
     }
 
     fn newVar(&mut self, upol : LBool, dvar : bool) -> Var {
@@ -258,7 +258,7 @@ impl Solver for CoreSolver {
             return false;
         }
 
-        if self.nAssigns() as int == self.simpDB_assigns || self.simpDB_props > 0 {
+        if self.nAssigns() as i32 == self.simpDB_assigns || self.simpDB_props > 0 {
             return true;
         }
 
@@ -271,17 +271,17 @@ impl Solver for CoreSolver {
 
             // Remove all released variables from the trail:
             for v in self.released_vars.iter() {
-                assert!(self.seen[*v] == 0);
-                self.seen[*v] = 1;
+                assert!(self.seen[v] == 0);
+                self.seen[v] = 1;
             }
 
             {
                 let seen = &self.seen;
-                self.trail.retain(|l| { seen[l.var()] == 0 });
+                self.trail.retain(|l| { seen[&l.var()] == 0 });
             }
 
             for v in self.released_vars.iter() {
-                self.seen[*v] = 0;
+                self.seen[v] = 0;
             }
 
             // Released variables are now ready to be reused:
@@ -292,7 +292,7 @@ impl Solver for CoreSolver {
         self.checkGarbageDef();
         self.rebuildOrderHeap();
 
-        self.simpDB_assigns = self.nAssigns() as int;
+        self.simpDB_assigns = self.nAssigns() as i32;
         self.simpDB_props   = (self.stats.clauses_literals + self.stats.learnts_literals) as i64;   // (shouldn't depend on stats really, but it will do for now)
 
         true
@@ -322,7 +322,7 @@ impl Solver for CoreSolver {
 }
 
 impl CoreSolver {
-    pub fn new(verbosity : int) -> CoreSolver {
+    pub fn new(verbosity : i32) -> CoreSolver {
         CoreSolver {
             set : CoreSettings { verbosity : verbosity, ..Default::default() },
 
@@ -369,24 +369,24 @@ impl CoreSolver {
         }
     }
 
-    pub fn nLearnts(&self) -> uint {
-        self.stats.num_learnts as uint
+    pub fn nLearnts(&self) -> usize {
+        self.stats.num_learnts as usize
     }
 
-    pub fn nAssigns(&self) -> uint {
+    pub fn nAssigns(&self) -> usize {
         self.trail.totalSize()
     }
 
     // Revert to the state at given level (keeping all assignment at 'level' but not beyond).
-    fn cancelUntil(&mut self, level : uint) {
+    fn cancelUntil(&mut self, level : usize) {
         if self.trail.decisionLevel() > level {
             let level_lim = self.trail.lim[level];
-            for c in range(level_lim, self.trail.totalSize()).rev() {
+            for c in (level_lim .. self.trail.totalSize()).rev() {
                 let lit = self.trail[c];
                 let x = lit.var();
                 self.assigns.cancel(x);
                 if self.set.phase_saving > 1 || (self.set.phase_saving == 1 && c > *self.trail.lim.last().unwrap()) {
-                    self.polarity[x] = lit.sign();
+                    self.polarity[&x] = lit.sign();
                 }
                 self.insertVarOrder(x);
             }
@@ -398,13 +398,13 @@ impl CoreSolver {
     }
 
     fn setDecisionVar(&mut self, v : Var, b : bool) {
-        if b && !self.decision[v] {
+        if b && !self.decision[&v] {
             self.stats.dec_vars += 1;
-        } else if !b && self.decision[v] {
+        } else if !b && self.decision[&v] {
             self.stats.dec_vars -= 1;
         }
 
-        self.decision[v] = b;
+        self.decision[&v] = b;
         self.insertVarOrder(v);
     }
 
@@ -436,7 +436,7 @@ impl CoreSolver {
                         false => { self.set.restart_inc.powi(curr_restarts as i32) }
                     };
                 let conflicts_to_go = rest_base * self.set.restart_first as f64;
-                status = self.search(conflicts_to_go as uint);
+                status = self.search(conflicts_to_go as u32);
                 if !self.withinBudget() { break; }
                 curr_restarts += 1;
             }
@@ -448,8 +448,8 @@ impl CoreSolver {
 
         if status.isTrue() {
             let vars = self.nVars();
-            self.model.grow(vars, LBool::Undef());
-            for i in range(0, vars) {
+            self.model.resize(vars, LBool::Undef());
+            for i in 0 .. vars {
                 self.model[i] = self.assigns.ofVar(Var::new(i));
             }
         } else if status.isFalse() && self.conflict.is_empty() {
@@ -473,11 +473,11 @@ impl CoreSolver {
     //   all variables are decision variables, this means that the clause set is satisfiable. 'l_False'
     //   if the clause set is unsatisfiable. 'l_Undef' if the bound on number of conflicts is reached.
     //_______________________________________________________________________________________________@
-    fn search(&mut self, nof_conflicts : uint) -> LBool {
+    fn search(&mut self, nof_conflicts : u32) -> LBool {
         assert!(self.ok);
         self.stats.starts += 1;
 
-        let mut conflictC = 0u;
+        let mut conflictC = 0u32;
         loop {
             match self.propagate() {
                 Some(confl) => {
@@ -504,13 +504,13 @@ impl CoreSolver {
                     self.learntsize_adjust_cnt -= 1;
                     if self.learntsize_adjust_cnt == 0 {
                         self.learntsize_adjust_confl *= self.set.learntsize_adjust_inc;
-                        self.learntsize_adjust_cnt = self.learntsize_adjust_confl as int;
+                        self.learntsize_adjust_cnt = self.learntsize_adjust_confl as i32;
                         self.max_learnts *= self.set.learntsize_inc;
 
                         if self.set.verbosity >= 1 {
                             println!("| {:9} | {:7} {:8} {:8} | {:8} {:8} {:6.0} | {:6.3} % |",
                                    self.stats.conflicts,
-                                   self.stats.dec_vars as uint - self.trail.levelSize(0),
+                                   self.stats.dec_vars - (self.trail.levelSize(0) as u64),
                                    self.nClauses(),
                                    self.stats.clauses_literals,
                                    self.max_learnts as u64,
@@ -534,7 +534,7 @@ impl CoreSolver {
                         return LBool::False();
                     }
 
-                    if self.learnts.len() >= self.max_learnts as uint + self.nAssigns() {
+                    if self.learnts.len() >= (self.max_learnts as usize) + self.nAssigns() {
                         // Reduce the set of learnt clauses:
                         self.reduceDB();
                     }
@@ -635,7 +635,7 @@ impl CoreSolver {
 
                     // Look for new watch:
                     let mut new_watch = None;
-                    for k in range(2, c.len()) {
+                    for k in 2 .. c.len() {
                         if !self.assigns.unsat(c[k]) {
                             new_watch = Some(k);
                             break;
@@ -707,7 +707,7 @@ impl CoreSolver {
         let extra_lim = self.cla_inc / self.learnts.len() as f64; // Remove any clause below this activity
         {
             let mut j = 0;
-            for i in range(0, self.learnts.len()) {
+            for i in 0 .. self.learnts.len() {
                 let cr = self.learnts[i];
                 let remove = {
                     let c = &self.ca[cr];
@@ -729,9 +729,9 @@ impl CoreSolver {
 
     fn rebuildOrderHeap(&mut self) {
         let mut tmp = Vec::new();
-        for vi in range(0, self.nVars()) {
+        for vi in 0 .. self.nVars() {
             let v = Var::new(vi);
-            if self.decision[v] && self.assigns.undef(v) {
+            if self.decision[&v] && self.assigns.undef(v) {
                 tmp.push(v);
             }
         }
@@ -745,26 +745,26 @@ impl CoreSolver {
         // Random decision:
         if self.rand.chance(self.set.random_var_freq) && !self.activity_queue.is_empty() {
             let v = self.activity_queue[self.rand.irand(self.activity_queue.len())];
-            if self.assigns.undef(v) && self.decision[v] {
+            if self.assigns.undef(v) && self.decision[&v] {
                 self.stats.rnd_decisions += 1;
             }
             next = Some(v);
         }
 
         // Activity based decision:
-        while next.is_none() || !self.assigns.undef(next.unwrap()) || !self.decision[next.unwrap()] {
+        while next.is_none() || !self.assigns.undef(next.unwrap()) || !self.decision[&next.unwrap()] {
             next = self.activity_queue.pop();
             if next.is_none() { break; }
         }
 
         // Choose polarity based on different polarity modes (global or per-variable):
         next.map(|v| {
-            if !self.user_pol[v].isUndef() {
-                Lit::new(v, self.user_pol[v].isTrue())
+            if !self.user_pol[&v].isUndef() {
+                Lit::new(v, self.user_pol[&v].isTrue())
             } else if self.set.rnd_pol {
                 Lit::new(v, self.rand.chance(0.5))
             } else {
-                Lit::new(v, self.polarity[v])
+                Lit::new(v, self.polarity[&v])
             }
         })
     }
@@ -786,11 +786,11 @@ impl CoreSolver {
     //       rest of literals. There may be others from the same level though.
     //
     //_______________________________________________________________________________________________@
-    fn analyze(&mut self, confl_param : ClauseRef) -> (uint, Vec<Lit>) {
+    fn analyze(&mut self, confl_param : ClauseRef) -> (usize, Vec<Lit>) {
         // Generate conflict clause:
         let mut out_learnt = Vec::new();
 
-        let mut pathC = 0i;
+        let mut pathC = 0i32;
         let mut p = None;
         let mut index = self.trail.totalSize() - 1;
         let mut confl = Some(confl_param);
@@ -801,15 +801,15 @@ impl CoreSolver {
 
             let c = &self.ca[confl.unwrap()];
 
-            for j in range(match p { None => 0, Some(_) => 1 }, c.len()) {
+            for j in match p { None => 0, Some(_) => 1 } .. c.len() {
                 let q = c[j];
                 let v = q.var();
 
-                if self.seen[v] == 0 && self.vardata[v].level > 0 {
+                if self.seen[&v] == 0 && self.vardata[&v].level > 0 {
                     varBumpActivity(&mut self.activity_queue, &mut self.var_inc, v);
 
-                    self.seen[v] = 1;
-                    if self.vardata[v].level >= self.trail.decisionLevel() {
+                    self.seen[&v] = 1;
+                    if self.vardata[&v].level >= self.trail.decisionLevel() {
                         pathC += 1;
                     } else {
                         out_learnt.push(q);
@@ -819,13 +819,13 @@ impl CoreSolver {
 
             // Select next clause to look at:
             loop {
-                let s = self.seen[self.trail[index].var()];
+                let s = self.seen[&self.trail[index].var()];
                 index -= 1;
                 if s != 0 { break; }
             }
             let pl = self.trail[index + 1];
-            confl = self.vardata[pl.var()].reason;
-            self.seen[pl.var()] = 0;
+            confl = self.vardata[&pl.var()].reason;
+            self.seen[&pl.var()] = 0;
             p = Some(pl);
 
             pathC -= 1;
@@ -842,9 +842,9 @@ impl CoreSolver {
             match self.set.ccmin_mode {
                 2 => {
                     j = 1;
-                    for i in range(1, out_learnt.len()) {
+                    for i in 1 .. out_learnt.len() {
                         let l = out_learnt[i];
-                        if self.vardata[l.var()].reason.is_none() || !self.litRedundant(l) {
+                        if self.vardata[&l.var()].reason.is_none() || !self.litRedundant(l) {
                             out_learnt[j] = out_learnt[i];
                             j += 1;
                         }
@@ -853,15 +853,15 @@ impl CoreSolver {
 
                 1 => {
                     j = 1;
-                    for i in range(1, out_learnt.len()) {
+                    for i in 1 .. out_learnt.len() {
                         let x = out_learnt[i].var();
-                        match self.vardata[x].reason {
+                        match self.vardata[&x].reason {
                             None     => { out_learnt[j] = out_learnt[i]; j += 1; }
                             Some(cr) => {
                                 let c = &self.ca[cr];
-                                for k in range(1, c.len()) {
+                                for k in 1 .. c.len() {
                                     let y = c[k].var();
-                                    if self.seen[y] == 0 && self.vardata[y].level > 0 {
+                                    if self.seen[&y] == 0 && self.vardata[&y].level > 0 {
                                         out_learnt[j] = out_learnt[i];
                                         j += 1;
                                         break;
@@ -887,8 +887,8 @@ impl CoreSolver {
             } else {
                 // Find the first literal assigned at the next-highest level:
                 let mut max_i = 1;
-                for i in range(2, out_learnt.len()) {
-                    if self.vardata[out_learnt[i].var()].level > self.vardata[out_learnt[max_i].var()].level {
+                for i in 2 .. out_learnt.len() {
+                    if self.vardata[&out_learnt[i].var()].level > self.vardata[&out_learnt[max_i].var()].level {
                         max_i = i;
                     }
                 }
@@ -897,11 +897,11 @@ impl CoreSolver {
                 let p             = out_learnt[max_i];
                 out_learnt[max_i] = out_learnt[1];
                 out_learnt[1]     = p;
-                self.vardata[p.var()].level
+                self.vardata[&p.var()].level
             };
 
         for l in self.analyze_toclear.iter() {
-            self.seen[l.var()] = 0;    // ('seen[]' is now cleared)
+            self.seen[&l.var()] = 0;    // ('seen[]' is now cleared)
         }
 
         (out_btlevel, out_learnt)
@@ -914,31 +914,31 @@ impl CoreSolver {
         let seen_removable = 2;
         let seen_failed = 3;
 
-        assert!(self.seen[p.var()] == seen_undef || self.seen[p.var()] == seen_source);
+        assert!(self.seen[&p.var()] == seen_undef || self.seen[&p.var()] == seen_source);
 
         let mut stack = Vec::new();
         let mut i = 0;
         loop {
             i += 1;
 
-            assert!(self.vardata[p.var()].reason.is_some());
-            let c = &self.ca[self.vardata[p.var()].reason.unwrap()];
+            assert!(self.vardata[&p.var()].reason.is_some());
+            let c = &self.ca[self.vardata[&p.var()].reason.unwrap()];
 
             if i < c.len() {
                 // Checking 'p'-parents 'l':
                 let l = c[i];
 
                 // Variable at level 0 or previously removable:
-                if self.vardata[l.var()].level == 0 || self.seen[l.var()] == seen_source || self.seen[l.var()] == seen_removable {
+                if self.vardata[&l.var()].level == 0 || self.seen[&l.var()] == seen_source || self.seen[&l.var()] == seen_removable {
                     continue;
                 }
 
                 // Check variable can not be removed for some local reason:
-                if self.vardata[l.var()].reason.is_none() || self.seen[l.var()] == seen_failed {
+                if self.vardata[&l.var()].reason.is_none() || self.seen[&l.var()] == seen_failed {
                     stack.push((0, p));
                     for &(_, l) in stack.iter() {
-                        if self.seen[l.var()] == seen_undef {
-                            self.seen[l.var()] = seen_failed;
+                        if self.seen[&l.var()] == seen_undef {
+                            self.seen[&l.var()] = seen_failed;
                             self.analyze_toclear.push(l);
                         }
                     }
@@ -951,8 +951,8 @@ impl CoreSolver {
                 p  = l;
             } else {
                 // Finished with current element 'p' and reason 'c':
-                if self.seen[p.var()] == seen_undef {
-                    self.seen[p.var()] = seen_removable;
+                if self.seen[&p.var()] == seen_undef {
+                    self.seen[&p.var()] = seen_removable;
                     self.analyze_toclear.push(p);
                 }
 
@@ -985,29 +985,29 @@ impl CoreSolver {
         out_conflict.insert(&p, ());
 
         if !self.trail.isGroundLevel() {
-            self.seen[p.var()] = 1;
-            for i in range(self.trail.lim[0], self.trail.totalSize()).rev() {
+            self.seen[&p.var()] = 1;
+            for i in (self.trail.lim[0] .. self.trail.totalSize()).rev() {
                 let x = self.trail[i].var();
-                if self.seen[x] != 0 {
-                    match self.vardata[x].reason {
+                if self.seen[&x] != 0 {
+                    match self.vardata[&x].reason {
                         None     => {
-                            assert!(self.vardata[x].level > 0);
+                            assert!(self.vardata[&x].level > 0);
                             out_conflict.insert(&!self.trail[i], ());
                         }
 
                         Some(cr) => {
                             let c = &self.ca[cr];
-                            for j in range(1, c.len()) {
+                            for j in 1 .. c.len() {
                                 let v = c[j].var();
-                                if self.vardata[v].level > 0 {
-                                    self.seen[v] = 1;
+                                if self.vardata[&v].level > 0 {
+                                    self.seen[&v] = 1;
                                 }
                             }
                         }
                     }
                 }
             }
-            self.seen[p.var()] = 0;
+            self.seen[&p.var()] = 0;
         }
 
         out_conflict
@@ -1032,7 +1032,7 @@ impl CoreSolver {
             Some(_) => { false }
             None    => {
                 out.clear();
-                for j in range(trail_before, self.trail.totalSize()) {
+                for j in trail_before .. self.trail.totalSize() {
                     out.push(self.trail[j]);
                 }
                 true
@@ -1065,14 +1065,14 @@ impl CoreSolver {
 
     // Insert a variable in the decision order priority queue.
     fn insertVarOrder(&mut self, x : Var) {
-        if self.decision[x] {
+        if self.decision[&x] {
             self.activity_queue.insert(x);
         }
     }
 
     fn uncheckedEnqueue(&mut self, p : Lit, from : Option<ClauseRef>) {
         self.assigns.assignLit(p);
-        self.vardata[p.var()] = VarData { level : self.trail.decisionLevel(), reason : from };
+        self.vardata[&p.var()] = VarData { level : self.trail.decisionLevel(), reason : from };
         self.trail.push(p);
     }
 
@@ -1090,7 +1090,7 @@ impl CoreSolver {
     fn progressEstimate(&self) -> f64 {
         let F = 1.0 / self.nVars() as f64;
         let mut progress = 0.0;
-        for i in range(0, self.trail.decisionLevel() + 1) {
+        for i in 0 .. self.trail.decisionLevel() + 1 {
             progress += F.powi(i as i32) * self.trail.levelSize(i) as f64;
         }
         progress * F
@@ -1125,7 +1125,7 @@ impl CoreSolver {
 
         // All watchers:
         self.watches.cleanAll(&self.ca);
-        for vi in range(0, self.nVars()) {
+        for vi in 0 .. self.nVars() {
             for s in [false, true].iter() {
                 let p = Lit::new(Var::new(vi), *s);
                 let ws = &mut self.watches[p];
@@ -1141,11 +1141,11 @@ impl CoreSolver {
 
             // Note: it is not safe to call 'locked()' on a relocated clause. This is why we keep
             // 'dangling' reasons here. It is safe and does not hurt.
-            match self.vardata[v].reason {
+            match self.vardata[&v].reason {
                 Some(mut cr) if self.ca[cr].reloced() || isLocked(&self.ca, &self.assigns, &self.vardata, cr) => {
                     assert!(self.ca[cr].mark() != 1);
                     self.ca.reloc(to, &mut cr);
-                    self.vardata[v].reason = Some(cr);
+                    self.vardata[&v].reason = Some(cr);
                 }
 
                 _ => {}
@@ -1155,7 +1155,7 @@ impl CoreSolver {
         // All learnt:
         {
             let mut j = 0;
-            for i in range(0, self.learnts.len()) {
+            for i in 0 .. self.learnts.len() {
                 if self.ca[self.learnts[i]].mark() != 1 {
                     self.ca.reloc(to, &mut self.learnts[i]);
                     self.learnts[j] = self.learnts[i];
@@ -1168,7 +1168,7 @@ impl CoreSolver {
         // All original:
         {
             let mut j = 0;
-            for i in range(0, self.clauses.len()) {
+            for i in 0 .. self.clauses.len() {
                 if self.ca[self.clauses[i]].mark() != 1 {
                     self.ca.reloc(to, &mut self.clauses[i]);
                     self.clauses[j] = self.clauses[i];
@@ -1199,7 +1199,7 @@ impl CoreSolver {
 }
 
 
-pub fn luby(y : f64, mut x : uint) -> f64 {
+pub fn luby(y : f64, mut x : u32) -> f64 {
     // Find the finite subsequence that contains index 'x', and the
     // size of that subsequence:
     let mut size = 1;
@@ -1223,7 +1223,7 @@ pub fn luby(y : f64, mut x : uint) -> f64 {
 fn isLocked(ca : &ClauseAllocator, assigns : &Assignment, vardata : &IndexMap<Var, VarData>, cr : ClauseRef) -> bool {
     let lit = ca[cr][0];
     if !assigns.sat(lit) { return false; }
-    match vardata[lit.var()].reason {
+    match vardata[&lit.var()].reason {
         Some(r) if cr == r => { true }
         _                  => { false }
     }
@@ -1232,7 +1232,7 @@ fn isLocked(ca : &ClauseAllocator, assigns : &Assignment, vardata : &IndexMap<Va
 
 // Returns TRUE if a clause is satisfied in the current state.
 fn satisfiedWith(c : &Clause, s : &Assignment) -> bool {
-    for i in range(0, c.len()) {
+    for i in 0 .. c.len() {
         if s.sat(c[i]) {
             return true;
         }
@@ -1242,7 +1242,7 @@ fn satisfiedWith(c : &Clause, s : &Assignment) -> bool {
 
 fn removeSatisfied(ca : &mut ClauseAllocator, watches : &mut Watches, stats : &mut Stats, vardata : &mut IndexMap<Var, VarData>, assigns : &Assignment, cs : &mut Vec<ClauseRef>) {
     let mut j = 0;
-    for i in range(0, cs.len()) {
+    for i in 0 .. cs.len() {
         let cr = cs[i];
         if satisfiedWith(&ca[cr], assigns) {
             removeClause(ca, watches, stats, vardata, assigns, cr);
@@ -1266,7 +1266,7 @@ fn removeClause(ca : &mut ClauseAllocator, watches : &mut Watches, stats : &mut 
     {
         // Don't leave pointers to free'd memory!
         if isLocked(ca, assigns, vardata, cr) {
-            vardata[ca[cr][0].var()].reason = None;
+            vardata[&ca[cr][0].var()].reason = None;
         }
 
         ca[cr].setMark(1);

@@ -1,6 +1,7 @@
+use std::ops::{BitXor};
 use std::fmt;
 
-#[deriving(Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct LBool(u8);
 
 impl LBool {
@@ -32,7 +33,9 @@ impl LBool {
     }
 }
 
-impl BitXor<bool, LBool> for LBool {
+impl BitXor<bool> for LBool {
+    type Output = LBool;
+
     #[inline]
     fn bitxor(self, b : bool) -> LBool {
         let LBool(a) = self;
@@ -40,7 +43,7 @@ impl BitXor<bool, LBool> for LBool {
     }
 }
 
-impl fmt::Show for LBool {
+impl fmt::Display for LBool {
     fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
         match () {
             _ if self.isTrue()  => { write!(f, "true") }

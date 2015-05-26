@@ -1,9 +1,10 @@
+use std::ops::{Index};
 use super::index_map::{HasIndex, IndexMap};
 
 
 pub struct ActivityQueue<V : HasIndex> {
     heap     : Vec<V>,
-    indices  : IndexMap<V, uint>,
+    indices  : IndexMap<V, usize>,
     activity : IndexMap<V, f64>,
 }
 
@@ -17,7 +18,7 @@ impl<V : HasIndex> ActivityQueue<V> {
     }
 
     #[inline]
-    pub fn len(&self) -> uint {
+    pub fn len(&self) -> usize {
         self.heap.len()
     }
 
@@ -33,7 +34,7 @@ impl<V : HasIndex> ActivityQueue<V> {
 
     #[inline]
     pub fn getActivity(&self, v : &V) -> f64 {
-        self.activity[*v]
+        self.activity[v]
     }
 
     pub fn clear(&mut self) {
@@ -42,7 +43,7 @@ impl<V : HasIndex> ActivityQueue<V> {
     }
 
     pub fn scaleActivity(&mut self, factor : f64) {
-        self.activity.map_in_place(|a| *a * factor);
+        self.activity.modify_in_place(|act| { act * factor });
     }
 }
 
@@ -52,7 +53,7 @@ impl<V : HasIndex + Clone> ActivityQueue<V> {
             None      => {}
             Some(old) => {
                 if self.indices.contains_key(v) {
-                    let i = self.indices[*v];
+                    let i = self.indices[v];
                     if new > old { self.sift_up(i) } else { self.sift_down(i) }
                 }
             }
@@ -97,22 +98,22 @@ impl<V : HasIndex + Clone> ActivityQueue<V> {
     pub fn heapifyFrom(&mut self, from : Vec<V>) {
         self.heap = from;
         self.indices.clear();
-        for i in range(0, self.heap.len()) {
+        for i in 0 .. self.heap.len() {
             self.indices.insert(&self.heap[i], i);
         }
 
-        for i in range(0, self.heap.len() / 2).rev() {
+        for i in (0 .. self.heap.len() / 2).rev() {
             self.sift_down(i);
         }
     }
 
 
-    fn sift_up(&mut self, mut i : uint) {
+    fn sift_up(&mut self, mut i : usize) {
         let x = self.heap[i].clone();
         while i > 0 {
             let pi = (i - 1) >> 1;
             let p = self.heap[pi].clone();
-            if self.activity[x] > self.activity[p] {
+            if self.activity[&x] > self.activity[&p] {
                 self.set(i, p);
                 i = pi;
             } else {
@@ -122,16 +123,16 @@ impl<V : HasIndex + Clone> ActivityQueue<V> {
         self.set(i, x);
     }
 
-    fn sift_down(&mut self, mut i : uint) {
+    fn sift_down(&mut self, mut i : usize) {
         let x = self.heap[i].clone();
         let len = self.heap.len();
         loop {
             let li = i + i + 1;
             if li >= len { break; }
             let ri = i + i + 2;
-            let ci = if ri < len && self.activity[self.heap[ri]] > self.activity[self.heap[li]] { ri } else { li };
+            let ci = if ri < len && self.activity[&self.heap[ri]] > self.activity[&self.heap[li]] { ri } else { li };
             let c = self.heap[ci].clone();
-            if self.activity[c] <= self.activity[x] { break; }
+            if self.activity[&c] <= self.activity[&x] { break; }
             self.set(i, c);
             i = ci;
         }
@@ -139,15 +140,17 @@ impl<V : HasIndex + Clone> ActivityQueue<V> {
     }
 
     #[inline]
-    fn set(&mut self, i : uint, v : V) {
+    fn set(&mut self, i : usize, v : V) {
         self.indices.insert(&v, i);
         self.heap[i] = v;
     }
 }
 
-impl<V : HasIndex> Index<uint, V> for ActivityQueue<V> {
+impl<V : HasIndex> Index<usize> for ActivityQueue<V> {
+    type Output = V;
+
     #[inline]
-    fn index(&self, i : &uint) -> &V {
+    fn index(&self, i : usize) -> &V {
         self.heap.index(i)
     }
 }

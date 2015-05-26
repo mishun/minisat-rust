@@ -1,9 +1,10 @@
+use std::ops::{Index, IndexMut};
 use super::literal::{Lit, Var};
 use super::clause::{ClauseRef, ClauseAllocator};
 use super::index_map::{IndexMap};
 
 
-#[deriving(Clone)]
+#[derive(Clone)]
 pub struct Watcher {
     pub cref    : ClauseRef,
     pub blocker : Lit,
@@ -54,13 +55,13 @@ impl Watches {
     }
 
     pub fn lookup(&mut self, ca : &ClauseAllocator, lit : Lit) -> &mut Vec<Watcher> {
-        let wl = &mut self.watches[lit];
+        let wl = &mut self.watches[&lit];
         wl.clean(ca);
         &mut wl.watchers
     }
 
     pub fn smudge(&mut self, lit : Lit) {
-        let wl = &mut self.watches[lit];
+        let wl = &mut self.watches[&lit];
         if !wl.dirty {
             wl.dirty = true;
             self.dirties.push(lit);
@@ -69,7 +70,7 @@ impl Watches {
 
     pub fn cleanAll(&mut self, ca : &ClauseAllocator) {
         for dl in self.dirties.iter() {
-            self.watches[*dl].clean(ca);
+            self.watches[dl].clean(ca);
         }
         self.dirties.clear();
     }
@@ -80,16 +81,18 @@ impl Watches {
     }
 }
 
-impl Index<Lit, Vec<Watcher>> for Watches {
+impl Index<Lit> for Watches {
+    type Output = Vec<Watcher>;
+
     #[inline]
-    fn index(&self, lit : &Lit) -> &Vec<Watcher> {
-        &self.watches[*lit].watchers
+    fn index(&self, lit : Lit) -> &Vec<Watcher> {
+        &self.watches[&lit].watchers
     }
 }
 
-impl IndexMut<Lit, Vec<Watcher>> for Watches {
+impl IndexMut<Lit> for Watches {
     #[inline]
-    fn index_mut(&mut self, lit : &Lit) -> &mut Vec<Watcher> {
-        &mut self.watches[*lit].watchers
+    fn index_mut(&mut self, lit : Lit) -> &mut Vec<Watcher> {
+        &mut self.watches[&lit].watchers
     }
 }

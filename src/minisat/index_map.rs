@@ -1,18 +1,21 @@
+use std::marker::PhantomData;
 use std::collections::vec_map;
+use std::ops::{Index, IndexMut};
 
 
 pub trait HasIndex {
-    fn toIndex(&self) -> uint;
+    fn toIndex(&self) -> usize;
 }
 
 
 pub struct IndexMap<K : HasIndex, V> {
-    map : vec_map::VecMap<V>
+    map : vec_map::VecMap<V>,
+    tmp : PhantomData<K>
 }
 
 impl<K : HasIndex, V> IndexMap<K, V> {
     pub fn new() -> IndexMap<K, V> {
-        IndexMap { map : vec_map::VecMap::new() }
+        IndexMap { map : vec_map::VecMap::new(), tmp : PhantomData }
     }
 
     #[inline]
@@ -45,30 +48,25 @@ impl<K : HasIndex, V> IndexMap<K, V> {
     }
 
     #[inline]
-    pub fn map_in_place(&mut self, f : |&V| -> V) -> () {
+    pub fn modify_in_place<F : Fn(&V) -> V>(&mut self, f : F) {
         for (_, v) in self.map.iter_mut() {
             *v = f(v);
         }
     }
 }
 
-impl<K : HasIndex, V : Clone> IndexMap<K, V> {
-    #[inline]
-    pub fn update<F : Fn(V, V) -> V>(&mut self, k : &K, new : V, f : F) -> bool {
-        self.map.update(k.toIndex(), new, f)
-    }
-}
+impl<'r, K : HasIndex, V> Index<&'r K> for IndexMap<K, V> {
+    type Output = V;
 
-impl<K : HasIndex, V> Index<K, V> for IndexMap<K, V> {
     #[inline]
-    fn index(&self, k : &K) -> &V {
+    fn index(&self, k : &'r K) -> &V {
         self.map.index(&k.toIndex())
     }
 }
 
-impl<K : HasIndex, V> IndexMut<K, V> for IndexMap<K, V> {
+impl<'r, K : HasIndex, V> IndexMut<&'r K> for IndexMap<K, V> {
     #[inline]
-    fn index_mut(&mut self, k : &K) -> &mut V {
+    fn index_mut(&mut self, k : &'r K) -> &mut V {
         self.map.index_mut(&k.toIndex())
     }
 }

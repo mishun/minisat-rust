@@ -1,26 +1,27 @@
 use std::fmt;
+use std::ops::{Not, BitXor};
 use super::index_map::{HasIndex};
 
 
-#[deriving(PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
-pub struct Var(uint);
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
+pub struct Var(usize);
 
 impl Var {
     #[inline]
-    pub fn new(v : uint) -> Var {
+    pub fn new(v : usize) -> Var {
         Var(v)
     }
 }
 
 impl HasIndex for Var {
     #[inline]
-    fn toIndex(&self) -> uint {
+    fn toIndex(&self) -> usize {
         let Var(ref idx) = *self;
         *idx
     }
 }
 
-impl fmt::Show for Var {
+impl fmt::Display for Var {
     fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
         let Var(ref v) = *self;
         write!(f, "x{}", v)
@@ -28,13 +29,13 @@ impl fmt::Show for Var {
 }
 
 
-#[deriving(PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
-pub struct Lit(uint);
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
+pub struct Lit(usize);
 
 impl Lit {
     #[inline]
     pub fn new(Var(v) : Var, sign : bool) -> Lit {
-        Lit(v + v + sign as uint)
+        Lit(v + v + (sign as usize))
     }
 
     #[inline]
@@ -52,29 +53,33 @@ impl Lit {
 
 impl HasIndex for Lit {
     #[inline]
-    fn toIndex(&self) -> uint {
+    fn toIndex(&self) -> usize {
         let Lit(ref idx) = *self;
         *idx
     }
 }
 
-impl Not<Lit> for Lit {
+impl Not for Lit {
+    type Output = Lit;
+
     #[inline]
-    fn not(&self) -> Lit {
-        let Lit(l) = *self;
+    fn not(self) -> Lit {
+        let Lit(l) = self;
         Lit(l ^ 1)
     }
 }
 
-impl BitXor<bool, Lit> for Lit {
+impl BitXor<bool> for Lit {
+    type Output = Lit;
+
     #[inline]
     fn bitxor(self, b : bool) -> Lit {
         let Lit(l) = self;
-        Lit(l ^ b as uint)
+        Lit(l ^ (b as usize))
     }
 }
 
-impl fmt::Show for Lit {
+impl fmt::Display for Lit {
     fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}{}", if self.sign() { "~" } else { "" }, self.var())
     }

@@ -1,4 +1,3 @@
-use std::num::{SignedInt};
 use std::io;
 use super::index_map::{HasIndex};
 use super::literal::{Var, Lit};
@@ -6,23 +5,23 @@ use super::lbool::{LBool};
 use super::solver::{Solver};
 
 
-fn parse_clause<B : Buffer>(p : &mut BufferParser<B>) -> io::IoResult<Vec<Lit>> {
+fn parse_clause<R : io::Read>(p : &mut BufferParser<R>) -> io::Result<Vec<Lit>> {
     let mut lits : Vec<Lit> = Vec::new();
     loop {
         let lit = try!(p.nextInt());
         if lit == 0 {
             return Ok(lits);
         } else {
-            let var = lit.abs() as uint - 1;
+            let var = (lit.abs() as usize) - 1;
             lits.push(Lit::new(Var::new(var), lit < 0));
         }
     }
 }
 
-pub fn parse_DIMACS<B : io::Buffer, S : Solver>(buffer : &mut B, solver : &mut S, validate : bool) -> io::IoResult<()> {
-    let mut p = try!(BufferParser::new(buffer));
+pub fn parse_DIMACS<R : io::Read, S : Solver>(chars : io::Chars<R>, solver : &mut S, validate : bool) -> io::Result<()> {
+    let mut p = try!(BufferParser::new(chars));
 
-    enum State { Waiting, Parsing(uint, uint) }
+    enum State { Waiting, Parsing(usize, usize) }
 
     let mut state = State::Waiting;
     loop {
@@ -46,12 +45,7 @@ pub fn parse_DIMACS<B : io::Buffer, S : Solver>(buffer : &mut B, solver : &mut S
 
                     None      => {
                         if validate && (clauses != solver.nClauses() || vars < solver.nVars()) {
-                            return Err(
-                                io::IoError {
-                                    kind   : io::OtherIoError,
-                                    desc   : "PARSE ERROR! DIMACS header mismatch",
-                                    detail : None
-                                });
+                            return Err(io::Error::new(io::ErrorKind::Other, "PARSE ERROR! DIMACS header mismatch"));
                         }
                         return Ok(());
                     }
@@ -73,24 +67,24 @@ pub fn parse_DIMACS<B : io::Buffer, S : Solver>(buffer : &mut B, solver : &mut S
 
 
 
-pub struct BufferParser<'r, R : 'r> {
-    reader : &'r mut R,
-    cur : Option<char>,
+pub struct BufferParser<R> {
+    reader : io::Chars<R>,
+    cur    : Option<char>,
 }
 
-impl<'r, R : Buffer> BufferParser<'r, R> {
-    pub fn new(r : &'r mut R) -> io::IoResult<BufferParser<'r, R>> {
+impl<R : io::Read> BufferParser<R> {
+    pub fn new(r : io::Chars<R>) -> io::Result<BufferParser<R>> {
         let mut p : BufferParser<R> = BufferParser { reader : r, cur : None };
         try!(p.next());
         Ok(p)
     }
 
     #[inline]
-    pub fn next(&mut self) -> io::IoResult<()> {
-        match self.reader.read_char() {
-            Ok(c)                                         => { self.cur = Some(c); Ok(()) }
-            Err(io::IoError { kind : io::EndOfFile, .. }) => { self.cur = None; Ok(()) }
-            Err(err)                                      => { Err(err) }
+    pub fn next(&mut self) -> io::Result<()> {
+        match self.reader.next() {
+            Some(Ok(c))    => { self.cur = Some(c); Ok(()) }
+            None           => { self.cur = None; Ok(()) }
+            Some(Err(err)) => { self.cur = None; Err(io::Error::new(io::ErrorKind::Other, err)) }
         }
     }
 
@@ -99,7 +93,7 @@ impl<'r, R : Buffer> BufferParser<'r, R> {
         self.cur
     }
 
-    pub fn skipWhitespace(&mut self) -> io::IoResult<()> {
+    pub fn skipWhitespace(&mut self) -> io::Result<()> {
         loop {
             match self.cur {
                 None                          => break,
@@ -110,7 +104,7 @@ impl<'r, R : Buffer> BufferParser<'r, R> {
         Ok(())
     }
 
-    pub fn skipLine(&mut self) -> io::IoResult<()> {
+    pub fn skipLine(&mut self) -> io::Result<()> {
         loop {
             match self.cur {
                 None       => break,
@@ -121,30 +115,25 @@ impl<'r, R : Buffer> BufferParser<'r, R> {
         Ok(())
     }
 
-    pub fn consume(&mut self, target : &str) -> io::IoResult<()> {
+    pub fn consume(&mut self, target : &str) -> io::Result<()> {
         for tc in target.chars() {
             match self.cur {
                 Some(c) if c == tc => { try!(self.next()) }
                 _                  => {
-                    return Err(
-                        io::IoError {
-                            kind   : io::OtherIoError,
-                            desc   : "failed to consume",
-                            detail : Some(format!("expected '{}'", target))
-                        });
+                    return Err(io::Error::new(io::ErrorKind::Other, format!("failed to consume; expected '{}'", target)));
                 }
             }
         }
         Ok(())
     }
 
-    fn readIntBody(&mut self) -> io::IoResult<uint> {
-        let mut len : uint = 0;
+    fn readIntBody(&mut self) -> io::Result<usize> {
+        let mut len : usize = 0;
         let mut value = 0;
         loop {
             match self.cur.and_then(|c| { c.to_digit(10) }) {
                 Some(d)      => {
-                    value = value * 10 + d;
+                    value = value * 10 + (d as usize);
                     len += 1;
                     try!(self.next())
                 }
@@ -152,18 +141,13 @@ impl<'r, R : Buffer> BufferParser<'r, R> {
                 _ if len > 0 => { return Ok(value) }
 
                 _            => {
-                    return Err(
-                        io::IoError {
-                            kind   : io::OtherIoError,
-                            desc   : "int expected",
-                            detail : None
-                        });
+                    return Err(io::Error::new(io::ErrorKind::Other, "int expected"));
                 }
             }
         }
     }
 
-    pub fn nextInt(&mut self) -> io::IoResult<int> {
+    pub fn nextInt(&mut self) -> io::Result<i32> {
         try!(self.skipWhitespace());
         let sign =
             match self.cur {
@@ -173,10 +157,10 @@ impl<'r, R : Buffer> BufferParser<'r, R> {
             };
 
         let val = try!(self.readIntBody());
-        Ok(sign * val as int)
+        Ok(sign * (val as i32))
     }
 
-    pub fn nextUInt(&mut self) -> io::IoResult<uint> {
+    pub fn nextUInt(&mut self) -> io::Result<usize> {
         try!(self.skipWhitespace());
         match self.cur {
             Some('+') => { try!(self.next()) }

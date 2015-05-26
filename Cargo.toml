@@ -9,4 +9,4 @@ debug = true
 
 [dependencies]
 time = "*"
-
+getopts = "0.2"

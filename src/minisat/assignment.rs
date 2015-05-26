@@ -5,7 +5,7 @@ use super::lbool::{LBool};
 
 pub struct Assignment {
     assigns   : Vec<LBool>,
-    free_vars : Vec<uint>,
+    free_vars : Vec<usize>,
 }
 
 impl Assignment {
@@ -17,7 +17,7 @@ impl Assignment {
     }
 
     #[inline]
-    pub fn nVars(&self) -> uint {
+    pub fn nVars(&self) -> usize {
         self.assigns.len()
     }
 
