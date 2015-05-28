@@ -1,5 +1,8 @@
 #![allow(non_snake_case)]
 #![allow(dead_code)]
+#![feature(collections)]
+#![feature(io)]
+#![feature(convert)]
 
 extern crate getopts;
 extern crate time;

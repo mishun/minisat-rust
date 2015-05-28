@@ -141,26 +141,25 @@ pub struct CoreSolver {
     stats : Stats,   // Statistics: (read-only member variable)
 
     // Solver state:
-    clauses : Vec<ClauseRef>,    // List of problem clauses.
-    learnts : Vec<ClauseRef>,    // List of learnt clauses.
-    trail   : PropagationTrail<Lit>,            // Assignment stack; stores all assigments made in the order they were made.
-    assumptions : Vec<Lit>,      // Current set of assumptions provided to solve by the user.
+    ca                : ClauseAllocator,
+    clauses           : Vec<ClauseRef>,              // List of problem clauses.
+    learnts           : Vec<ClauseRef>,              // List of learnt clauses.
+    trail             : PropagationTrail<Lit>,       // Assignment stack; stores all assigments made in the order they were made.
+    assumptions       : Vec<Lit>,                    // Current set of assumptions provided to solve by the user.
+    assigns           : Assignment,                  // The current assignments.
+    polarity          : IndexMap<Var, bool>,         // The preferred polarity of each variable.
+    user_pol          : IndexMap<Var, LBool>,        // The users preferred polarity of each variable.
+    decision          : IndexMap<Var, bool>,         // Declares if a variable is eligible for selection in the decision heuristic.
+    vardata           : IndexMap<Var, VarData>,      // Stores reason and level for each variable.
+    watches           : Watches,                     // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
+    activity_queue    : ActivityQueue<Var>,          // A priority queue of variables ordered with respect to the variable activity.
 
-    assigns  : Assignment,        // The current assignments.
-    polarity : IndexMap<Var, bool>,         // The preferred polarity of each variable.
-    user_pol : IndexMap<Var, LBool>,        // The users preferred polarity of each variable.
-    decision : IndexMap<Var, bool>,         // Declares if a variable is eligible for selection in the decision heuristic.
-    vardata  : IndexMap<Var, VarData>,      // Stores reason and level for each variable.
-    watches  : Watches,                     // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
-    activity_queue : ActivityQueue<Var>,    // A priority queue of variables ordered with respect to the variable activity.
-
-    ok : bool,               // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
-    cla_inc : f64,           // Amount to bump next clause with.
-    var_inc : f64,           // Amount to bump next variable with.
-    simpDB_assigns : i32,    // Number of top-level assignments since last execution of 'simplify()'.
-    simpDB_props : i64,      // Remaining number of propagations that must be made before next execution of 'simplify()'.
-    progress_estimate : f64, // Set by 'search()'.
-    ca : ClauseAllocator,
+    ok                : bool,   // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
+    cla_inc           : f64,    // Amount to bump next clause with.
+    var_inc           : f64,    // Amount to bump next variable with.
+    simpDB_assigns    : i32,    // Number of top-level assignments since last execution of 'simplify()'.
+    simpDB_props      : i64,    // Remaining number of propagations that must be made before next execution of 'simplify()'.
+    progress_estimate : f64,    // Set by 'search()'.
 
     released_vars : Vec<Var>,
 
@@ -169,14 +168,14 @@ pub struct CoreSolver {
     seen : IndexMap<Var, u8>,
     analyze_toclear : Vec<Lit>,
 
-    max_learnts : f64,
+    max_learnts             : f64,
     learntsize_adjust_confl : f64,
-    learntsize_adjust_cnt : i32,
+    learntsize_adjust_cnt   : i32,
 
     // Resource contraints:
-    conflict_budget : i64,    // -1 means no budget.
+    conflict_budget    : i64, // -1 means no budget.
     propagation_budget : i64, // -1 means no budget.
-    asynch_interrupt : bool,
+    asynch_interrupt   : bool,
 }
 
 impl Solver for CoreSolver {

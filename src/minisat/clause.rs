@@ -8,16 +8,16 @@ pub type ClauseRef = usize;
 
 
 struct ClauseHeader {
-    mark : u32,
-    learnt : bool,
+    mark      : u32,
+    learnt    : bool,
     has_extra : bool,
-    reloced : bool,
-    size : usize
+    reloced   : bool,
+    size      : usize
 }
 
 pub struct Clause {
-    header : ClauseHeader,
-    data : Vec<Lit>,
+    header   : ClauseHeader,
+    data     : Vec<Lit>,
     data_act : f32,
     data_abs : u32,
     data_rel : Option<ClauseRef>,
@@ -147,7 +147,7 @@ impl ClauseAllocator {
             } else {
                 c.calcAbstraction();
             };
-        };
+        }
 
         let len = self.clauses.len();
         self.clauses.push(c);
