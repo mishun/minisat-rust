@@ -789,7 +789,7 @@ impl CoreSolver {
 
         let mut pathC = 0i32;
         let mut p = None;
-        let mut index = self.trail.totalSize() - 1;
+        let mut index = self.trail.totalSize();
         let mut confl = Some(confl_param);
 
         loop {
@@ -816,18 +816,17 @@ impl CoreSolver {
 
             // Select next clause to look at:
             loop {
-                let s = self.seen[&self.trail[index].var()];
                 index -= 1;
-                if s != 0 { break; }
+                if self.seen[&self.trail[index].var()] != 0 { break; }
             }
-            let pl = self.trail[index + 1];
+            let pl = self.trail[index];
             confl = self.vardata[&pl.var()].reason;
             self.seen[&pl.var()] = 0;
             p = Some(pl);
 
             pathC -= 1;
             if pathC <= 0 { break; }
-        };
+        }
 
         out_learnt.insert(0, !p.unwrap());
 
