@@ -54,30 +54,29 @@ impl Stats {
     pub fn print(&self) {
         let cpu_time = time::precise_time_s() - self.start_time;
         //double mem_used = memUsedPeak();
-        println!("restarts              : {:12}", self.starts);
-        println!("conflicts             : {:12}   ({:.0} / sec)", self.conflicts, self.conflicts as f64 / cpu_time);
+        info!("restarts              : {:12}", self.starts);
+        info!("conflicts             : {:12}   ({:.0} / sec)", self.conflicts, self.conflicts as f64 / cpu_time);
 
-        println!("decisions             : {:12}   ({:4.2} % random) ({:.0} / sec)",
+        info!("decisions             : {:12}   ({:4.2} % random) ({:.0} / sec)",
             self.decisions,
             self.rnd_decisions as f64 * 100.0 / self.decisions as f64,
             self.decisions as f64 / cpu_time
         );
 
-        println!("propagations          : {:12}   ({:.0} / sec)", self.propagations, self.propagations as f64 / cpu_time);
+        info!("propagations          : {:12}   ({:.0} / sec)", self.propagations, self.propagations as f64 / cpu_time);
 
-        println!("conflict literals     : {:12}   ({:4.2} % deleted)",
+        info!("conflict literals     : {:12}   ({:4.2} % deleted)",
             self.tot_literals,
             (self.max_literals - self.tot_literals) as f64 * 100.0 / self.max_literals as f64
         );
 
         //if (mem_used != 0) printf("Memory used           : %.2f MB\n", mem_used);
-        println!("CPU time              : {} s", cpu_time);
+        info!("CPU time              : {} s", cpu_time);
     }
 }
 
 
 struct CoreSettings {
-    verbosity         : i32,
     var_decay         : f64,
     clause_decay      : f64,
     random_var_freq   : f64,
@@ -101,7 +100,6 @@ struct CoreSettings {
 impl Default for CoreSettings {
     fn default() -> CoreSettings {
         CoreSettings {
-            verbosity         : 0,
             var_decay         : 0.95,
             clause_decay      : 0.999,
             random_var_freq   : 0.0,
@@ -311,17 +309,15 @@ impl Solver for CoreSolver {
     }
 
     fn printStats(&self) {
-        if self.set.verbosity > 0 {
-            self.stats.print();
-            println!("");
-        }
+        self.stats.print();
+        info!("");
     }
 }
 
 impl CoreSolver {
-    pub fn new(verbosity : i32) -> CoreSolver {
+    pub fn new() -> CoreSolver {
         CoreSolver {
-            set : CoreSettings { verbosity : verbosity, ..Default::default() },
+            set : Default::default(),
 
             model : Vec::new(),
             conflict : IndexMap::new(),
@@ -416,12 +412,10 @@ impl CoreSolver {
         self.learntsize_adjust_cnt   = self.set.learntsize_adjust_start_confl;
         let mut status = LBool::Undef();
 
-        if self.set.verbosity >= 1 {
-            println!("============================[ Search Statistics ]==============================");
-            println!("| Conflicts |          ORIGINAL         |          LEARNT          | Progress |");
-            println!("|           |    Vars  Clauses Literals |    Limit  Clauses Lit/Cl |          |");
-            println!("===============================================================================");
-        }
+        info!("============================[ Search Statistics ]==============================");
+        info!("| Conflicts |          ORIGINAL         |          LEARNT          | Progress |");
+        info!("|           |    Vars  Clauses Literals |    Limit  Clauses Lit/Cl |          |");
+        info!("===============================================================================");
 
         // Search:
         {
@@ -439,9 +433,7 @@ impl CoreSolver {
             }
         }
 
-        if self.set.verbosity >= 1 {
-            println!("===============================================================================");
-        }
+        info!("===============================================================================");
 
         if status.isTrue() {
             let vars = self.nVars();
@@ -504,17 +496,15 @@ impl CoreSolver {
                         self.learntsize_adjust_cnt = self.learntsize_adjust_confl as i32;
                         self.max_learnts *= self.set.learntsize_inc;
 
-                        if self.set.verbosity >= 1 {
-                            println!("| {:9} | {:7} {:8} {:8} | {:8} {:8} {:6.0} | {:6.3} % |",
-                                   self.stats.conflicts,
-                                   self.stats.dec_vars - (self.trail.levelSize(0) as u64),
-                                   self.nClauses(),
-                                   self.stats.clauses_literals,
-                                   self.max_learnts as u64,
-                                   self.nLearnts(),
-                                   self.stats.learnts_literals as f64 / self.nLearnts() as f64,
-                                   self.progressEstimate() * 100.0);
-                        }
+                        info!("| {:9} | {:7} {:8} {:8} | {:8} {:8} {:6.0} | {:6.3} % |",
+                               self.stats.conflicts,
+                               self.stats.dec_vars - (self.trail.levelSize(0) as u64),
+                               self.nClauses(),
+                               self.stats.clauses_literals,
+                               self.max_learnts as u64,
+                               self.nLearnts(),
+                               self.stats.learnts_literals as f64 / self.nLearnts() as f64,
+                               self.progressEstimate() * 100.0);
                     }
                 }
 
@@ -1110,10 +1100,8 @@ impl CoreSolver {
 
         let mut to = ClauseAllocator::new(); //self.ca.size() - self.ca.wasted());
         self.relocAll(&mut to);
-        if self.set.verbosity >= 2 {
-            println!("|  Garbage collection:   {:12} bytes ({:5} clauses) => {:12} bytes  ({:5} clauses)            |",
-                self.ca.size(), self.ca.numberOfClauses(), to.size(), to.numberOfClauses());
-        }
+        debug!("|  Garbage collection:   {:12} bytes ({:5} clauses) => {:12} bytes  ({:5} clauses)            |",
+            self.ca.size(), self.ca.numberOfClauses(), to.size(), to.numberOfClauses());
         self.ca = to;
     }
 

@@ -4,10 +4,15 @@
 extern crate getopts;
 extern crate time;
 extern crate vec_map;
+#[macro_use]
+extern crate log;
+extern crate env_logger;
 
 use std::io;
 use std::io::{Write};
 use std::fs::File;
+use log::{LogRecord, LogLevelFilter};
+use env_logger::LogBuilder;
 use minisat::solver::{Solver, CoreSolver};
 use minisat::dimacs::{parse_DIMACS};
 use minisat::lbool::{LBool};
@@ -40,7 +45,19 @@ fn main() {
         return;
     }
 
-    let verbosity = matches.opt_str("verb").and_then(|s| { s.parse().ok() }).unwrap_or(1);
+    {
+        let verbosity = matches.opt_str("verb").and_then(|s| { s.parse().ok() }).unwrap_or(1);
+        let mut builder = LogBuilder::new();
+        builder.format(|record: &LogRecord| { format!("{}", record.args()) });
+        builder.filter(None,
+            match verbosity {
+                    1 => { LogLevelFilter::Info }
+                    2 => { LogLevelFilter::Trace }
+                    _ => { LogLevelFilter::Off }
+            });
+        builder.init().unwrap();
+    }
+
     let strict = matches.opt_present("strict");
     let (in_path, out_path) = {
         let left = matches.free;
@@ -51,8 +68,8 @@ fn main() {
         }
     };
 
-    let mut s = CoreSolver::new(verbosity);
-    solveFile(&mut s, verbosity, strict, in_path, out_path).unwrap_or_else(|err| {
+    let mut s = CoreSolver::new();
+    solveFile(&mut s, strict, in_path, out_path).unwrap_or_else(|err| {
         panic!(format!("Error: {}", err));
     });
 }
@@ -66,13 +83,11 @@ fn resToString(ret : LBool) -> &'static str {
     }
 }
 
-fn solveFile<S : Solver>(solver : &mut S, verbosity : i32, strict : bool, in_path : String, out_path : Option<String>) -> io::Result<()> {
+fn solveFile<S : Solver>(solver : &mut S, strict : bool, in_path : String, out_path : Option<String>) -> io::Result<()> {
     let initial_time = time::precise_time_s();
 
-    if verbosity > 0 {
-        println!("============================[ Problem Statistics ]=============================");
-        println!("|                                                                             |");
-    }
+    info!("============================[ Problem Statistics ]=============================");
+    info!("|                                                                             |");
 
     {
         let in_file = try!(File::open(in_path));
@@ -80,23 +95,17 @@ fn solveFile<S : Solver>(solver : &mut S, verbosity : i32, strict : bool, in_pat
         try!(parse_DIMACS(&mut reader, solver, strict));
     }
 
-    if verbosity > 0 {
-        println!("|  Number of variables:  {:12}                                         |", solver.nVars());
-        println!("|  Number of clauses:    {:12}                                         |", solver.nClauses());
-    }
+    info!("|  Number of variables:  {:12}                                         |", solver.nVars());
+    info!("|  Number of clauses:    {:12}                                         |", solver.nClauses());
 
     let parsed_time = time::precise_time_s();
-    if verbosity > 0 {
-        println!("|  Parse time:           {:12.2} s                                       |", parsed_time - initial_time);
-        println!("|                                                                             |");
-    }
+    info!("|  Parse time:           {:12.2} s                                       |", parsed_time - initial_time);
+    info!("|                                                                             |");
 
     if !solver.simplify() {
-        if verbosity > 0 {
-            println!("===============================================================================");
-            println!("Solved by unit propagation");
-            solver.printStats();
-        }
+        info!("===============================================================================");
+        info!("Solved by unit propagation");
+        solver.printStats();
         println!("UNSATISFIABLE");
     } else {
         let ret = solver.solveLimited(&[]);

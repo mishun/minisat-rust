@@ -90,8 +90,8 @@ impl SimpSolver {
 
         if result.isTrue() {
             result = self.core.solve_();
-        } else if self.core.set.verbosity >= 1 {
-            println!("===============================================================================");
+        } else {
+            info!("===============================================================================");
         }
 
         if result.isTrue() && self.set.extend_model {
