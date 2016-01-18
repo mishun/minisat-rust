@@ -30,20 +30,20 @@ pub trait Solver {
 
 #[derive(Default)]
 struct Stats {
-    solves : u64,
-    starts : u64,
-    decisions : u64,
-    rnd_decisions : u64,
-    propagations : u64,
-    conflicts : u64,
-    dec_vars : u64,
-    num_clauses : u64,
-    num_learnts : u64,
+    solves           : u64,
+    starts           : u64,
+    decisions        : u64,
+    rnd_decisions    : u64,
+    propagations     : u64,
+    conflicts        : u64,
+    dec_vars         : u64,
+    num_clauses      : u64,
+    num_learnts      : u64,
     clauses_literals : u64,
     learnts_literals : u64,
-    max_literals : u64,
-    tot_literals : u64,
-    start_time : f64,
+    max_literals     : u64,
+    tot_literals     : u64,
+    start_time       : f64,
 }
 
 impl Stats {
@@ -204,8 +204,7 @@ impl Solver for CoreSolver {
         assert!(self.trail.isGroundLevel());
         if !self.ok { return false; }
 
-        let mut ps = Vec::new();
-        ps.push_all(clause);
+        let mut ps = clause.to_vec();
 
         // Check if clause is satisfied and remove false/duplicate literals:
         ps.sort();
@@ -303,8 +302,7 @@ impl Solver for CoreSolver {
     }
 
     fn solveLimited(&mut self, assumps : &[Lit]) -> LBool {
-        self.assumptions.clear();
-        self.assumptions.push_all(assumps);
+        self.assumptions = assumps.to_vec();
         self.solve_()
     }
 
@@ -1177,7 +1175,6 @@ impl CoreSolver {
             self.clauses.truncate(j);
         }
     }
-
 
     fn attachClause(&mut self, cr : ClauseRef) {
         let ref c = self.ca[cr];

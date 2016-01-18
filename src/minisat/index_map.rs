@@ -1,5 +1,5 @@
 use std::marker::PhantomData;
-use std::collections::vec_map;
+use vec_map::VecMap;
 use std::ops::{Index, IndexMut};
 
 
@@ -9,13 +9,15 @@ pub trait HasIndex {
 
 
 pub struct IndexMap<K : HasIndex, V> {
-    map : vec_map::VecMap<V>,
+    map : VecMap<V>,
     tmp : PhantomData<K>
 }
 
 impl<K : HasIndex, V> IndexMap<K, V> {
     pub fn new() -> IndexMap<K, V> {
-        IndexMap { map : vec_map::VecMap::new(), tmp : PhantomData }
+        IndexMap { map : VecMap::new()
+                 , tmp : PhantomData
+                 }
     }
 
     #[inline]

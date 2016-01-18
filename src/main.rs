@@ -1,14 +1,12 @@
 #![allow(non_snake_case)]
 #![allow(dead_code)]
-#![feature(collections)]
-#![feature(io)]
-#![feature(convert)]
 
 extern crate getopts;
 extern crate time;
+extern crate vec_map;
 
 use std::io;
-use std::io::{Read, Write};
+use std::io::{Write};
 use std::fs::File;
 use minisat::solver::{Solver, CoreSolver};
 use minisat::dimacs::{parse_DIMACS};
@@ -78,8 +76,8 @@ fn solveFile<S : Solver>(solver : &mut S, verbosity : i32, strict : bool, in_pat
 
     {
         let in_file = try!(File::open(in_path));
-        let reader = io::BufReader::new(in_file);
-        try!(parse_DIMACS(reader.chars(), solver, strict));
+        let mut reader = io::BufReader::new(in_file);
+        try!(parse_DIMACS(&mut reader, solver, strict));
     }
 
     if verbosity > 0 {

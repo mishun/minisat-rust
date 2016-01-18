@@ -1,25 +1,17 @@
+// TODO: wait for io stabilization and completely rewrite it
 use std::io;
+use std::str;
+use std::borrow::Borrow;
 use super::index_map::{HasIndex};
 use super::literal::{Var, Lit};
 use super::lbool::{LBool};
 use super::solver::{Solver};
 
 
-fn parse_clause<R : io::Read>(p : &mut BufferParser<R>) -> io::Result<Vec<Lit>> {
-    let mut lits : Vec<Lit> = Vec::new();
-    loop {
-        let lit = try!(p.nextInt());
-        if lit == 0 {
-            return Ok(lits);
-        } else {
-            let var = (lit.abs() as usize) - 1;
-            lits.push(Lit::new(Var::new(var), lit < 0));
-        }
-    }
-}
-
-pub fn parse_DIMACS<R : io::Read, S : Solver>(chars : io::Chars<R>, solver : &mut S, validate : bool) -> io::Result<()> {
-    let mut p = try!(BufferParser::new(chars));
+pub fn parse_DIMACS<R : io::Read, S : Solver>(reader : &mut R, solver : &mut S, validate : bool) -> io::Result<()> {
+    let mut buf = String::new();
+    let _ = try!(reader.read_to_string(&mut buf));
+    let mut p = try!(Parser::new(buf.chars()));
 
     enum State { Waiting, Parsing(usize, usize) }
 
@@ -57,7 +49,7 @@ pub fn parse_DIMACS<R : io::Read, S : Solver>(chars : io::Chars<R>, solver : &mu
                                 solver.newVar(LBool::Undef(), true);
                             }
                         }
-                        solver.addClause(c.as_slice());
+                        solver.addClause(c.borrow());
                     }
                 }
             }
@@ -65,27 +57,35 @@ pub fn parse_DIMACS<R : io::Read, S : Solver>(chars : io::Chars<R>, solver : &mu
     }
 }
 
-
-
-pub struct BufferParser<R> {
-    reader : io::Chars<R>,
-    cur    : Option<char>,
+fn parse_clause<'a>(p : &mut Parser<'a>) -> io::Result<Vec<Lit>> {
+    let mut lits : Vec<Lit> = Vec::new();
+    loop {
+        let lit = try!(p.nextInt());
+        if lit == 0 {
+            return Ok(lits);
+        } else {
+            let var = (lit.abs() as usize) - 1;
+            lits.push(Lit::new(Var::new(var), lit < 0));
+        }
+    }
 }
 
-impl<R : io::Read> BufferParser<R> {
-    pub fn new(r : io::Chars<R>) -> io::Result<BufferParser<R>> {
-        let mut p : BufferParser<R> = BufferParser { reader : r, cur : None };
+struct Parser<'a> {
+    reader : str::Chars<'a>,
+    cur    : Option<char>
+}
+
+impl<'a> Parser<'a> {
+    pub fn new(r : str::Chars<'a>) -> io::Result<Parser<'a>> {
+        let mut p : Parser<'a> = Parser { reader : r, cur : None };
         try!(p.next());
         Ok(p)
     }
 
     #[inline]
     pub fn next(&mut self) -> io::Result<()> {
-        match self.reader.next() {
-            Some(Ok(c))    => { self.cur = Some(c); Ok(()) }
-            None           => { self.cur = None; Ok(()) }
-            Some(Err(err)) => { self.cur = None; Err(io::Error::new(io::ErrorKind::Other, err)) }
-        }
+        self.cur = self.reader.next();
+        Ok(())
     }
 
     #[inline]
