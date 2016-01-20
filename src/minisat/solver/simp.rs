@@ -1,12 +1,13 @@
 use std::default::{Default};
 use std::collections::vec_deque::{VecDeque};
 use std::mem;
-use minisat::index_map::{IndexMap};
+use std::borrow::Borrow;
+use minisat::index_map::{HasIndex, IndexMap};
 use minisat::lbool::{LBool};
 use minisat::literal::{Var, Lit};
-use minisat::clause::{Clause, ClauseRef};
+use minisat::clause::{Clause, ClauseRef, SubsumesRes, subsumes};
 use minisat::assignment::{Assignment};
-use super::{Solver, CoreSolver};
+use super::Solver;
 
 
 struct SimpSettings {
@@ -91,10 +92,15 @@ impl ElimQueue {
         }
     }
 
-//    pub fn clear(&mut self) {
-//        self.heap.clear();
-//        self.indices.clear();
-//    }
+    pub fn clearHeap(&mut self) {
+        self.heap.clear();
+        self.indices.clear();
+    }
+
+    pub fn clearAll(&mut self) {
+        self.clearHeap();
+        self.n_occ.clear();
+    }
 
     pub fn bumpLitOcc(&mut self, lit : &Lit, delta : i32) {
         self.n_occ[lit] += delta;
@@ -174,9 +180,72 @@ impl ElimQueue {
 }
 
 
+struct OccLists<V> {
+    occs    : IndexMap<Var, Vec<V>>,
+    dirty   : IndexMap<Var, bool>,
+    dirties : Vec<Var>
+//Deleted                  deleted;
+}
+
+impl<V> OccLists<V> {
+    pub fn initVar(&mut self, v : &Var) {
+        self.occs.insert(v, Vec::new());
+        self.dirty.insert(v, false);
+    }
+
+    pub fn clearVar(&mut self, v : &Var) {
+        self.occs.remove(v);
+    }
+
+    pub fn pushOcc(&mut self, v : &Var, x : V) {
+        self.occs[v].push(x);
+    }
+
+    pub fn clear(&mut self) {
+        self.occs.clear();
+        self.dirty.clear();
+        self.dirties.clear();
+    }
+
+    pub fn lookup(&mut self, v : &Var) -> &Vec<V> {
+        if self.dirty[v] {
+            self.cleanVar(v);
+        }
+        &self.occs[v]
+    }
+
+    pub fn get(&self, v : &Var) -> &Vec<V> {
+        &self.occs[v]
+    }
+
+    fn  smudge(&mut self, v : Var) {
+        if !self.dirty[&v] {
+            self.dirty[&v] = true;
+            self.dirties.push(v);
+        }
+    }
+
+    pub fn cleanVar(&mut self, v : &Var) {
+// TODO:
+//        Vec& vec = occs[idx];
+//        int  i, j;
+//        for (i = j = 0; i < vec.size(); i++)
+//        if (!deleted(vec[i]))
+//        vec[j++] = vec[i];
+//        vec.shrink(i - j);
+        self.dirty[v] = false;
+    }
+}
+
+impl<V : PartialEq> OccLists<V> {
+    pub fn removeOcc(&mut self, v : &Var, x : V) {
+        self.occs[v].retain(|y| { *y != x })
+    }
+}
+
 
 pub struct SimpSolver {
-    core               : CoreSolver,
+    core               : super::CoreSolver,
     set                : SimpSettings,
 
     // Statistics:
@@ -185,13 +254,12 @@ pub struct SimpSolver {
     eliminated_vars    : i32,
 
     // Solver state:
-    elimorder          : i32,
     use_simplification : bool,
     max_simp_var       : Var,        // Max variable at the point simplification was turned off.
     elimclauses        : Vec<u32>,
     touched            : IndexMap<Var, i8>,
 
-    // TODO: OccLists<Var, vec<CRef>, ClauseDeleted> occurs;
+    occurs             : OccLists<ClauseRef>,
     elim               : ElimQueue,
     subsumption_queue  : VecDeque<ClauseRef>,
     frozen             : IndexMap<Var, i8>,
@@ -213,7 +281,7 @@ impl SimpSolver {
         self.eliminated.insert(&v, 0);
 
         if self.use_simplification {
-            // TODO: self.occurs.init(v);
+            self.occurs.initVar(&v);
             self.touched.insert(&v, 0);
             self.elim.addVar(v);
         }
@@ -246,7 +314,7 @@ impl SimpSolver {
             // forward subsumption.
             self.subsumption_queue.push_back(cr);
             for i in 0 .. c.len() {
-                // TODO: self.occurs[var(c[i])].push(cr);
+                self.occurs.pushOcc(&c[i].var(), cr);
                 self.touched[&c[i].var()] = 1;
                 self.n_touched += 1;
                 self.elim.bumpLitOcc(&c[i], 1);
@@ -325,33 +393,28 @@ impl SimpSolver {
     fn extendModel(&mut self) {
         let mut i = self.elimclauses.len() - 1;
         while i > 0 {
-            let mut j = self.elimclauses[i];
+            let mut j = self.elimclauses[i] as usize    ;
             i -= 1;
+            let mut skip = false;
+
             while j > 1 {
-                //
+                let x = Lit::fromIndex(self.elimclauses[i] as usize);
+                if !(self.core.model[x.var().toIndex()] ^ x.sign()).isFalse() {
+                    skip = true;
+                    break;
+                }
 
                 j -= 1;
                 i -= 1;
             }
 
-            //let x = toLit(elimclauses[i]);
-            //self.model[x.var()] = LBool::new(!x.sign());
+            if !skip {
+                let x = Lit::fromIndex(self.elimclauses[i] as usize);
+                self.core.model[x.var().toIndex()] = LBool::new(!x.sign());
+            }
+
+            i -= j;
         }
-
-/*
-        int i, j;
-        Lit x;
-
-        for (i = elimclauses.size() - 1; i > 0; i -= j){
-            for (j = elimclauses[i--]; j > 1; j--, i--)
-                if (modelValue(toLit(elimclauses[i])) != l_False)
-                    goto next;
-
-            x = toLit(elimclauses[i]);
-            model[var(x)] = lbool(!sign(x));
-        next:;
-        }
-        */
     }
 
     fn eliminate(&mut self, turn_off_elim : bool) -> bool {
@@ -376,7 +439,7 @@ impl SimpSolver {
                 assert!(self.bwdsub_assigns == self.core.trail.totalSize() as i32);
                 assert!(self.subsumption_queue.len() == 0);
                 assert!(self.n_touched == 0);
-                //elim_heap.clear();
+                self.elim.clearHeap();
                 break 'cleanup;
             }
 
@@ -415,8 +478,6 @@ impl SimpSolver {
                         cnt += 1;
                     }
                 }
-
-
             }
 
             assert!(self.subsumption_queue.len() == 0);
@@ -425,22 +486,21 @@ impl SimpSolver {
         // If no more simplification is needed, free all simplification-related data structures:
         if turn_off_elim {
             self.touched.clear();
-            //occurs   .clear(true);
-            //n_occ    .clear(true);
-            //elim_heap.clear(true);
+            self.occurs.clear();
+            self.elim.clearAll();
             self.subsumption_queue.clear();
 
-            self.use_simplification    = false;
-            self.core.set.remove_satisfied      = true;
+            self.use_simplification = false;
+            self.core.set.remove_satisfied = true;
             //ca.extra_clause_field = false;
-            //self.max_simp_var          = self.core.nVars();
+            self.max_simp_var = Var::new(self.core.nVars());
 
             // Force full cleanup (this is safe and desirable since it only happens once):
-            //rebuildOrderHeap();
-            //garbageCollect();
+            self.core.rebuildOrderHeap();
+            //self.core.garbageCollect(); // TODO: override
         } else {
             // Cheaper cleanup:
-            self.core.checkGarbageDef();
+            //self.core.checkGarbageDef();
         }
 
         if self.elimclauses.len() > 0 {
@@ -454,41 +514,135 @@ impl SimpSolver {
     fn asymmVar(&mut self, v : Var) -> bool {
         assert!(self.use_simplification);
 
-/*
-        const vec<CRef>& cls = occurs.lookup(v);
+        let cls = {
+            let cls = self.occurs.lookup(&v);
+            if !self.core.assigns.undef(v) || cls.len() == 0 {
+                return true;
+            }
+            cls.clone()
+        };
 
-        if (value(v) != l_Undef || cls.size() == 0)
-        return true;
+        for cr in cls.iter() {
+            if !self.asymm(v, *cr) {
+                return false;
+            }
+        }
 
-        for (int i = 0; i < cls.size(); i++)
-        if (!asymm(v, cls[i]))
-        return false;
-*/
         self.backwardSubsumptionCheck(false)
     }
 
     fn asymm(&mut self, v : Var, cr : ClauseRef) -> bool {
-        assert!(self.core.trail.decisionLevel() == 0);
-/*        Clause& c = ca[cr];
-        if (c.mark() || satisfied(c)) return true;
+        assert!(self.core.trail.isGroundLevel());
 
-        trail_lim.push(trail.size());
-        Lit l = lit_Undef;
-        for (int i = 0; i < c.size(); i++)
-        if (var(c[i]) != v && value(c[i]) != l_False)
-        uncheckedEnqueue(~c[i]);
-        else
-        l = c[i];
+        let c = {
+            let c = &mut self.core.ca[cr];
+            if c.mark() != 0 || super::satisfiedWith(c, &self.core.assigns) {
+                return true;
+            }
 
-        if (propagate() != CRef_Undef){
-        cancelUntil(0);
-        asymm_lits++;
-        if (!strengthenClause(cr, l))
-        return false;
-        }else
-        cancelUntil(0);
-*/
+            c.to_vec()
+        };
+
+        self.core.trail.newDecisionLevel();
+
+        let mut l = None;
+        for lit in c.iter() {
+            if v != lit.var() && !self.core.assigns.unsat(*lit) {
+                self.core.uncheckedEnqueue(!*lit, None);
+            } else {
+                l = Some(*lit);
+            }
+        }
+
+        if self.core.propagate().is_some() {
+            self.core.cancelUntil(0);
+            self.asymm_lits += 1;
+            if !self.strengthenClause(cr, l.unwrap()) {
+                return false;
+            }
+        } else {
+            self.core.cancelUntil(0);
+        }
+
         true
+    }
+
+    fn removeClause(&mut self, cr : ClauseRef) {
+        if self.use_simplification {
+            let c = &self.core.ca[cr];
+
+            for i in 0 .. c.len() {
+                self.elim.bumpLitOcc(&c[i], -1);
+                self.elim.updateElimHeap(&c[i].var(), &self.frozen, &self.eliminated, &self.core.assigns);
+                self.occurs.smudge(c[i].var());
+            }
+        }
+
+        super::removeClause(&mut self.core.ca, &mut self.core.watches, &mut self.core.stats, &mut self.core.vardata, &self.core.assigns, cr);
+    }
+
+    fn strengthenClause(&mut self, cr : ClauseRef, l : Lit) -> bool {
+        assert!(self.core.trail.isGroundLevel());
+        assert!(self.use_simplification);
+
+        // FIX: this is too inefficient but would be nice to have (properly implemented)
+        // if (!find(subsumption_queue, &c))
+        self.subsumption_queue.push_back(cr);
+
+        if self.core.ca[cr].len() == 2 {
+            self.removeClause(cr);
+            self.core.ca[cr].strengthen(l);
+        } else {
+            super::detachClause(&mut self.core.ca, &mut self.core.stats, &mut self.core.watches, cr, true);
+            self.core.ca[cr].strengthen(l);
+            self.core.attachClause(cr);
+            self.occurs.removeOcc(&l.var(), cr);
+            self.elim.bumpLitOcc(&l, -1);
+            self.elim.updateElimHeap(&l.var(), &self.frozen, &self.eliminated, &self.core.assigns);
+        }
+
+        match self.core.ca[cr].as_unit_clause() {
+            None    => { true }
+            Some(l) => { self.core.enqueue(l, None) && self.core.propagate().is_none() }
+        }
+    }
+
+    fn merge(&mut self, _ps : ClauseRef, _qs : ClauseRef, v : Var) -> Option<Vec<Lit>> {
+        self.merges += 1;
+
+        let ps_smallest = self.core.ca[_ps].len() < self.core.ca[_qs].len();
+        let ps = if ps_smallest { &self.core.ca[_qs] } else { &self.core.ca[_ps] };
+        let qs = if ps_smallest { &self.core.ca[_ps] } else { &self.core.ca[_qs] };
+
+        let mut res = Vec::new();
+        for i in 0 .. qs.len() {
+            if qs[i].var() != v {
+                let mut ok = true;
+
+                for j in 0 .. ps.len() {
+                    if ps[j].var() == qs[i].var() {
+                        if ps[j] == !qs[i] {
+                            return None;
+                        } else {
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+
+                if ok {
+                    res.push(qs[i]);
+                }
+            }
+        }
+
+        for i in 0 .. ps.len() {
+            if ps[i].var() != v {
+                res.push(ps[i]);
+            }
+        }
+
+        Some(res)
     }
 
     fn eliminateVar(&mut self, v : Var) -> bool {
@@ -496,152 +650,241 @@ impl SimpSolver {
         assert!(self.eliminated[&v] == 0);
         assert!(self.core.assigns.undef(v));
 
-/*
         // Split the occurrences into positive and negative:
-        //
-        const vec<CRef>& cls = occurs.lookup(v);
-        vec<CRef>        pos, neg;
-        for (int i = 0; i < cls.size(); i++)
-        (find(ca[cls[i]], mkLit(v)) ? pos : neg).push(cls[i]);
+        let cls = self.occurs.lookup(&v).clone();
+        let mut pos = Vec::new();
+        let mut neg = Vec::new();
+        for cr in cls.iter() {
+            let c = &self.core.ca[*cr];
+            for i in 0 .. c.len() {
+                let l = c[i];
+                if l.var() == v {
+                    if l.sign() { neg.push(*cr); } else { pos.push(*cr); }
+                    break;
+                }
+            }
+        }
 
         // Check wether the increase in number of clauses stays within the allowed ('grow'). Moreover, no
         // clause must exceed the limit on the maximal clause size (if it is set):
-        //
-        int cnt         = 0;
-        int clause_size = 0;
+        let mut cnt         = 0;
 
-        for (int i = 0; i < pos.size(); i++)
-        for (int j = 0; j < neg.size(); j++)
-        if (merge(ca[pos[i]], ca[neg[j]], v, clause_size) &&
-        (++cnt > cls.size() + grow || (clause_lim != -1 && clause_size > clause_lim)))
-        return true;
-
-        // Delete and store old clauses:
-        eliminated[v] = true;
-        setDecisionVar(v, false);
-        eliminated_vars++;
-
-        if (pos.size() > neg.size()){
-        for (int i = 0; i < neg.size(); i++)
-        mkElimClause(elimclauses, v, ca[neg[i]]);
-        mkElimClause(elimclauses, mkLit(v));
-        }else{
-        for (int i = 0; i < pos.size(); i++)
-        mkElimClause(elimclauses, v, ca[pos[i]]);
-        mkElimClause(elimclauses, ~mkLit(v));
+        for pr in pos.iter() {
+            for nr in neg.iter() {
+                match self.merge(*pr, *nr, v) {
+                    None            => {}
+                    Some(resolvent) => {
+                        cnt += 1;
+                        if cnt > cls.len() + (self.set.grow as usize) || (self.set.clause_lim != -1 && (resolvent.len() as i32) > self.set.clause_lim) {
+                            return true;
+                        }
+                    }
+                }
+            }
         }
 
-        for (int i = 0; i < cls.size(); i++)
-        removeClause(cls[i]);
+        // Delete and store old clauses:
+        self.eliminated[&v] = 1;
+        self.core.setDecisionVar(v, false);
+        self.eliminated_vars += 1;
+
+        if pos.len() > neg.len() {
+            for cr in neg.iter() {
+                mkElimClause(&mut self.elimclauses, v, &self.core.ca[*cr]);
+            }
+            mkElimClause2(&mut self.elimclauses, Lit::new(v, false));
+        } else {
+            for cr in pos.iter() {
+                mkElimClause(&mut self.elimclauses, v, &self.core.ca[*cr]);
+            }
+            mkElimClause2(&mut self.elimclauses, Lit::new(v, true));
+        }
+
+        for cr in cls.iter() {
+            self.removeClause(*cr);
+        }
 
         // Produce clauses in cross product:
-        vec<Lit>& resolvent = add_tmp;
-        for (int i = 0; i < pos.size(); i++)
-        for (int j = 0; j < neg.size(); j++)
-        if (merge(ca[pos[i]], ca[neg[j]], v, resolvent) && !addClause_(resolvent))
-        return false;
+        //vec<Lit>& resolvent = add_tmp;
+        for pr in pos.iter() {
+            for nr in neg.iter() {
+                match self.merge(*pr, *nr, v) {
+                    None            => {}
+                    Some(resolvent) => {
+                        if !self.addClause(resolvent.borrow()) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
 
         // Free occurs list for this variable:
-        occurs[v].clear(true);
+        self.occurs.clearVar(&v);
 
         // Free watchers lists for this variable, if possible:
-        if (watches[ mkLit(v)].size() == 0) watches[ mkLit(v)].clear(true);
-        if (watches[~mkLit(v)].size() == 0) watches[~mkLit(v)].clear(true);
-*/
+//        if (watches[ mkLit(v)].size() == 0) watches[ mkLit(v)].clear(true);
+//        if (watches[~mkLit(v)].size() == 0) watches[~mkLit(v)].clear(true);
+
         self.backwardSubsumptionCheck(false)
     }
 
     // Backward subsumption + backward subsumption resolution
     fn backwardSubsumptionCheck(&mut self, verbose : bool) -> bool {
         assert!(self.core.trail.decisionLevel() == 0);
-/*
-        int cnt = 0;
-        int subsumed = 0;
-        int deleted_literals = 0;
 
-        while (subsumption_queue.size() > 0 || bwdsub_assigns < trail.size()){
+        let mut cnt = 0i32;
+        let mut subsumed = 0i32;
+        let mut deleted_literals = 0i32;
 
-        // Empty subsumption queue and return immediately on user-interrupt:
-        if (asynch_interrupt){
-        subsumption_queue.clear();
-        bwdsub_assigns = trail.size();
-        break; }
+        while self.subsumption_queue.len() > 0 || self.bwdsub_assigns < self.core.trail.totalSize() as i32 {
 
-        // Check top-level assignments by creating a dummy clause and placing it in the queue:
-        if (subsumption_queue.size() == 0 && bwdsub_assigns < trail.size()){
-        Lit l = trail[bwdsub_assigns++];
-        ca[bwdsub_tmpunit][0] = l;
-        ca[bwdsub_tmpunit].calcAbstraction();
-        subsumption_queue.insert(bwdsub_tmpunit); }
+            // Empty subsumption queue and return immediately on user-interrupt:
+            if self.core.asynch_interrupt {
+                self.subsumption_queue.clear();
+                self.bwdsub_assigns = self.core.trail.totalSize() as i32;
+                break;
+            }
 
-        CRef    cr = subsumption_queue.peek(); subsumption_queue.pop();
-        Clause& c  = ca[cr];
+            // Check top-level assignments by creating a dummy clause and placing it in the queue:
+            if self.subsumption_queue.len() == 0 && self.bwdsub_assigns < self.core.trail.totalSize() as i32 {
+                let l = self.core.trail[self.bwdsub_assigns as usize];
+                self.bwdsub_assigns += 1;
 
-        if (c.mark()) continue;
+                self.core.ca[self.bwdsub_tmpunit][0] = l;
+                self.core.ca[self.bwdsub_tmpunit].calcAbstraction();
+                self.subsumption_queue.push_back(self.bwdsub_tmpunit);
+            }
 
-        if (verbose && verbosity >= 2 && cnt++ % 1000 == 0)
-        printf("subsumption left: %10d (%10d subsumed, %10d deleted literals)\r", subsumption_queue.size(), subsumed, deleted_literals);
+            let cr = self.subsumption_queue.pop_front().unwrap();
 
-        assert(c.size() > 1 || value(c[0]) == l_True);    // Unit-clauses should have been propagated before this point.
+            let best = {
+                let c = &self.core.ca[cr];
 
-        // Find best variable to scan:
-        Var best = var(c[0]);
-        for (int i = 1; i < c.size(); i++)
-        if (occurs[var(c[i])].size() < occurs[best].size())
-        best = var(c[i]);
+                if c.mark() != 0 {
+                    continue;
+                }
 
-        // Search all candidates:
-        vec<CRef>& _cs = occurs.lookup(best);
-        CRef*       cs = (CRef*)_cs;
+                if verbose && cnt % 1000 == 0 {
+                    trace!("subsumption left: {:10} ({:10} subsumed, {:10} deleted literals)\r",
+                        self.subsumption_queue.len(), subsumed, deleted_literals);
+                }
+                cnt += 1;
 
-        for (int j = 0; j < _cs.size(); j++)
-        if (c.mark())
-        break;
-        else if (!ca[cs[j]].mark() &&  cs[j] != cr && (subsumption_lim == -1 || ca[cs[j]].size() < subsumption_lim)){
-        Lit l = c.subsumes(ca[cs[j]]);
+                assert!(c.len() > 1 || self.core.assigns.sat(c[0])); // Unit-clauses should have been propagated before this point.
 
-        if (l == lit_Undef)
-        subsumed++, removeClause(cs[j]);
-        else if (l != lit_Error){
-        deleted_literals++;
+                // Find best variable to scan:
+                let mut best = c[0].var();
+                for i in 1 .. c.len() {
+                    if self.occurs.get(&c[i].var()).len() < self.occurs.get(&best).len() {
+                        best = c[i].var();
+                    }
+                }
 
-        if (!strengthenClause(cs[j], ~l))
-        return false;
+                best
+            };
 
-        // Did current candidate get deleted from cs? Then check candidate at index j again:
-        if (var(l) == best)
-        j--;
+            // Search all candidates:
+            //let _cs = self.occurs.lookup(&best);
+            //CRef*       cs = (CRef*)_cs;
+
+            let mut j = 0;
+            while j < self.occurs.lookup(&best).len() {
+                let cj = self.occurs.lookup(&best)[j];
+
+                if self.core.ca[cr].mark() != 0 {
+                    break;
+                } else if self.core.ca[cj].mark() == 0 && cj != cr && (self.set.subsumption_lim == -1 || (self.core.ca[cj].len() as i32) < self.set.subsumption_lim) {
+                    match subsumes(&self.core.ca[cr], &self.core.ca[cj]) {
+                        SubsumesRes::Undef      => {
+                            subsumed += 1;
+                            self.removeClause(cj);
+                        }
+
+                        SubsumesRes::Literal(l) => {
+                            deleted_literals += 1;
+                            if !self.strengthenClause(cj, l) {
+                                return false;
+                            }
+
+                            // Did current candidate get deleted from cs? Then check candidate at index j again:
+                            if l.var() == best {
+                                j -= 1;
+                            }
+                        }
+
+                        SubsumesRes::Error      => {}
+                    }
+                }
+
+                j += 1;
+            }
         }
-        }
-        }
-*/
+
         true
     }
 
     fn gatherTouchedClauses(&mut self) {
         if self.n_touched == 0 { return; }
-/*
-        int i,j;
-        for (i = j = 0; i < subsumption_queue.size(); i++)
-        if (ca[subsumption_queue[i]].mark() == 0)
-        ca[subsumption_queue[i]].mark(2);
 
-        for (i = 0; i < nVars(); i++)
-        if (touched[i]){
-        const vec<CRef>& cs = occurs.lookup(i);
-        for (j = 0; j < cs.size(); j++)
-        if (ca[cs[j]].mark() == 0){
-        subsumption_queue.insert(cs[j]);
-        ca[cs[j]].mark(2);
-        }
-        touched[i] = 0;
+        for cr in self.subsumption_queue.iter() {
+            let c = &mut self.core.ca[*cr];
+            if c.mark() == 0 {
+                c.setMark(2);
+            }
         }
 
-        for (i = 0; i < subsumption_queue.size(); i++)
-        if (ca[subsumption_queue[i]].mark() == 2)
-        ca[subsumption_queue[i]].mark(0);
-*/
+        for i in 0 .. self.core.nVars() {
+            let v = Var::new(i);
+            if self.touched[&v] != 0 {
+                for cr in self.occurs.lookup(&v) {
+                    let c = &mut self.core.ca[*cr];
+                    if c.mark() == 0 {
+                        self.subsumption_queue.push_back(*cr);
+                        c.setMark(2);
+                    }
+                }
+                self.touched[&v] = 0;
+            }
+        }
+
+        for cr in self.subsumption_queue.iter() {
+            let c = &mut self.core.ca[*cr];
+            if c.mark() == 2 {
+                c.setMark(0);
+            }
+        }
+
         self.n_touched = 0;
     }
 
+}
+
+
+fn mkElimClause2(elimclauses : &mut Vec<u32>, x : Lit) {
+    elimclauses.push(x.toIndex() as u32);
+    elimclauses.push(1);
+}
+
+
+fn mkElimClause(elimclauses : &mut Vec<u32>, v : Var, c : &Clause) {
+    let first = elimclauses.len();
+    let mut v_pos = 0;
+
+    // Copy clause to elimclauses-vector. Remember position where the
+    // variable 'v' occurs:
+    for i in 0 .. c.len() {
+        elimclauses.push(c[i].toIndex() as u32);
+        if c[i].var() == v {
+            v_pos = i + first;
+        }
+    }
+    assert!(v_pos > 0);
+
+    // Swap the first literal with the 'v' literal, so that the literal
+    // containing 'v' will occur first in the clause:
+    elimclauses.swap(first, v_pos);
+
+    // Store the length of the clause last:
+    elimclauses.push(c.len() as u32);
 }

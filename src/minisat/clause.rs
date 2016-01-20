@@ -74,7 +74,29 @@ impl Clause {
         }
     }
 
-    fn calcAbstraction(&mut self) {
+    pub fn strengthen(&mut self, p : Lit) {
+        self.data.retain(|lit| { *lit != p });
+        self.header.size = self.data.len();
+        self.calcAbstraction();
+    }
+
+    pub fn to_vec(&self) -> Vec<Lit> {
+        let mut v = Vec::new();
+        for i in 0 .. self.len() {
+            v.push(self[i])
+        }
+        v
+    }
+
+    pub fn as_unit_clause(&self) -> Option<Lit> {
+        if self.len() == 1 {
+            Some(self[0])
+        } else {
+            None
+        }
+    }
+
+    pub fn calcAbstraction(&mut self) {
         assert!(self.header.has_extra);
         let mut abstraction : u32 = 0;
         for i in 0 .. self.header.size {
@@ -108,6 +130,46 @@ impl fmt::Display for Clause {
         }
         write!(f, ")")
     }
+}
+
+
+#[derive(PartialEq)]
+pub enum SubsumesRes {
+    Error,
+    Undef,
+    Literal(Lit)
+}
+
+pub fn subsumes(this : &Clause, other : &Clause) -> SubsumesRes {
+    assert!(!this.header.learnt);
+    assert!(!other.header.learnt);
+    assert!(this.header.has_extra);
+    assert!(other.header.has_extra);
+
+    if other.header.size < this.header.size || (this.data_abs & !other.data_abs) != 0 {
+        return SubsumesRes::Error;
+    }
+
+    let  mut ret = SubsumesRes::Undef;
+    for i in 0 .. this.header.size {
+        // search for c[i] or ~c[i]
+        let mut ok = false;
+        for j in 0 .. other.header.size {
+            if this.data[i] == other.data[j] {
+                ok = true;
+                break;
+            } else if ret == SubsumesRes::Undef && this.data[i] == !other.data[j] {
+                ret = SubsumesRes::Literal(this.data[i]);
+                ok = true;
+                break;
+            }
+        }
+
+        // did not find it
+        if !ok { return SubsumesRes::Error; }
+    }
+
+    return ret;
 }
 
 

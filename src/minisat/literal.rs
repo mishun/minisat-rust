@@ -38,6 +38,10 @@ impl Lit {
         Lit(v + v + (sign as usize))
     }
 
+    pub fn fromIndex(x : usize) -> Lit {
+        Lit(x)
+    }
+
     #[inline]
     pub fn sign(&self) -> bool {
         let Lit(l) = *self;
