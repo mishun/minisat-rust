@@ -13,7 +13,8 @@ use std::io::{Write};
 use std::fs::File;
 use log::{LogRecord, LogLevelFilter};
 use env_logger::LogBuilder;
-use minisat::solver::{Solver, CoreSolver};
+use minisat::solver;
+use minisat::solver::Solver;
 use minisat::dimacs::{parse_DIMACS};
 use minisat::lbool::{LBool};
 
@@ -33,6 +34,7 @@ fn main() {
     opts.optopt("", "verb", "Verbosity level (0=silent, 1=some, 2=more)", "<VERB>");
     opts.optflag("h", "help", "Print this help menu");
     opts.optflag("", "strict", "Validate DIMACS header during parsing");
+    opts.optflag("", "core", "Use core solver");
 
     let matches =
         match opts.parse(&args[1..]) {
@@ -59,6 +61,7 @@ fn main() {
     }
 
     let strict = matches.opt_present("strict");
+    let core = matches.opt_present("core");
     let (in_path, out_path) = {
         let left = matches.free;
         match left.len() {
@@ -68,12 +71,10 @@ fn main() {
         }
     };
 
-    let mut s = CoreSolver::new();
-    solveFile(&mut s, strict, in_path, out_path).unwrap_or_else(|err| {
+    (if core { solveFile(strict, in_path, out_path) } else { simpSolveFile(strict, in_path, out_path) }).unwrap_or_else(|err| {
         panic!(format!("Error: {}", err));
     });
 }
-
 
 fn resToString(ret : LBool) -> &'static str {
     match () {
@@ -83,7 +84,8 @@ fn resToString(ret : LBool) -> &'static str {
     }
 }
 
-fn solveFile<S : Solver>(solver : &mut S, strict : bool, in_path : String, out_path : Option<String>) -> io::Result<()> {
+fn solveFile(strict : bool, in_path : String, out_path : Option<String>) -> io::Result<()> {
+    let mut solver = solver::CoreSolver::new();
     let initial_time = time::precise_time_s();
 
     info!("============================[ Problem Statistics ]=============================");
@@ -91,8 +93,7 @@ fn solveFile<S : Solver>(solver : &mut S, strict : bool, in_path : String, out_p
 
     {
         let in_file = try!(File::open(in_path));
-        let mut reader = io::BufReader::new(in_file);
-        try!(parse_DIMACS(&mut reader, solver, strict));
+        try!(parse_DIMACS(&mut io::BufReader::new(in_file), &mut solver, strict));
     }
 
     info!("|  Number of variables:  {:12}                                         |", solver.nVars());
@@ -110,7 +111,6 @@ fn solveFile<S : Solver>(solver : &mut S, strict : bool, in_path : String, out_p
     } else {
         let ret = solver.solveLimited(&[]);
         solver.printStats();
-
         println!("{}", resToString(ret));
         match out_path {
             None       => {}
@@ -135,6 +135,48 @@ fn solveFile<S : Solver>(solver : &mut S, strict : bool, in_path : String, out_p
                 }
             }
         }
+    }
+
+    Ok(())
+}
+
+fn simpSolveFile(strict : bool, in_path : String, out_path : Option<String>) -> io::Result<()> {
+    let mut solver = solver::simp::SimpSolver::new();
+    let initial_time = time::precise_time_s();
+
+    info!("============================[ Problem Statistics ]=============================");
+    info!("|                                                                             |");
+
+    {
+        let in_file = try!(File::open(in_path));
+        try!(parse_DIMACS(&mut io::BufReader::new(in_file), &mut solver, strict));
+    }
+
+    info!("|  Number of variables:  {:12}                                         |", solver.nVars());
+    info!("|  Number of clauses:    {:12}                                         |", solver.nClauses());
+
+    let parsed_time = time::precise_time_s();
+    info!("|  Parse time:           {:12.2} s                                       |", parsed_time - initial_time);
+
+    let elim_res = solver.eliminate(true);
+    let simplified_time = time::precise_time_s();
+
+    info!("|  Simplification time:  {:12.2} s                                       |", simplified_time - parsed_time);
+    info!("|                                                                             |");
+
+    if !elim_res {
+        //if (res != NULL) fprintf(res, "UNSAT\n"), fclose(res);
+
+        info!("===============================================================================");
+        info!("Solved by simplification");
+        solver.printStats();
+        info!("");
+
+        println!("UNSATISFIABLE");
+    } else {
+        let ret = solver.solveLimited(&[], true, false);
+        solver.printStats();
+        println!("{}", resToString(ret));
     }
 
     Ok(())

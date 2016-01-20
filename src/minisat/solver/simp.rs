@@ -188,6 +188,13 @@ struct OccLists<V> {
 }
 
 impl<V> OccLists<V> {
+    pub fn new() -> OccLists<V> {
+        OccLists { occs    : IndexMap::new()
+                 , dirty   : IndexMap::new()
+                 , dirties : Vec::new()
+                 }
+    }
+
     pub fn initVar(&mut self, v : &Var) {
         self.occs.insert(v, Vec::new());
         self.dirty.insert(v, false);
@@ -272,7 +279,14 @@ pub struct SimpSolver {
     bwdsub_tmpunit     : ClauseRef,
 }
 
-impl SimpSolver {
+impl Solver for SimpSolver {
+    fn nVars(&self) -> usize {
+        self.core.nVars()
+    }
+
+    fn nClauses(&self) -> usize {
+        self.core.nClauses()
+    }
 
     fn newVar(&mut self, upol : LBool, dvar : bool) -> Var {
         let v = self.core.newVar(upol, dvar);
@@ -324,6 +338,47 @@ impl SimpSolver {
         true
     }
 
+    fn getModel(&self) -> &Vec<LBool> {
+        self.core.getModel()
+    }
+
+    fn printStats(&self) {
+        self.core.printStats();
+    }
+}
+
+impl SimpSolver {
+
+    pub fn new() -> SimpSolver {
+        let mut s = super::CoreSolver::new();
+        s.ca.set_extra_clause_field(true); // NOTE: must happen before allocating the dummy clause below.
+        s.set.remove_satisfied = false;
+        let temp_clause = s.ca.alloc(&vec![Lit::fromIndex(0)], false);
+        SimpSolver { core               : s
+                   , set                : Default::default()
+
+                   , merges             : 0
+                   , asymm_lits         : 0
+                   , eliminated_vars    : 0
+
+                   , use_simplification : true
+                   , max_simp_var       : Var::new(0)
+                   , elimclauses        : Vec::new()
+                   , touched            : IndexMap::new()
+
+                   , occurs             : OccLists::new()
+                   , elim               : ElimQueue::new()
+                   , subsumption_queue  : VecDeque::new()
+                   , frozen             : IndexMap::new()
+                   , frozen_vars        : Vec::new()
+                   , eliminated         : IndexMap::new()
+                   , bwdsub_assigns     : 0
+                   , n_touched          : 0
+
+                   , bwdsub_tmpunit     : temp_clause
+                   }
+    }
+
     fn implied(&mut self, c : &[Lit]) -> bool {
         assert!(self.core.trail.isGroundLevel());
 
@@ -342,6 +397,11 @@ impl SimpSolver {
         let result = self.core.propagate().is_some();
         self.core.cancelUntil(0);
         return result;
+    }
+
+    pub fn solveLimited(&mut self, assumps : &[Lit], do_simp : bool, turn_off_simp : bool) -> LBool {
+        self.core.assumptions = assumps.to_vec();
+        return self.solve_(do_simp, turn_off_simp);
     }
 
     fn solve_(&mut self, mut do_simp : bool, turn_off_simp : bool) -> LBool {
@@ -393,7 +453,7 @@ impl SimpSolver {
     fn extendModel(&mut self) {
         let mut i = self.elimclauses.len() - 1;
         while i > 0 {
-            let mut j = self.elimclauses[i] as usize    ;
+            let mut j = self.elimclauses[i] as usize;
             i -= 1;
             let mut skip = false;
 
@@ -417,7 +477,7 @@ impl SimpSolver {
         }
     }
 
-    fn eliminate(&mut self, turn_off_elim : bool) -> bool {
+    pub fn eliminate(&mut self, turn_off_elim : bool) -> bool {
         if !self.core.simplify() {
             return false;
         } else if !self.use_simplification {
@@ -492,7 +552,7 @@ impl SimpSolver {
 
             self.use_simplification = false;
             self.core.set.remove_satisfied = true;
-            //ca.extra_clause_field = false;
+            self.core.ca.set_extra_clause_field(false);
             self.max_simp_var = Var::new(self.core.nVars());
 
             // Force full cleanup (this is safe and desirable since it only happens once):
@@ -791,6 +851,7 @@ impl SimpSolver {
             let mut j = 0;
             while j < self.occurs.lookup(&best).len() {
                 let cj = self.occurs.lookup(&best)[j];
+                j += 1;
 
                 if self.core.ca[cr].mark() != 0 {
                     break;
@@ -816,8 +877,6 @@ impl SimpSolver {
                         SubsumesRes::Error      => {}
                     }
                 }
-
-                j += 1;
             }
         }
 

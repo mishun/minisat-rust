@@ -20,9 +20,6 @@ pub trait Solver {
     fn nClauses(&self) -> usize;
     fn newVar(&mut self, upol : LBool, dvar : bool) -> Var;
     fn addClause(&mut self, clause : &[Lit]) -> bool;
-    fn simplify(&mut self) -> bool;
-    fn solve(&mut self, assumps : &[Lit]) -> bool;
-    fn solveLimited(&mut self, assumps : &[Lit]) -> LBool;
     fn getModel(&self) -> &Vec<LBool>;
     fn printStats(&self);
 }
@@ -237,73 +234,6 @@ impl Solver for CoreSolver {
         }
     }
 
-    //_________________________________________________________________________________________________
-    //
-    // simplify : [void]  ->  [bool]
-    //
-    // Description:
-    //   Simplify the clause database according to the current top-level assigment. Currently, the only
-    //   thing done here is the removal of satisfied clauses, but more things can be put here.
-    //_______________________________________________________________________________________________@
-    fn simplify(&mut self) -> bool {
-        assert!(self.trail.isGroundLevel());
-        if !self.ok { return false; }
-
-        if self.propagate().is_some() {
-            self.ok = false;
-            return false;
-        }
-
-        if self.nAssigns() as i32 == self.simpDB_assigns || self.simpDB_props > 0 {
-            return true;
-        }
-
-        // Remove satisfied clauses:
-        removeSatisfied(&mut self.ca, &mut self.watches, &mut self.stats, &mut self.vardata, &self.assigns, &mut self.learnts);
-
-        // TODO: what todo in if 'remove_satisfied' is false?
-        if self.set.remove_satisfied {       // Can be turned off.
-            removeSatisfied(&mut self.ca, &mut self.watches, &mut self.stats, &mut self.vardata, &self.assigns, &mut self.clauses);
-
-            // Remove all released variables from the trail:
-            for v in self.released_vars.iter() {
-                assert!(self.seen[v] == 0);
-                self.seen[v] = 1;
-            }
-
-            {
-                let seen = &self.seen;
-                self.trail.retain(|l| { seen[&l.var()] == 0 });
-            }
-
-            for v in self.released_vars.iter() {
-                self.seen[v] = 0;
-            }
-
-            // Released variables are now ready to be reused:
-            for v in self.released_vars.iter() { self.assigns.freeVar(v); }
-            self.released_vars.clear();
-        }
-
-        self.checkGarbageDef();
-        self.rebuildOrderHeap();
-
-        self.simpDB_assigns = self.nAssigns() as i32;
-        self.simpDB_props   = (self.stats.clauses_literals + self.stats.learnts_literals) as i64;   // (shouldn't depend on stats really, but it will do for now)
-
-        true
-    }
-
-    fn solve(&mut self, assumps : &[Lit]) -> bool {
-        self.budgetOff();
-        self.solveLimited(assumps).isTrue()
-    }
-
-    fn solveLimited(&mut self, assumps : &[Lit]) -> LBool {
-        self.assumptions = assumps.to_vec();
-        self.solve_()
-    }
-
     fn getModel(&self) -> &Vec<LBool> {
         &self.model
     }
@@ -368,6 +298,73 @@ impl CoreSolver {
 
     pub fn nAssigns(&self) -> usize {
         self.trail.totalSize()
+    }
+
+    pub fn solve(&mut self, assumps : &[Lit]) -> bool {
+        self.budgetOff();
+        self.solveLimited(assumps).isTrue()
+    }
+
+    pub fn solveLimited(&mut self, assumps : &[Lit]) -> LBool {
+        self.assumptions = assumps.to_vec();
+        self.solve_()
+    }
+
+    //_________________________________________________________________________________________________
+    //
+    // simplify : [void]  ->  [bool]
+    //
+    // Description:
+    //   Simplify the clause database according to the current top-level assigment. Currently, the only
+    //   thing done here is the removal of satisfied clauses, but more things can be put here.
+    //_______________________________________________________________________________________________@
+    pub fn simplify(&mut self) -> bool {
+        assert!(self.trail.isGroundLevel());
+        if !self.ok { return false; }
+
+        if self.propagate().is_some() {
+            self.ok = false;
+            return false;
+        }
+
+        if self.nAssigns() as i32 == self.simpDB_assigns || self.simpDB_props > 0 {
+            return true;
+        }
+
+        // Remove satisfied clauses:
+        removeSatisfied(&mut self.ca, &mut self.watches, &mut self.stats, &mut self.vardata, &self.assigns, &mut self.learnts);
+
+        // TODO: what todo in if 'remove_satisfied' is false?
+        if self.set.remove_satisfied {       // Can be turned off.
+            removeSatisfied(&mut self.ca, &mut self.watches, &mut self.stats, &mut self.vardata, &self.assigns, &mut self.clauses);
+
+            // Remove all released variables from the trail:
+            for v in self.released_vars.iter() {
+                assert!(self.seen[v] == 0);
+                self.seen[v] = 1;
+            }
+
+            {
+                let seen = &self.seen;
+                self.trail.retain(|l| { seen[&l.var()] == 0 });
+            }
+
+            for v in self.released_vars.iter() {
+                self.seen[v] = 0;
+            }
+
+            // Released variables are now ready to be reused:
+            for v in self.released_vars.iter() { self.assigns.freeVar(v); }
+            self.released_vars.clear();
+        }
+
+        self.checkGarbageDef();
+        self.rebuildOrderHeap();
+
+        self.simpDB_assigns = self.nAssigns() as i32;
+        self.simpDB_props   = (self.stats.clauses_literals + self.stats.learnts_literals) as i64;   // (shouldn't depend on stats really, but it will do for now)
+
+        true
     }
 
     // Revert to the state at given level (keeping all assignment at 'level' but not beyond).

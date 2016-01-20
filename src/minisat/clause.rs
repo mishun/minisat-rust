@@ -179,22 +179,23 @@ fn clauseSize(size : usize, has_extra : bool) -> usize {
 
 
 pub struct ClauseAllocator {
-    clauses : Vec<Box<Clause>>,
-    size    : usize,
-    wasted  : usize,
+    clauses            : Vec<Box<Clause>>,
+    size               : usize,
+    wasted             : usize,
+    extra_clause_field : bool
 }
 
 impl ClauseAllocator {
     pub fn new() -> ClauseAllocator {
-        ClauseAllocator {
-            clauses : Vec::new(),
-            size    : 0,
-            wasted  : 0,
-        }
+        ClauseAllocator { clauses            : Vec::new()
+                        , size               : 0
+                        , wasted             : 0
+                        , extra_clause_field : false
+                        }
     }
 
     pub fn alloc(&mut self, ps : &Vec<Lit>, learnt : bool) -> ClauseRef {
-        let use_extra = learnt;
+        let use_extra = learnt | self.extra_clause_field;
         let mut c = Box::new(Clause {
             header   : ClauseHeader { mark : 0, learnt : learnt, has_extra : use_extra, reloced : false, size : ps.len() },
             data     : ps.clone(),
@@ -255,6 +256,10 @@ impl ClauseAllocator {
             c.header.reloced = true;
             c.data_rel = Some(*cr);
         }
+    }
+
+    pub fn set_extra_clause_field(&mut self, new_value : bool) {
+        self.extra_clause_field = new_value;
     }
 }
 
