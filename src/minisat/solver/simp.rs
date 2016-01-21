@@ -5,7 +5,7 @@ use std::borrow::Borrow;
 use minisat::index_map::{HasIndex, IndexMap};
 use minisat::lbool::{LBool};
 use minisat::literal::{Var, Lit};
-use minisat::clause::{Clause, ClauseRef, SubsumesRes, subsumes};
+use minisat::clause::{Clause, ClauseRef, ClauseAllocator, SubsumesRes, subsumes};
 use minisat::assignment::{Assignment};
 use super::Solver;
 
@@ -180,15 +180,15 @@ impl ElimQueue {
 }
 
 
-struct OccLists<V> {
-    occs    : IndexMap<Var, Vec<V>>,
+struct OccLists {
+    occs    : IndexMap<Var, Vec<ClauseRef>>,
     dirty   : IndexMap<Var, bool>,
     dirties : Vec<Var>
 //Deleted                  deleted;
 }
 
-impl<V> OccLists<V> {
-    pub fn new() -> OccLists<V> {
+impl OccLists {
+    pub fn new() -> OccLists {
         OccLists { occs    : IndexMap::new()
                  , dirty   : IndexMap::new()
                  , dirties : Vec::new()
@@ -204,8 +204,12 @@ impl<V> OccLists<V> {
         self.occs.remove(v);
     }
 
-    pub fn pushOcc(&mut self, v : &Var, x : V) {
+    pub fn pushOcc(&mut self, v : &Var, x : ClauseRef) {
         self.occs[v].push(x);
+    }
+
+    pub fn removeOcc(&mut self, v : &Var, x : ClauseRef) {
+        self.occs[v].retain(|y| { *y != x })
     }
 
     pub fn clear(&mut self) {
@@ -214,14 +218,15 @@ impl<V> OccLists<V> {
         self.dirties.clear();
     }
 
-    pub fn lookup(&mut self, v : &Var) -> &Vec<V> {
+    pub fn lookup(&mut self, v : &Var, ca : &ClauseAllocator) -> &Vec<ClauseRef> {
         if self.dirty[v] {
-            self.cleanVar(v);
+            self.occs[v].retain(|cr| { ca[*cr].mark() != 1 });
+            self.dirty[v] = false;
         }
         &self.occs[v]
     }
 
-    pub fn get(&self, v : &Var) -> &Vec<V> {
+    pub fn getDirty(&self, v : &Var) -> &Vec<ClauseRef> {
         &self.occs[v]
     }
 
@@ -230,23 +235,6 @@ impl<V> OccLists<V> {
             self.dirty[&v] = true;
             self.dirties.push(v);
         }
-    }
-
-    pub fn cleanVar(&mut self, v : &Var) {
-// TODO:
-//        Vec& vec = occs[idx];
-//        int  i, j;
-//        for (i = j = 0; i < vec.size(); i++)
-//        if (!deleted(vec[i]))
-//        vec[j++] = vec[i];
-//        vec.shrink(i - j);
-        self.dirty[v] = false;
-    }
-}
-
-impl<V : PartialEq> OccLists<V> {
-    pub fn removeOcc(&mut self, v : &Var, x : V) {
-        self.occs[v].retain(|y| { *y != x })
     }
 }
 
@@ -266,7 +254,7 @@ pub struct SimpSolver {
     elimclauses        : Vec<u32>,
     touched            : IndexMap<Var, i8>,
 
-    occurs             : OccLists<ClauseRef>,
+    occurs             : OccLists,
     elim               : ElimQueue,
     subsumption_queue  : VecDeque<ClauseRef>,
     frozen             : IndexMap<Var, i8>,
@@ -488,7 +476,7 @@ impl SimpSolver {
         'cleanup: while self.n_touched > 0 || self.bwdsub_assigns < self.core.trail.totalSize() as i32 || self.elim.len() > 0 {
 
             self.gatherTouchedClauses();
-            // printf("  ## (time = %6.2f s) BWD-SUB: queue = %d, trail = %d\n", cpuTime(), subsumption_queue.size(), trail.size() - bwdsub_assigns);
+            trace!("BWD-SUB: queue = {}, trail = {}", self.subsumption_queue.len(), self.core.trail.totalSize() - (self.bwdsub_assigns as usize));
             if (self.subsumption_queue.len() > 0 || self.bwdsub_assigns < self.core.trail.totalSize() as i32) && !self.backwardSubsumptionCheck(true) {
                 self.core.ok = false;
                 break 'cleanup;
@@ -503,7 +491,7 @@ impl SimpSolver {
                 break 'cleanup;
             }
 
-            // printf("  ## (time = %6.2f s) ELIM: vars = %d\n", cpuTime(), elim_heap.size());
+            trace!("ELIM: vars = {}", self.elim.len());
             let mut cnt = 0;
             loop {
                 match self.elim.pop() {
@@ -535,9 +523,9 @@ impl SimpSolver {
 
                             self.core.checkGarbage(self.set.simp_garbage_frac);
                         }
-                        cnt += 1;
                     }
                 }
+                cnt += 1;
             }
 
             assert!(self.subsumption_queue.len() == 0);
@@ -575,7 +563,7 @@ impl SimpSolver {
         assert!(self.use_simplification);
 
         let cls = {
-            let cls = self.occurs.lookup(&v);
+            let cls = self.occurs.lookup(&v, &self.core.ca);
             if !self.core.assigns.undef(v) || cls.len() == 0 {
                 return true;
             }
@@ -649,12 +637,14 @@ impl SimpSolver {
         // if (!find(subsumption_queue, &c))
         self.subsumption_queue.push_back(cr);
 
-        if self.core.ca[cr].len() == 2 {
+        let len = self.core.ca[cr].len();
+        if len == 2 {
             self.removeClause(cr);
             self.core.ca[cr].strengthen(l);
         } else {
             super::detachClause(&mut self.core.ca, &mut self.core.stats, &mut self.core.watches, cr, true);
             self.core.ca[cr].strengthen(l);
+            assert!(self.core.ca[cr].len() == len - 1);
             self.core.attachClause(cr);
             self.occurs.removeOcc(&l.var(), cr);
             self.elim.bumpLitOcc(&l, -1);
@@ -711,7 +701,7 @@ impl SimpSolver {
         assert!(self.core.assigns.undef(v));
 
         // Split the occurrences into positive and negative:
-        let cls = self.occurs.lookup(&v).clone();
+        let cls = self.occurs.lookup(&v, &self.core.ca).clone();
         let mut pos = Vec::new();
         let mut neg = Vec::new();
         for cr in cls.iter() {
@@ -791,7 +781,7 @@ impl SimpSolver {
 
     // Backward subsumption + backward subsumption resolution
     fn backwardSubsumptionCheck(&mut self, verbose : bool) -> bool {
-        assert!(self.core.trail.decisionLevel() == 0);
+        assert!(self.core.trail.isGroundLevel());
 
         let mut cnt = 0i32;
         let mut subsumed = 0i32;
@@ -826,7 +816,7 @@ impl SimpSolver {
                 }
 
                 if verbose && cnt % 1000 == 0 {
-                    trace!("subsumption left: {:10} ({:10} subsumed, {:10} deleted literals)\r",
+                    trace!("subsumption left: {:10} ({:10} subsumed, {:10} deleted literals)",
                         self.subsumption_queue.len(), subsumed, deleted_literals);
                 }
                 cnt += 1;
@@ -836,7 +826,7 @@ impl SimpSolver {
                 // Find best variable to scan:
                 let mut best = c[0].var();
                 for i in 1 .. c.len() {
-                    if self.occurs.get(&c[i].var()).len() < self.occurs.get(&best).len() {
+                    if self.occurs.getDirty(&c[i].var()).len() < self.occurs.getDirty(&best).len() {
                         best = c[i].var();
                     }
                 }
@@ -845,32 +835,20 @@ impl SimpSolver {
             };
 
             // Search all candidates:
-            //let _cs = self.occurs.lookup(&best);
-            //CRef*       cs = (CRef*)_cs;
-
-            let mut j = 0;
-            while j < self.occurs.lookup(&best).len() {
-                let cj = self.occurs.lookup(&best)[j];
-                j += 1;
-
+            for cj in self.occurs.lookup(&best, &self.core.ca).clone().iter() {
                 if self.core.ca[cr].mark() != 0 {
                     break;
-                } else if self.core.ca[cj].mark() == 0 && cj != cr && (self.set.subsumption_lim == -1 || (self.core.ca[cj].len() as i32) < self.set.subsumption_lim) {
-                    match subsumes(&self.core.ca[cr], &self.core.ca[cj]) {
+                } else if self.core.ca[*cj].mark() == 0 && *cj != cr && (self.set.subsumption_lim == -1 || (self.core.ca[*cj].len() as i32) < self.set.subsumption_lim) {
+                    match subsumes(&self.core.ca[cr], &self.core.ca[*cj]) {
                         SubsumesRes::Undef      => {
                             subsumed += 1;
-                            self.removeClause(cj);
+                            self.removeClause(*cj);
                         }
 
                         SubsumesRes::Literal(l) => {
                             deleted_literals += 1;
-                            if !self.strengthenClause(cj, l) {
+                            if !self.strengthenClause(*cj, !l) {
                                 return false;
-                            }
-
-                            // Did current candidate get deleted from cs? Then check candidate at index j again:
-                            if l.var() == best {
-                                j -= 1;
                             }
                         }
 
@@ -896,7 +874,7 @@ impl SimpSolver {
         for i in 0 .. self.core.nVars() {
             let v = Var::new(i);
             if self.touched[&v] != 0 {
-                for cr in self.occurs.lookup(&v) {
+                for cr in self.occurs.lookup(&v, &self.core.ca) {
                     let c = &mut self.core.ca[*cr];
                     if c.mark() == 0 {
                         self.subsumption_queue.push_back(*cr);

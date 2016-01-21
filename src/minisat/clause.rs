@@ -75,9 +75,16 @@ impl Clause {
     }
 
     pub fn strengthen(&mut self, p : Lit) {
-        self.data.retain(|lit| { *lit != p });
-        self.header.size = self.data.len();
-        self.calcAbstraction();
+        for i in 0 .. self.header.size {
+            if self.data[i] == p {
+                for j in i + 1 .. self.header.size {
+                    self.data[j - 1] = self.data[j];
+                }
+                self.header.size -= 1;
+                self.calcAbstraction();
+                return;
+            }
+        }
     }
 
     pub fn to_vec(&self) -> Vec<Lit> {
@@ -111,6 +118,7 @@ impl Index<usize> for Clause {
 
     #[inline]
     fn index<'a>(&'a self, index : usize) -> &'a Lit {
+        assert!(index < self.header.size);
         self.data.index(index)
     }
 }
@@ -118,6 +126,7 @@ impl Index<usize> for Clause {
 impl IndexMut<usize> for Clause {
     #[inline]
     fn index_mut<'a>(&'a mut self, index : usize) -> &'a mut Lit {
+        assert!(index < self.header.size);
         self.data.index_mut(index)
     }
 }
