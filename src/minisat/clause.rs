@@ -143,9 +143,13 @@ impl IndexMut<usize> for Clause {
 
 impl fmt::Display for Clause {
     fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
+        if self.is_deleted() {
+            try!(write!(f, "<deleted>"));
+        }
         try!(write!(f, "("));
         for i in 0 .. self.len() {
-            try!(write!(f, "{}{}", if i == 0 { "" } else { " | " }, self[i]));
+            if i > 0 { try!(write!(f, " | ")); }
+            try!(write!(f, "{}", self[i]));
         }
         write!(f, ")")
     }

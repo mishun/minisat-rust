@@ -174,8 +174,8 @@ impl ElimQueue {
 
     #[inline]
     fn set(&mut self, i : usize, v : Var) {
-            self.indices.insert(&v, i);
-            self.heap[i] = v;
+        self.indices.insert(&v, i);
+        self.heap[i] = v;
     }
 }
 
@@ -257,8 +257,8 @@ pub struct SimpSolver {
     frozen             : IndexMap<Var, i8>,
     frozen_vars        : Vec<Var>,
     eliminated         : IndexMap<Var, i8>,
-    bwdsub_assigns     : i32,
-    n_touched          : i32,
+    bwdsub_assigns     : usize,
+    n_touched          : usize,
 
     // Temporaries:
     bwdsub_tmpunit     : ClauseRef,
@@ -436,6 +436,8 @@ impl SimpSolver {
     }
 
     fn extendModel(&mut self) {
+        if self.elimclauses.is_empty() { return; }
+
         let mut i = self.elimclauses.len() - 1;
         while i > 0 {
             let mut j = self.elimclauses[i] as usize;
@@ -470,18 +472,18 @@ impl SimpSolver {
         }
 
         // Main simplification loop:
-        'cleanup: while self.n_touched > 0 || self.bwdsub_assigns < self.core.trail.totalSize() as i32 || self.elim.len() > 0 {
-
+        'cleanup: while self.n_touched > 0 || self.bwdsub_assigns < self.core.trail.totalSize() || self.elim.len() > 0 {
             self.gatherTouchedClauses();
-            trace!("BWD-SUB: queue = {}, trail = {}", self.subsumption_queue.len(), self.core.trail.totalSize() - (self.bwdsub_assigns as usize));
-            if (self.subsumption_queue.len() > 0 || self.bwdsub_assigns < self.core.trail.totalSize() as i32) && !self.backwardSubsumptionCheck(true) {
+
+            trace!("BWD-SUB: queue = {}, trail = {}", self.subsumption_queue.len(), self.core.trail.totalSize() - self.bwdsub_assigns);
+            if (self.subsumption_queue.len() > 0 || self.bwdsub_assigns < self.core.trail.totalSize()) && !self.backwardSubsumptionCheck(true) {
                 self.core.ok = false;
                 break 'cleanup;
             }
 
             // Empty elim_heap and return immediately on user-interrupt:
             if self.core.asynch_interrupt {
-                assert!(self.bwdsub_assigns == self.core.trail.totalSize() as i32);
+                assert!(self.bwdsub_assigns == self.core.trail.totalSize());
                 assert!(self.subsumption_queue.len() == 0);
                 assert!(self.n_touched == 0);
                 self.elim.clearHeap();
@@ -783,26 +785,30 @@ impl SimpSolver {
         let mut subsumed = 0i32;
         let mut deleted_literals = 0i32;
 
-        while self.subsumption_queue.len() > 0 || self.bwdsub_assigns < self.core.trail.totalSize() as i32 {
-
+        loop {
             // Empty subsumption queue and return immediately on user-interrupt:
             if self.core.asynch_interrupt {
                 self.subsumption_queue.clear();
-                self.bwdsub_assigns = self.core.trail.totalSize() as i32;
+                self.bwdsub_assigns = self.core.trail.totalSize();
                 break;
             }
 
-            // Check top-level assignments by creating a dummy clause and placing it in the queue:
-            if self.subsumption_queue.len() == 0 && self.bwdsub_assigns < self.core.trail.totalSize() as i32 {
-                let l = self.core.trail[self.bwdsub_assigns as usize];
-                self.bwdsub_assigns += 1;
+            let cr =
+                match self.subsumption_queue.pop_front() {
+                    Some(cr) => { cr }
 
-                self.core.ca[self.bwdsub_tmpunit][0] = l;
-                self.core.ca[self.bwdsub_tmpunit].calcAbstraction();
-                self.subsumption_queue.push_back(self.bwdsub_tmpunit);
-            }
+                    // Check top-level assignments by creating a dummy clause and placing it in the queue:
+                    None if self.bwdsub_assigns < self.core.trail.totalSize() => {
+                        let ref mut c = self.core.ca[self.bwdsub_tmpunit];
+                        c[0] = self.core.trail[self.bwdsub_assigns];
+                        c.calcAbstraction();
 
-            let cr = self.subsumption_queue.pop_front().unwrap();
+                        self.bwdsub_assigns += 1;
+                        self.bwdsub_tmpunit
+                    }
+
+                    None => { break }
+                };
 
             let best = {
                 let c = &self.core.ca[cr];

@@ -701,8 +701,10 @@ impl CoreSolver {
             let mut j = 0;
             for i in 0 .. self.learnts.len() {
                 let cr = self.learnts[i];
+                if self.ca[cr].is_deleted() { continue; }
+
                 let remove = {
-                    let c = &self.ca[cr];
+                    let ref c = self.ca[cr];
                     c.len() > 2 && !isLocked(&self.ca, &self.assigns, &self.vardata, cr)
                                 && (i < self.learnts.len() / 2 || c.activity() < extra_lim)
                 };
@@ -1095,7 +1097,7 @@ impl CoreSolver {
 
     fn checkGarbage(&mut self, gf : f64) {
         if self.ca.wasted() as f64 > self.ca.size() as f64 * gf {
-            self.garbageCollect();
+            // TODO: self.garbageCollect();
         }
     }
 
@@ -1228,23 +1230,19 @@ fn satisfiedWith(c : &Clause, s : &Assignment) -> bool {
 }
 
 fn removeSatisfied(ca : &mut ClauseAllocator, watches : &mut Watches, stats : &mut Stats, vardata : &mut IndexMap<Var, VarData>, assigns : &Assignment, cs : &mut Vec<ClauseRef>) {
-    let mut j = 0;
-    for i in 0 .. cs.len() {
-        let cr = cs[i];
-        if satisfiedWith(&ca[cr], assigns) {
-            removeClause(ca, watches, stats, vardata, assigns, cr);
+    cs.retain(|cr| {
+        if ca[*cr].is_deleted() {
+            false
+        } else if satisfiedWith(&ca[*cr], assigns) {
+            removeClause(ca, watches, stats, vardata, assigns, *cr);
+            false
         } else {
-            // Trim clause:
-            let c = &mut ca[cr];
+            let ref mut c = ca[*cr];
             assert!(assigns.undef(c[0].var()) && assigns.undef(c[1].var()));
-
             c.retainSuffix(2, |lit| !assigns.unsat(*lit));
-
-            cs[j] = cr;
-            j += 1;
+            true
         }
-    }
-    cs.truncate(j);
+    });
 }
 
 
