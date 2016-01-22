@@ -584,24 +584,27 @@ impl CoreSolver {
 
         loop {
             let p = match self.trail.dequeue() { Some(p) => p, None => break }; // 'p' is enqueued fact to propagate.
-            self.watches.lookup(&self.ca, p);
             num_props += 1;
+            let false_lit = !p;
+
+            self.watches.lookup(&self.ca, p);
 
             let mut i = 0;
             let mut j = 0;
-            while i < self.watches[p].len() {
-                let blocker = self.watches[p][i].blocker;
-                if self.assigns.sat(blocker) {
-                    self.watches[p][j] = self.watches[p][i].clone();
-                    i += 1;
-                    j += 1;
-                    continue;
-                }
+            loop {
+                let (cw, first, new_watch) = {
+                    let p_watches = self.watches.getDirty(p);
+                    if i >= p_watches.len() { break; }
 
-                let false_lit = !p;
-                let cr = self.watches[p][i].cref;
-                let (new_watch, first) = {
-                    let c = &mut self.ca[cr];
+                    let cw = p_watches[i].clone();
+                    if self.assigns.sat(cw.blocker) {
+                        p_watches[j] = p_watches[i].clone();
+                        i += 1;
+                        j += 1;
+                        continue;
+                    }
+
+                    let c = &mut self.ca[cw.cref];
                     if c[0] == false_lit {
                         c[0] = c[1];
                         c[1] = false_lit;
@@ -611,8 +614,8 @@ impl CoreSolver {
 
                     // If 0th watch is true, then clause is already satisfied.
                     let first = c[0];
-                    if first != blocker && self.assigns.sat(first) {
-                        self.watches[p][j] = Watcher { cref : cr, blocker : first };
+                    if first != cw.blocker && self.assigns.sat(first) {
+                        p_watches[j] = Watcher { cref : cw.cref, blocker : first };
                         j += 1;
                         continue;
                     }
@@ -625,38 +628,43 @@ impl CoreSolver {
                             break;
                         }
                     }
-                    (new_watch, first)
+                    (cw, first, new_watch)
                 };
 
                 match new_watch {
                     Some(k) => {
-                        let c = &mut self.ca[cr];
-                        c[1] = c[k];
+                        let c = &mut self.ca[cw.cref];
+                        let lit = c[k];
+                        c[1] = lit;
                         c[k] = false_lit;
-                        self.watches[!c[1]].push(Watcher { cref : cr, blocker : first });
+                        self.watches.watch(lit, cw.cref, first);
                     }
 
                     // Did not find watch -- clause is unit under assignment:
-                    None => {
-                        self.watches[p][j] = Watcher { cref : cr, blocker : first };
+                    None    => {
+                        let p_watches = self.watches.getDirty(p);
+                        p_watches[j] = Watcher { cref : cw.cref, blocker : first };
                         j += 1;
+
                         if self.assigns.unsat(first) {
-                            confl = Some(cr);
+                            confl = Some(cw.cref);
                             self.trail.dequeueAll();
 
                             // Copy the remaining watches:
-                            while i < self.watches[p].len() {
-                                self.watches[p][j] = self.watches[p][i].clone();
+                            while i < p_watches.len() {
+                                p_watches[j] = p_watches[i].clone();
                                 j += 1;
                                 i += 1;
                             }
                         } else {
-                            self.uncheckedEnqueue(first, Some(cr));
+                            self.assigns.assignLit(first);
+                            self.vardata[&first.var()] = VarData { level : self.trail.decisionLevel(), reason : Some(cw.cref) };
+                            self.trail.push(first);
                         }
                     }
                 }
             }
-            self.watches[p].truncate(j);
+            self.watches.getDirty(p).truncate(j);
         }
 
         self.stats.propagations += num_props;
@@ -1109,7 +1117,7 @@ impl CoreSolver {
         for vi in 0 .. self.nVars() {
             for s in [false, true].iter() {
                 let p = Lit::new(Var::new(vi), *s);
-                let ws = &mut self.watches[p];
+                let ws = self.watches.getDirty(p);
                 for w in ws.iter_mut() {
                     self.ca.reloc(to, &mut w.cref);
                 }
@@ -1124,7 +1132,7 @@ impl CoreSolver {
             // 'dangling' reasons here. It is safe and does not hurt.
             match self.vardata[&v].reason {
                 Some(mut cr) if self.ca[cr].reloced() || isLocked(&self.ca, &self.assigns, &self.vardata, cr) => {
-                    assert!(self.ca[cr].mark() != 1);
+                    assert!(!self.ca[cr].is_deleted());
                     self.ca.reloc(to, &mut cr);
                     self.vardata[&v].reason = Some(cr);
                 }
@@ -1137,7 +1145,7 @@ impl CoreSolver {
         {
             let mut j = 0;
             for i in 0 .. self.learnts.len() {
-                if self.ca[self.learnts[i]].mark() != 1 {
+                if !self.ca[self.learnts[i]].is_deleted() {
                     self.ca.reloc(to, &mut self.learnts[i]);
                     self.learnts[j] = self.learnts[i];
                     j += 1;
@@ -1150,7 +1158,7 @@ impl CoreSolver {
         {
             let mut j = 0;
             for i in 0 .. self.clauses.len() {
-                if self.ca[self.clauses[i]].mark() != 1 {
+                if !self.ca[self.clauses[i]].is_deleted() {
                     self.ca.reloc(to, &mut self.clauses[i]);
                     self.clauses[j] = self.clauses[i];
                     j += 1;
@@ -1162,16 +1170,15 @@ impl CoreSolver {
 
     fn attachClause(&mut self, cr : ClauseRef) {
         let ref c = self.ca[cr];
+
         assert!(c.len() > 1);
+        self.watches.watch(c[0], cr, c[1]);
+        self.watches.watch(c[1], cr, c[0]);
 
-        self.watches[!c[0]].push(Watcher { cref : cr, blocker : c[1] });
-        self.watches[!c[1]].push(Watcher { cref : cr, blocker : c[0] });
-
-        if c.learnt() {
+        if c.is_learnt() {
             self.stats.num_learnts += 1;
             self.stats.learnts_literals += c.len() as u64;
-        }
-        else {
+        } else {
             self.stats.num_clauses += 1;
             self.stats.clauses_literals += c.len() as u64;
         }
@@ -1249,25 +1256,19 @@ fn removeClause(ca : &mut ClauseAllocator, watches : &mut Watches, stats : &mut 
             vardata[&ca[cr][0].var()].reason = None;
         }
 
-        ca[cr].setMark(1);
+        ca[cr].mark_deleted();
     }
     ca.free(cr);
 }
 
 fn detachClause(ca : &ClauseAllocator, stats : &mut Stats, watches : &mut Watches, cr : ClauseRef, strict : bool) {
     let ref c = ca[cr];
-    assert!(c.len() > 1);
-    
-    // Strict or lazy detaching:
-    if strict {
-        watches[!c[0]].retain(|w| w.cref != cr);
-        watches[!c[1]].retain(|w| w.cref != cr);
-    } else {
-        watches.smudge(!c[0]);
-        watches.smudge(!c[1]);
-    }
 
-    if c.learnt() {
+    assert!(c.len() > 1);
+    watches.unwatch(c[0], cr, strict);
+    watches.unwatch(c[1], cr, strict);
+
+    if c.is_learnt() {
         stats.num_learnts -= 1;
         stats.learnts_literals -= c.len() as u64;
     } else {
@@ -1290,7 +1291,7 @@ fn varBumpActivity(q : &mut ActivityQueue<Var>, var_inc : &mut f64, v : Var) {
 fn claBumpActivity(ca : &mut ClauseAllocator, learnts : &mut Vec<ClauseRef>, cla_inc : &mut f64, cr : ClauseRef) {
     let new = {
             let c = &mut ca[cr];
-            if !c.learnt() { return; }
+            if !c.is_learnt() { return; }
 
             let new = c.activity() + *cla_inc;
             c.setActivity(new);

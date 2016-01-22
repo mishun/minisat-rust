@@ -35,7 +35,17 @@ impl Clause {
     }
 
     #[inline]
-    pub fn learnt(&self) -> bool {
+    pub fn is_deleted(&self) -> bool {
+        self.header.mark == 1
+    }
+
+    #[inline]
+    pub fn mark_deleted(&mut self) {
+        self.header.mark = 1;
+    }
+
+    #[inline]
+    pub fn is_learnt(&self) -> bool {
         self.header.learnt
     }
 

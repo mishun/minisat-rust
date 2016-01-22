@@ -180,24 +180,22 @@ impl ElimQueue {
 }
 
 
+struct OccLine {
+    occs  : Vec<ClauseRef>,
+    dirty : bool
+}
+
 struct OccLists {
-    occs    : IndexMap<Var, Vec<ClauseRef>>,
-    dirty   : IndexMap<Var, bool>,
-    dirties : Vec<Var>
-//Deleted                  deleted;
+    occs : IndexMap<Var, OccLine>
 }
 
 impl OccLists {
     pub fn new() -> OccLists {
-        OccLists { occs    : IndexMap::new()
-                 , dirty   : IndexMap::new()
-                 , dirties : Vec::new()
-                 }
+        OccLists { occs : IndexMap::new() }
     }
 
     pub fn initVar(&mut self, v : &Var) {
-        self.occs.insert(v, Vec::new());
-        self.dirty.insert(v, false);
+        self.occs.insert(v, OccLine { occs : Vec::new(), dirty : false });
     }
 
     pub fn clearVar(&mut self, v : &Var) {
@@ -205,36 +203,35 @@ impl OccLists {
     }
 
     pub fn pushOcc(&mut self, v : &Var, x : ClauseRef) {
-        self.occs[v].push(x);
+        self.occs[v].occs.push(x);
     }
 
     pub fn removeOcc(&mut self, v : &Var, x : ClauseRef) {
-        self.occs[v].retain(|y| { *y != x })
+        self.occs[v].occs.retain(|y| { *y != x })
+    }
+
+    pub fn lookup(&mut self, v : &Var, ca : &ClauseAllocator) -> &Vec<ClauseRef> {
+        let ol = &mut self.occs[v];
+        if ol.dirty {
+            ol.occs.retain(|cr| { !ca[*cr].is_deleted() });
+            ol.dirty = false;
+        }
+        &ol.occs
+    }
+
+    pub fn getDirty(&self, v : &Var) -> &Vec<ClauseRef> {
+        &self.occs[v].occs
+    }
+
+    fn smudge(&mut self, v : &Var) {
+        let ol = &mut self.occs[v];
+        if !ol.dirty {
+            ol.dirty = true;
+        }
     }
 
     pub fn clear(&mut self) {
         self.occs.clear();
-        self.dirty.clear();
-        self.dirties.clear();
-    }
-
-    pub fn lookup(&mut self, v : &Var, ca : &ClauseAllocator) -> &Vec<ClauseRef> {
-        if self.dirty[v] {
-            self.occs[v].retain(|cr| { ca[*cr].mark() != 1 });
-            self.dirty[v] = false;
-        }
-        &self.occs[v]
-    }
-
-    pub fn getDirty(&self, v : &Var) -> &Vec<ClauseRef> {
-        &self.occs[v]
-    }
-
-    fn  smudge(&mut self, v : Var) {
-        if !self.dirty[&v] {
-            self.dirty[&v] = true;
-            self.dirties.push(v);
-        }
     }
 }
 
@@ -622,7 +619,7 @@ impl SimpSolver {
             for i in 0 .. c.len() {
                 self.elim.bumpLitOcc(&c[i], -1);
                 self.elim.updateElimHeap(&c[i].var(), &self.frozen, &self.eliminated, &self.core.assigns);
-                self.occurs.smudge(c[i].var());
+                self.occurs.smudge(&c[i].var());
             }
         }
 
@@ -773,8 +770,7 @@ impl SimpSolver {
         self.occurs.clearVar(&v);
 
         // Free watchers lists for this variable, if possible:
-//        if (watches[ mkLit(v)].size() == 0) watches[ mkLit(v)].clear(true);
-//        if (watches[~mkLit(v)].size() == 0) watches[~mkLit(v)].clear(true);
+        self.core.watches.tryClearVar(v);
 
         self.backwardSubsumptionCheck(false)
     }

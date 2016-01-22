@@ -121,7 +121,7 @@ fn solveFile(strict : bool, in_path : String, out_path : Option<String>) -> io::
                         try!(writeln!(&mut out, "SAT"));
                         let model = solver.getModel();
                         for i in 0 .. solver.nVars() {
-                        let val = model[i];
+                            let val = model[i];
                             if !val.isUndef() {
                                 if i > 0 { try!(write!(&mut out, " ")); }
                                 try!(write!(&mut out, "{}{}", if val.isTrue() { "" } else { "-" }, i + 1));

@@ -1,4 +1,3 @@
-use std::ops::{Index, IndexMut};
 use super::literal::{Lit, Var};
 use super::clause::{ClauseRef, ClauseAllocator};
 use super::index_map::{IndexMap};
@@ -7,22 +6,20 @@ use super::index_map::{IndexMap};
 #[derive(Clone)]
 pub struct Watcher {
     pub cref    : ClauseRef,
-    pub blocker : Lit,
+    pub blocker : Lit
 }
 
 
 struct WatchesLine {
     watchers : Vec<Watcher>,
-    dirty    : bool,
+    dirty    : bool
 }
 
 impl WatchesLine {
     #[inline]
     fn clean(&mut self, ca : &ClauseAllocator) {
         if self.dirty {
-            self.watchers.retain(|w| {
-                !(ca[w.cref].mark() == 1)
-            });
+            self.watchers.retain(|w| { !ca[w.cref].is_deleted() });
             self.dirty = false;
         }
     }
@@ -31,15 +28,14 @@ impl WatchesLine {
 
 pub struct Watches {
     watches : IndexMap<Lit, WatchesLine>,
-    dirties : Vec<Lit>,
+    dirties : Vec<Lit>
 }
 
 impl Watches {
     pub fn new() -> Watches {
-        Watches {
-            watches : IndexMap::new(),
-            dirties : Vec::new()
-        }
+        Watches { watches : IndexMap::new()
+                , dirties : Vec::new()
+                }
     }
 
     pub fn initVar(&mut self, var : Var) {
@@ -50,8 +46,33 @@ impl Watches {
     pub fn initLit(&mut self, lit : Lit) {
         self.watches.insert(&lit, WatchesLine {
             watchers : Vec::new(),
-            dirty : false,
+            dirty    : false,
         });
+    }
+
+    pub fn tryClearVar(&mut self, var : Var) {
+        self.tryClearLit(Lit::new(var, false));
+        self.tryClearLit(Lit::new(var, true));
+    }
+
+    pub fn tryClearLit(&mut self, lit : Lit) {
+        if self.watches[&lit].watchers.is_empty() {
+            self.watches.remove(&lit);
+        }
+    }
+
+    pub fn watch(&mut self, lit : Lit, cr : ClauseRef, blocker : Lit) {
+        self.watches[&!lit].watchers.push(Watcher { cref : cr, blocker : blocker });
+    }
+
+    pub fn unwatch(&mut self, lit : Lit, cr : ClauseRef, strict : bool) {
+        let wl = &mut self.watches[&!lit];
+        if strict {
+            wl.watchers.retain(|w| w.cref != cr);
+        } else if !wl.dirty {
+            wl.dirty = true;
+            self.dirties.push(!lit);
+        }
     }
 
     pub fn lookup(&mut self, ca : &ClauseAllocator, lit : Lit) -> &mut Vec<Watcher> {
@@ -60,12 +81,8 @@ impl Watches {
         &mut wl.watchers
     }
 
-    pub fn smudge(&mut self, lit : Lit) {
-        let wl = &mut self.watches[&lit];
-        if !wl.dirty {
-            wl.dirty = true;
-            self.dirties.push(lit);
-        }
+    pub fn getDirty(&mut self, lit : Lit) -> &mut Vec<Watcher> {
+        &mut self.watches[&lit].watchers
     }
 
     pub fn cleanAll(&mut self, ca : &ClauseAllocator) {
@@ -73,26 +90,5 @@ impl Watches {
             self.watches[dl].clean(ca);
         }
         self.dirties.clear();
-    }
-
-    pub fn clear(&mut self) {
-        self.watches.clear();
-        self.dirties.clear();
-    }
-}
-
-impl Index<Lit> for Watches {
-    type Output = Vec<Watcher>;
-
-    #[inline]
-    fn index(&self, lit : Lit) -> &Vec<Watcher> {
-        &self.watches[&lit].watchers
-    }
-}
-
-impl IndexMut<Lit> for Watches {
-    #[inline]
-    fn index_mut(&mut self, lit : Lit) -> &mut Vec<Watcher> {
-        &mut self.watches[&lit].watchers
     }
 }
