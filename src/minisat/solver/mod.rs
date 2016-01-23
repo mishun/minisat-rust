@@ -1,7 +1,8 @@
 extern crate time;
 
-use std::default::{Default};
-use std::cmp::Ordering::{Less, Greater};
+use std::default::Default;
+use std::cmp::Ordering;
+use std::sync::atomic;
 use super::lbool::{LBool};
 use super::literal::{Var, Lit};
 use super::clause::{Clause, ClauseRef, ClauseAllocator};
@@ -10,7 +11,7 @@ use super::random::{Random};
 use super::watches::{Watches, Watcher};
 use super::activity_queue::{ActivityQueue};
 use super::assignment::{Assignment};
-use super::propagation_trail::{PropagationTrail};
+use super::propagation_trail::{DecisionLevel, PropagationTrail};
 
 pub mod simp;
 
@@ -122,46 +123,46 @@ impl Default for CoreSettings {
 
 struct VarData {
     reason : Option<ClauseRef>,
-    level  : usize,
+    level  : DecisionLevel
 }
 
 
 pub struct CoreSolver {
-    set : CoreSettings,
+    set                : CoreSettings,
 
-    model : Vec<LBool>,             // If problem is satisfiable, this vector contains the model (if any).
-    conflict : IndexMap<Lit, ()>,
+    model              : Vec<LBool>,             // If problem is satisfiable, this vector contains the model (if any).
+    conflict           : IndexMap<Lit, ()>,
 
-    rand : Random,
-    stats : Stats,   // Statistics: (read-only member variable)
+    rand               : Random,
+    stats              : Stats,   // Statistics: (read-only member variable)
 
     // Solver state:
-    ca                : ClauseAllocator,
-    clauses           : Vec<ClauseRef>,              // List of problem clauses.
-    learnts           : Vec<ClauseRef>,              // List of learnt clauses.
-    trail             : PropagationTrail<Lit>,       // Assignment stack; stores all assigments made in the order they were made.
-    assumptions       : Vec<Lit>,                    // Current set of assumptions provided to solve by the user.
-    assigns           : Assignment,                  // The current assignments.
-    polarity          : IndexMap<Var, bool>,         // The preferred polarity of each variable.
-    user_pol          : IndexMap<Var, LBool>,        // The users preferred polarity of each variable.
-    decision          : IndexMap<Var, bool>,         // Declares if a variable is eligible for selection in the decision heuristic.
-    vardata           : IndexMap<Var, VarData>,      // Stores reason and level for each variable.
-    watches           : Watches,                     // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
-    activity_queue    : ActivityQueue<Var>,          // A priority queue of variables ordered with respect to the variable activity.
+    ca                 : ClauseAllocator,
+    clauses            : Vec<ClauseRef>,              // List of problem clauses.
+    learnts            : Vec<ClauseRef>,              // List of learnt clauses.
+    trail              : PropagationTrail<Lit>,       // Assignment stack; stores all assigments made in the order they were made.
+    assumptions        : Vec<Lit>,                    // Current set of assumptions provided to solve by the user.
+    assigns            : Assignment,                  // The current assignments.
+    polarity           : IndexMap<Var, bool>,         // The preferred polarity of each variable.
+    user_pol           : IndexMap<Var, LBool>,        // The users preferred polarity of each variable.
+    decision           : IndexMap<Var, bool>,         // Declares if a variable is eligible for selection in the decision heuristic.
+    vardata            : IndexMap<Var, VarData>,      // Stores reason and level for each variable.
+    watches            : Watches,                     // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
+    activity_queue     : ActivityQueue<Var>,          // A priority queue of variables ordered with respect to the variable activity.
 
-    ok                : bool,   // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
-    cla_inc           : f64,    // Amount to bump next clause with.
-    var_inc           : f64,    // Amount to bump next variable with.
-    simpDB_assigns    : i32,    // Number of top-level assignments since last execution of 'simplify()'.
-    simpDB_props      : i64,    // Remaining number of propagations that must be made before next execution of 'simplify()'.
-    progress_estimate : f64,    // Set by 'search()'.
+    ok                 : bool,   // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
+    cla_inc            : f64,    // Amount to bump next clause with.
+    var_inc            : f64,    // Amount to bump next variable with.
+    simpDB_assigns     : i32,    // Number of top-level assignments since last execution of 'simplify()'.
+    simpDB_props       : i64,    // Remaining number of propagations that must be made before next execution of 'simplify()'.
+    progress_estimate  : f64,    // Set by 'search()'.
 
-    released_vars : Vec<Var>,
+    released_vars      : Vec<Var>,
 
     // Temporaries (to reduce allocation overhead). Each variable is prefixed by the method in which it is
     // used, exept 'seen' wich is used in several places.
-    seen : IndexMap<Var, u8>,
-    analyze_toclear : Vec<Lit>,
+    seen               : IndexMap<Var, u8>,
+    analyze_toclear    : Vec<Lit>,
 
     max_learnts             : f64,
     learntsize_adjust_confl : f64,
@@ -170,7 +171,8 @@ pub struct CoreSolver {
     // Resource contraints:
     conflict_budget    : i64, // -1 means no budget.
     propagation_budget : i64, // -1 means no budget.
-    asynch_interrupt   : bool,
+
+    asynch_interrupt   : atomic::AtomicBool
 }
 
 impl Solver for CoreSolver {
@@ -288,7 +290,8 @@ impl CoreSolver {
 
             conflict_budget : -1,
             propagation_budget : -1,
-            asynch_interrupt : false,
+
+            asynch_interrupt : atomic::AtomicBool::new(false)
         }
     }
 
@@ -368,7 +371,7 @@ impl CoreSolver {
     }
 
     // Revert to the state at given level (keeping all assignment at 'level' but not beyond).
-    fn cancelUntil(&mut self, level : usize) {
+    fn cancelUntil(&mut self, level : DecisionLevel) {
         if self.trail.decisionLevel() > level {
             let level_lim = self.trail.lim[level];
             for c in (level_lim .. self.trail.totalSize()).rev() {
@@ -424,7 +427,7 @@ impl CoreSolver {
                         false => { self.set.restart_inc.powi(curr_restarts as i32) }
                     };
                 let conflicts_to_go = rest_base * self.set.restart_first as f64;
-                status = self.search(conflicts_to_go as u32);
+                status = self.search(conflicts_to_go as usize);
                 if !self.withinBudget() { break; }
                 curr_restarts += 1;
             }
@@ -459,11 +462,11 @@ impl CoreSolver {
     //   all variables are decision variables, this means that the clause set is satisfiable. 'l_False'
     //   if the clause set is unsatisfiable. 'l_Undef' if the bound on number of conflicts is reached.
     //_______________________________________________________________________________________________@
-    fn search(&mut self, nof_conflicts : u32) -> LBool {
+    fn search(&mut self, nof_conflicts : usize) -> LBool {
         assert!(self.ok);
         self.stats.starts += 1;
 
-        let mut conflictC = 0u32;
+        let mut conflictC = 0;
         loop {
             match self.propagate() {
                 Some(confl) => {
@@ -484,8 +487,8 @@ impl CoreSolver {
                         }
                     }
 
-                    self.varDecayActivity();
-                    self.claDecayActivity();
+                    self.var_inc *= 1.0 / self.set.var_decay;
+                    self.cla_inc *= 1.0 / self.set.clause_decay;
 
                     self.learntsize_adjust_cnt -= 1;
                     if self.learntsize_adjust_cnt == 0 {
@@ -687,9 +690,9 @@ impl CoreSolver {
                 let ref x = ca[*rx];
                 let ref y = ca[*ry];
                 if x.len() > 2 && (y.len() == 2 || x.activity() < y.activity()) {
-                    Less
+                    Ordering::Less
                 } else {
-                    Greater
+                    Ordering::Greater
                 }
             });
         }
@@ -780,7 +783,7 @@ impl CoreSolver {
     //       rest of literals. There may be others from the same level though.
     //
     //_______________________________________________________________________________________________@
-    fn analyze(&mut self, confl_param : ClauseRef) -> (usize, Vec<Lit>) {
+    fn analyze(&mut self, confl_param : ClauseRef) -> (DecisionLevel, Vec<Lit>) {
         // Generate conflict clause:
         let mut out_learnt = Vec::new();
 
@@ -1007,34 +1010,34 @@ impl CoreSolver {
     }
 
 
-    pub fn implies(&mut self, assumps : &Vec<Lit>, out : &mut Vec<Lit>) -> bool {
-        self.trail.newDecisionLevel();
-
-        for a in assumps.iter() {
-            let val = self.assigns.ofLit(*a);
-            if val.isFalse() {
-                self.cancelUntil(0);
-                return false;
-            } else if val.isUndef() {
-                self.uncheckedEnqueue(*a, None);
-            }
-        }
-
-        let trail_before = self.trail.totalSize();
-        let ret = match self.propagate() {
-            Some(_) => { false }
-            None    => {
-                out.clear();
-                for j in trail_before .. self.trail.totalSize() {
-                    out.push(self.trail[j]);
-                }
-                true
-            }
-        };
-
-        self.cancelUntil(0);
-        ret
-    }
+//    pub fn implies(&mut self, assumps : &Vec<Lit>, out : &mut Vec<Lit>) -> bool {
+//        self.trail.newDecisionLevel();
+//
+//        for a in assumps.iter() {
+//            let val = self.assigns.ofLit(*a);
+//            if val.isFalse() {
+//                self.cancelUntil(0);
+//                return false;
+//            } else if val.isUndef() {
+//                self.uncheckedEnqueue(*a, None);
+//            }
+//        }
+//
+//        let trail_before = self.trail.totalSize();
+//        let ret = match self.propagate() {
+//            Some(_) => { false }
+//            None    => {
+//                out.clear();
+//                for j in trail_before .. self.trail.totalSize() {
+//                    out.push(self.trail[j]);
+//                }
+//                true
+//            }
+//        };
+//
+//        self.cancelUntil(0);
+//        ret
+//    }
 
 
     fn budgetOff(&mut self) {
@@ -1043,17 +1046,9 @@ impl CoreSolver {
     }
 
     fn withinBudget(&self) -> bool {
-        !self.asynch_interrupt &&
+        !self.asynch_interrupt.load(atomic::Ordering::Relaxed) &&
             (self.conflict_budget    < 0 || self.stats.conflicts < self.conflict_budget as u64) &&
             (self.propagation_budget < 0 || self.stats.propagations < self.propagation_budget as u64)
-    }
-
-    fn varDecayActivity(&mut self) {
-        self.var_inc *= 1.0 / self.set.var_decay
-    }
-
-    fn claDecayActivity(&mut self) {
-        self.cla_inc *= 1.0 / self.set.clause_decay
     }
 
     // Insert a variable in the decision order priority queue.

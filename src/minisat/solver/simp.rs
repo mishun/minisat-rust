@@ -2,6 +2,7 @@ use std::default::{Default};
 use std::collections::vec_deque::{VecDeque};
 use std::mem;
 use std::borrow::Borrow;
+use std::sync::atomic;
 use minisat::index_map::{HasIndex, IndexMap};
 use minisat::lbool::{LBool};
 use minisat::literal::{Var, Lit};
@@ -482,7 +483,7 @@ impl SimpSolver {
             }
 
             // Empty elim_heap and return immediately on user-interrupt:
-            if self.core.asynch_interrupt {
+            if self.core.asynch_interrupt.load(atomic::Ordering::Relaxed) {
                 assert!(self.bwdsub_assigns == self.core.trail.totalSize());
                 assert!(self.subsumption_queue.len() == 0);
                 assert!(self.n_touched == 0);
@@ -496,7 +497,7 @@ impl SimpSolver {
                 match self.elim.pop() {
                     None       => { break; }
                     Some(elim) => {
-                        if self.core.asynch_interrupt { break; }
+                        if self.core.asynch_interrupt.load(atomic::Ordering::Relaxed) { break; }
                         if self.eliminated[&elim] == 0 && self.core.assigns.undef(elim) {
                             if cnt % 100 == 0 {
                                 trace!("elimination left: {:10}", self.elim.len());
@@ -639,7 +640,12 @@ impl SimpSolver {
         let len = self.core.ca[cr].len();
         if len == 2 {
             self.removeClause(cr);
-            self.core.ca[cr].strengthen(l);
+            let unit = {
+                let ref mut c = self.core.ca[cr];
+                c.strengthen(l);
+                c[0]
+            };
+            self.core.enqueue(unit, None) && self.core.propagate().is_none()
         } else {
             super::detachClause(&mut self.core.ca, &mut self.core.stats, &mut self.core.watches, cr, true);
             self.core.ca[cr].strengthen(l);
@@ -648,11 +654,7 @@ impl SimpSolver {
             self.occurs.removeOcc(&l.var(), cr);
             self.elim.bumpLitOcc(&l, -1);
             self.elim.updateElimHeap(&l.var(), &self.frozen, &self.eliminated, &self.core.assigns);
-        }
-
-        match self.core.ca[cr].as_unit_clause() {
-            None    => { true }
-            Some(l) => { self.core.enqueue(l, None) && self.core.propagate().is_none() }
+            true
         }
     }
 
@@ -716,8 +718,7 @@ impl SimpSolver {
 
         // Check wether the increase in number of clauses stays within the allowed ('grow'). Moreover, no
         // clause must exceed the limit on the maximal clause size (if it is set):
-        let mut cnt         = 0;
-
+        let mut cnt = 0;
         for pr in pos.iter() {
             for nr in neg.iter() {
                 match self.merge(*pr, *nr, v) {
@@ -741,12 +742,12 @@ impl SimpSolver {
             for cr in neg.iter() {
                 mkElimClause(&mut self.elimclauses, v, &self.core.ca[*cr]);
             }
-            mkElimClause2(&mut self.elimclauses, Lit::new(v, false));
+            mkElimUnit(&mut self.elimclauses, Lit::new(v, false));
         } else {
             for cr in pos.iter() {
                 mkElimClause(&mut self.elimclauses, v, &self.core.ca[*cr]);
             }
-            mkElimClause2(&mut self.elimclauses, Lit::new(v, true));
+            mkElimUnit(&mut self.elimclauses, Lit::new(v, true));
         }
 
         for cr in cls.iter() {
@@ -787,7 +788,7 @@ impl SimpSolver {
 
         loop {
             // Empty subsumption queue and return immediately on user-interrupt:
-            if self.core.asynch_interrupt {
+            if self.core.asynch_interrupt.load(atomic::Ordering::Relaxed) {
                 self.subsumption_queue.clear();
                 self.bwdsub_assigns = self.core.trail.totalSize();
                 break;
@@ -900,7 +901,7 @@ impl SimpSolver {
 }
 
 
-fn mkElimClause2(elimclauses : &mut Vec<u32>, x : Lit) {
+fn mkElimUnit(elimclauses : &mut Vec<u32>, x : Lit) {
     elimclauses.push(x.toIndex() as u32);
     elimclauses.push(1);
 }

@@ -45,11 +45,6 @@ impl<K : HasIndex, V> IndexMap<K, V> {
     }
 
     #[inline]
-    pub fn get(&self, k : &K) -> Option<&V> {
-        self.map.get(&k.toIndex())
-    }
-
-    #[inline]
     pub fn modify_in_place<F : Fn(&V) -> V>(&mut self, f : F) {
         for (_, v) in self.map.iter_mut() {
             *v = f(v);

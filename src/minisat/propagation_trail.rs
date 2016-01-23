@@ -1,5 +1,7 @@
 use std::ops::{Index};
 
+pub type DecisionLevel = usize;
+
 pub struct PropagationTrail<V> {
     pub qhead : usize,
     pub trail : Vec<V>,
@@ -21,7 +23,7 @@ impl<V> PropagationTrail<V> {
     }
 
     #[inline]
-    pub fn levelSize(&self, level : usize) -> usize {
+    pub fn levelSize(&self, level : DecisionLevel) -> usize {
         let cl = self.decisionLevel();
         if level > cl {
             0
@@ -33,7 +35,7 @@ impl<V> PropagationTrail<V> {
     }
 
     #[inline]
-    pub fn decisionLevel(&self) -> usize {
+    pub fn decisionLevel(&self) -> DecisionLevel {
         self.lim.len()
     }
 

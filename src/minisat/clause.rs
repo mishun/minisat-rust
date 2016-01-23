@@ -105,14 +105,6 @@ impl Clause {
         v
     }
 
-    pub fn as_unit_clause(&self) -> Option<Lit> {
-        if self.len() == 1 {
-            Some(self[0])
-        } else {
-            None
-        }
-    }
-
     pub fn calcAbstraction(&mut self) {
         assert!(self.header.has_extra);
         let mut abstraction : u32 = 0;
