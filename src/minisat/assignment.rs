@@ -1,11 +1,20 @@
-use super::index_map::{HasIndex};
+use super::index_map::{HasIndex, IndexMap};
+use super::clause;
 use super::literal::{Var, Lit};
-use super::lbool::{LBool};
+use super::lbool::*;
+use super::propagation_trail::DecisionLevel;
+
+
+pub struct VarData {
+    pub reason : Option<clause::ClauseRef>,
+    pub level  : DecisionLevel
+}
 
 
 pub struct Assignment {
-    assigns   : Vec<LBool>,
-    free_vars : Vec<usize>,
+    assigns     : Vec<LBool>,
+    free_vars   : Vec<usize>,
+    pub vardata : IndexMap<Var, VarData>
 }
 
 impl Assignment {
@@ -13,6 +22,7 @@ impl Assignment {
         Assignment {
             assigns   : Vec::new(),
             free_vars : Vec::new(),
+            vardata   : IndexMap::new()
         }
     }
 
@@ -21,12 +31,12 @@ impl Assignment {
         self.assigns.len()
     }
 
-    pub fn newVar(&mut self) -> Var {
-        let v =
+    pub fn newVar(&mut self, vd : VarData) -> Var {
+        let vid =
             match self.free_vars.pop() {
-                Some(v) => {
-                    self.assigns[v] = LBool::Undef();
-                    v
+                Some(vid) => {
+                    self.assigns[vid] = LBool::Undef();
+                    vid
                 }
 
                 None    => {
@@ -34,7 +44,9 @@ impl Assignment {
                     self.assigns.len() - 1
                 }
             };
-        Var::new(v)
+        let v = Var::new(vid);
+        self.vardata.insert(&v, vd);
+        v
     }
 
     pub fn freeVar(&mut self, v : &Var) {
@@ -42,10 +54,11 @@ impl Assignment {
     }
 
     #[inline]
-    pub fn assignLit(&mut self, p : Lit) {
+    pub fn assignLit(&mut self, p : Lit, vd : VarData) {
         let i = p.var().toIndex();
         assert!(self.assigns[i].isUndef());
         self.assigns[i] = LBool::new(!p.sign());
+        self.vardata.insert(&p.var(), vd);
     }
 
     #[inline]

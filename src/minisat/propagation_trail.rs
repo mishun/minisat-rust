@@ -1,11 +1,11 @@
-use std::ops::{Index};
+use std::ops;
 
 pub type DecisionLevel = usize;
 
 pub struct PropagationTrail<V> {
-    pub qhead : usize,
+    qhead     : usize,
     pub trail : Vec<V>,
-    pub lim   : Vec<usize>,
+    pub lim   : Vec<usize>
 }
 
 impl<V> PropagationTrail<V> {
@@ -13,24 +13,7 @@ impl<V> PropagationTrail<V> {
         PropagationTrail {
             qhead : 0,
             trail : Vec::new(),
-            lim   : Vec::new(),
-        }
-    }
-
-    #[inline]
-    pub fn totalSize(&self) -> usize {
-        self.trail.len()
-    }
-
-    #[inline]
-    pub fn levelSize(&self, level : DecisionLevel) -> usize {
-        let cl = self.decisionLevel();
-        if level > cl {
-            0
-        } else {
-            let l = if level == 0 { 0 } else { self.lim[level - 1] };
-            let r = if level == cl { self.trail.len() } else { self.lim[level] };
-            r - l
+            lim   : Vec::new()
         }
     }
 
@@ -66,28 +49,35 @@ impl<V> PropagationTrail<V> {
         self.qhead = self.trail.len();
     }
 
-/*
     #[inline]
-    pub fn popUntilLevel(&mut self, level : uint) {
-        if self.decisionLevel() > level {
-            let level_lim = self.lim[level];
-            self.qhead = level_lim;
-            self.trail.truncate(level_lim);
-            self.lim.truncate(level);
+    pub fn cancelUntil<F : FnMut(DecisionLevel, V) -> ()>(&mut self, target_level : DecisionLevel, mut f : F) {
+        while self.lim.len() > target_level {
+            let level = self.trail.len();
+            let bottom = self.lim.pop().unwrap();
+            while self.trail.len() > bottom {
+                let v = self.trail.pop().unwrap();
+                f(level, v);
+            }
+        }
+
+        self.qhead = self.trail.len();
+    }
+
+    #[inline]
+    pub fn totalSize(&self) -> usize {
+            self.trail.len()
+    }
+
+    pub fn levelSize(&self, level : DecisionLevel) -> usize {
+        let cl = self.decisionLevel();
+        if level > cl {
+            0
+        } else {
+            let l = if level == 0 { 0 } else { self.lim[level - 1] };
+            let r = if level == cl { self.trail.len() } else { self.lim[level] };
+            r - l
         }
     }
-
-    #[inline]
-    pub fn iterFromLevel(&self, level : uint) -> TrailIterator<V> {
-        let start = if level == 0 { 0 } else { self.lim[level - 1] };
-        TrailIterator { owner : self, index : start }
-    }
-
-    #[inline]
-    pub fn iter(&self) -> TrailIterator<V> {
-        TrailIterator { owner : self, index : 0 }
-    }
-*/
 }
 
 impl<V : Clone> PropagationTrail<V> {
@@ -103,7 +93,7 @@ impl<V : Clone> PropagationTrail<V> {
     }
 }
 
-impl<V> Index<usize> for PropagationTrail<V> {
+impl<V> ops::Index<usize> for PropagationTrail<V> {
     type Output = V;
 
     #[inline]
@@ -111,23 +101,3 @@ impl<V> Index<usize> for PropagationTrail<V> {
         self.trail.index(index)
     }
 }
-
-/*
-struct TrailIterator<'t, V: 't> {
-    owner : &'t PropagationTrail<V>,
-    index : uint,
-}
-
-impl<'t, V> Iterator<&'t V> for TrailIterator<'t, V> {
-    #[inline]
-    fn next(&mut self) -> Option<&'t V> {
-        if self.index < self.owner.trail.len() {
-            let v = &self.owner.trail[self.index];
-            self.index += 1;
-            Some(v)
-        } else {
-            None
-        }
-    }
-}
-*/

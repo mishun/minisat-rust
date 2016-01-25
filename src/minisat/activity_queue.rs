@@ -38,7 +38,7 @@ impl<V : HasIndex> ActivityQueue<V> {
     }
 
     pub fn scaleActivity(&mut self, factor : f64) {
-        self.activity.modify_in_place(|act| { act * factor });
+        self.activity.modify_in_place(|act| { *act *= factor });
     }
 }
 

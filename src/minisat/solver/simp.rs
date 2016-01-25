@@ -7,19 +7,20 @@ use minisat::index_map::{HasIndex, IndexMap};
 use minisat::lbool::{LBool};
 use minisat::literal::{Var, Lit};
 use minisat::clause::{Clause, ClauseRef, ClauseAllocator, SubsumesRes, subsumes};
-use minisat::assignment::{Assignment};
+use minisat::assignment::*;
 use super::Solver;
 
 
-struct SimpSettings {
-    grow              : bool, // Allow a variable elimination step to grow by a number of clauses (default to zero).
-    clause_lim        : i32,  // Variables are not eliminated if it produces a resolvent with a length above this limit. -1 means no limit.
-    subsumption_lim   : i32,  // Do not check if subsumption against a clause larger than this. -1 means no limit.
-    simp_garbage_frac : f64,  // A different limit for when to issue a GC during simplification (Also see 'garbage_frac').
-    use_asymm         : bool, // Shrink clauses by asymmetric branching.
-    use_rcheck        : bool, // Check if a clause is already implied. Prett costly, and subsumes subsumptions :)
-    use_elim          : bool, // Perform variable elimination.
-    extend_model      : bool, // Flag to indicate whether the user needs to look at the full model.
+#[derive(Clone, Copy)]
+pub struct SimpSettings {
+    pub grow              : bool, // Allow a variable elimination step to grow by a number of clauses (default to zero).
+    pub clause_lim        : i32,  // Variables are not eliminated if it produces a resolvent with a length above this limit. -1 means no limit.
+    pub subsumption_lim   : i32,  // Do not check if subsumption against a clause larger than this. -1 means no limit.
+    pub simp_garbage_frac : f64,  // A different limit for when to issue a GC during simplification (Also see 'garbage_frac').
+    pub use_asymm         : bool, // Shrink clauses by asymmetric branching.
+    pub use_rcheck        : bool, // Check if a clause is already implied. Prett costly, and subsumes subsumptions :)
+    pub use_elim          : bool, // Perform variable elimination.
+    pub extend_model      : bool, // Flag to indicate whether the user needs to look at the full model.
 }
 
 impl Default for SimpSettings {
@@ -224,7 +225,7 @@ impl OccLists {
         &self.occs[v].occs
     }
 
-    fn smudge(&mut self, v : &Var) {
+    pub fn smudge(&mut self, v : &Var) {
         let ol = &mut self.occs[v];
         if !ol.dirty {
             ol.dirty = true;
@@ -233,6 +234,19 @@ impl OccLists {
 
     pub fn clear(&mut self) {
         self.occs.clear();
+    }
+
+    pub fn relocGC(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {
+        self.occs.modify_in_place(|ol| {
+            if ol.dirty {
+                ol.occs.retain(|cr| { !from[*cr].is_deleted() });
+                ol.dirty = false;
+            }
+
+            for occ in ol.occs.iter_mut() {
+                *occ = from.relocTo(to, *occ);
+            }
+        });
     }
 }
 
@@ -335,13 +349,13 @@ impl Solver for SimpSolver {
 
 impl SimpSolver {
 
-    pub fn new() -> SimpSolver {
-        let mut s = super::CoreSolver::new();
+    pub fn new(core_s : super::CoreSettings, simp_s : SimpSettings) -> SimpSolver {
+        let mut s = super::CoreSolver::new(core_s);
         s.ca.set_extra_clause_field(true); // NOTE: must happen before allocating the dummy clause below.
         s.set.remove_satisfied = false;
         let temp_clause = s.ca.alloc(&vec![Lit::fromIndex(0)], false);
         SimpSolver { core               : s
-                   , set                : Default::default()
+                   , set                : simp_s
 
                    , merges             : 0
                    , asymm_lits         : 0
@@ -521,7 +535,9 @@ impl SimpSolver {
                                 break 'cleanup;
                             }
 
-                            self.core.checkGarbage(self.set.simp_garbage_frac);
+                            if self.core.ca.checkGarbage(self.set.simp_garbage_frac) {
+                                self.garbageCollect();
+                            }
                         }
                     }
                 }
@@ -545,10 +561,12 @@ impl SimpSolver {
 
             // Force full cleanup (this is safe and desirable since it only happens once):
             self.core.rebuildOrderHeap();
-            //self.core.garbageCollect(); // TODO: override
+            self.core.garbageCollect();
         } else {
             // Cheaper cleanup:
-            //self.core.checkGarbageDef();
+            if self.core.ca.checkGarbage(self.core.set.garbage_frac) {
+                self.garbageCollect();
+            }
         }
 
         if self.elimclauses.len() > 0 {
@@ -626,7 +644,7 @@ impl SimpSolver {
             }
         }
 
-        super::removeClause(&mut self.core.ca, &mut self.core.watches, &mut self.core.stats, &mut self.core.vardata, &self.core.assigns, cr);
+        super::removeClause(&mut self.core.ca, &mut self.core.watches, &mut self.core.stats, &mut self.core.assigns, cr);
     }
 
     fn strengthenClause(&mut self, cr : ClauseRef, l : Lit) -> bool {
@@ -898,6 +916,32 @@ impl SimpSolver {
         self.n_touched = 0;
     }
 
+    fn garbageCollect(&mut self) {
+        let mut to = ClauseAllocator::newForGC(&self.core.ca);
+        self.relocAll(&mut to);
+        self.core.relocAll(&mut to);
+        debug!("|  Garbage collection:   {:12} bytes => {:12} bytes             |", self.core.ca.size(), to.size());
+        self.core.ca = to;
+    }
+
+    fn relocAll(&mut self, to : &mut ClauseAllocator) {
+        if !self.use_simplification { return; }
+
+        // All occurs lists:
+        self.occurs.relocGC(&mut self.core.ca, to);
+
+        // Subsumption queue:
+        {
+            let ref mut from = self.core.ca;
+            self.subsumption_queue.retain(|cr| { !from[*cr].is_deleted() });
+            for cr in self.subsumption_queue.iter_mut() {
+                *cr = from.relocTo(to, *cr);
+            }
+        }
+
+        // Temporary clause:
+        self.bwdsub_tmpunit = self.core.ca.relocTo(to, self.bwdsub_tmpunit);
+    }
 }
 
 

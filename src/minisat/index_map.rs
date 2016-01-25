@@ -45,9 +45,9 @@ impl<K : HasIndex, V> IndexMap<K, V> {
     }
 
     #[inline]
-    pub fn modify_in_place<F : Fn(&V) -> V>(&mut self, f : F) {
+    pub fn modify_in_place<F : FnMut(&mut V) -> ()>(&mut self, mut f : F) {
         for (_, v) in self.map.iter_mut() {
-            *v = f(v);
+            f(v);
         }
     }
 }

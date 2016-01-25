@@ -8,6 +8,7 @@ extern crate vec_map;
 extern crate log;
 extern crate env_logger;
 
+use std::default::Default;
 use std::io;
 use std::io::{Write};
 use std::fs::File;
@@ -85,7 +86,7 @@ fn resToString(ret : LBool) -> &'static str {
 }
 
 fn solveFile(strict : bool, in_path : String, out_path : Option<String>) -> io::Result<()> {
-    let mut solver = solver::CoreSolver::new();
+    let mut solver = solver::CoreSolver::new(Default::default());
     let initial_time = time::precise_time_s();
 
     info!("============================[ Problem Statistics ]=============================");
@@ -140,8 +141,8 @@ fn solveFile(strict : bool, in_path : String, out_path : Option<String>) -> io::
     Ok(())
 }
 
-fn simpSolveFile(strict : bool, in_path : String, out_path : Option<String>) -> io::Result<()> {
-    let mut solver = solver::simp::SimpSolver::new();
+fn simpSolveFile(strict : bool, in_path : String, _ : Option<String>) -> io::Result<()> {
+    let mut solver = solver::simp::SimpSolver::new(Default::default(), Default::default());
     let initial_time = time::precise_time_s();
 
     info!("============================[ Problem Statistics ]=============================");
