@@ -7,7 +7,7 @@ use super::lbool::{LBool};
 use super::literal::{Var, Lit};
 use super::clause::{Clause, ClauseRef, ClauseAllocator};
 use super::index_map::{IndexMap};
-use super::random::{Random};
+use super::random;
 use super::watches::*;
 use super::activity_queue::{ActivityQueue};
 use super::assignment::*;
@@ -75,31 +75,32 @@ impl Stats {
 
 
 #[derive(PartialEq, Eq, Clone, Copy)]
-enum CCMinMode { None, Basic, Deep }
+pub enum CCMinMode { None, Basic, Deep }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
-enum PhaseSaving { None, Limited, Full }
+pub enum PhaseSaving { None, Limited, Full }
 
 #[derive(Clone, Copy)]
 pub struct CoreSettings {
-    var_decay         : f64,
-    clause_decay      : f64,
-    random_var_freq   : f64,
-    luby_restart      : bool,
-    ccmin_mode        : CCMinMode,   // Controls conflict clause minimization
-    phase_saving      : PhaseSaving, // Controls the level of phase saving
-    rnd_pol           : bool,        // Use random polarities for branching heuristics.
-    rnd_init_act      : bool,        // Initialize variable activities with a small random value.
-    garbage_frac      : f64,         // The fraction of wasted memory allowed before a garbage collection is triggered.
-    min_learnts_lim   : i32,         // Minimum number to set the learnts limit to.
-    restart_first     : i32,         // The initial restart limit.                                                                (default 100)
-    restart_inc       : f64,         // The factor with which the restart limit is multiplied in each restart.                    (default 1.5)
-    learntsize_factor : f64,         // The intitial limit for learnt clauses is a factor of the original clauses.                (default 1 / 3)
-    learntsize_inc    : f64,         // The limit for learnt clauses is multiplied with this factor each restart.                 (default 1.1)
-    remove_satisfied  : bool,        // Indicates whether possibly inefficient linear scan for satisfied clauses should be performed in 'simplify'.
+    pub var_decay         : f64,
+    pub clause_decay      : f64,
+    pub random_seed       : f64,
+    pub random_var_freq   : f64,
+    pub luby_restart      : bool,
+    pub ccmin_mode        : CCMinMode,   // Controls conflict clause minimization
+    pub phase_saving      : PhaseSaving, // Controls the level of phase saving
+    pub rnd_pol           : bool,        // Use random polarities for branching heuristics.
+    pub rnd_init_act      : bool,        // Initialize variable activities with a small random value.
+    pub garbage_frac      : f64,         // The fraction of wasted memory allowed before a garbage collection is triggered.
+    pub min_learnts_lim   : i32,         // Minimum number to set the learnts limit to.
+    pub restart_first     : i32,         // The initial restart limit.                                                                (default 100)
+    pub restart_inc       : f64,         // The factor with which the restart limit is multiplied in each restart.                    (default 1.5)
+    pub learntsize_factor : f64,         // The intitial limit for learnt clauses is a factor of the original clauses.                (default 1 / 3)
+    pub learntsize_inc    : f64,         // The limit for learnt clauses is multiplied with this factor each restart.                 (default 1.1)
+    pub remove_satisfied  : bool,        // Indicates whether possibly inefficient linear scan for satisfied clauses should be performed in 'simplify'.
 
-    learntsize_adjust_start_confl : i32,
-    learntsize_adjust_inc : f64,
+    pub learntsize_adjust_start_confl : i32,
+    pub learntsize_adjust_inc : f64,
 }
 
 impl Default for CoreSettings {
@@ -107,6 +108,7 @@ impl Default for CoreSettings {
         CoreSettings {
             var_decay         : 0.95,
             clause_decay      : 0.999,
+            random_seed       : 91648253.0,
             random_var_freq   : 0.0,
             luby_restart      : true,
             ccmin_mode        : CCMinMode::Deep,
@@ -143,7 +145,7 @@ pub struct CoreSolver {
     model              : Vec<LBool>,             // If problem is satisfiable, this vector contains the model (if any).
     conflict           : IndexMap<Lit, ()>,
 
-    rand               : Random,
+    rand               : random::Random,
     stats              : Stats,   // Statistics: (read-only member variable)
 
     // Solver state:
@@ -262,7 +264,7 @@ impl CoreSolver {
             model : Vec::new(),
             conflict : IndexMap::new(),
 
-            rand : Random::new(91648253.0),
+            rand : random::Random::new(settings.random_seed),
 
             stats : Stats::new(),
 

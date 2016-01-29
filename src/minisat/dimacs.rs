@@ -2,13 +2,13 @@
 use std::io;
 use std::str;
 use std::borrow::Borrow;
-use super::index_map::{HasIndex};
+use super::index_map::HasIndex;
 use super::literal::{Var, Lit};
-use super::lbool::{LBool};
-use super::solver::{Solver};
+use super::lbool::LBool;
+use super::solver::Solver;
 
 
-pub fn parse_DIMACS<R : io::Read, S : Solver>(reader : &mut R, solver : &mut S, validate : bool) -> io::Result<()> {
+pub fn parse<R : io::Read, S : Solver>(reader : &mut R, solver : &mut S, validate : bool) -> io::Result<()> {
     let mut buf = String::new();
     let _ = try!(reader.read_to_string(&mut buf));
     let mut p = try!(Parser::new(buf.chars()));

@@ -13,20 +13,20 @@ use super::Solver;
 
 #[derive(Clone, Copy)]
 pub struct SimpSettings {
-    pub grow              : bool, // Allow a variable elimination step to grow by a number of clauses (default to zero).
-    pub clause_lim        : i32,  // Variables are not eliminated if it produces a resolvent with a length above this limit. -1 means no limit.
-    pub subsumption_lim   : i32,  // Do not check if subsumption against a clause larger than this. -1 means no limit.
-    pub simp_garbage_frac : f64,  // A different limit for when to issue a GC during simplification (Also see 'garbage_frac').
-    pub use_asymm         : bool, // Shrink clauses by asymmetric branching.
-    pub use_rcheck        : bool, // Check if a clause is already implied. Prett costly, and subsumes subsumptions :)
-    pub use_elim          : bool, // Perform variable elimination.
-    pub extend_model      : bool, // Flag to indicate whether the user needs to look at the full model.
+    pub grow              : usize, // Allow a variable elimination step to grow by a number of clauses (default to zero).
+    pub clause_lim        : i32,   // Variables are not eliminated if it produces a resolvent with a length above this limit. -1 means no limit.
+    pub subsumption_lim   : i32,   // Do not check if subsumption against a clause larger than this. -1 means no limit.
+    pub simp_garbage_frac : f64,   // A different limit for when to issue a GC during simplification (Also see 'garbage_frac').
+    pub use_asymm         : bool,  // Shrink clauses by asymmetric branching.
+    pub use_rcheck        : bool,  // Check if a clause is already implied. Prett costly, and subsumes subsumptions :)
+    pub use_elim          : bool,  // Perform variable elimination.
+    pub extend_model      : bool,  // Flag to indicate whether the user needs to look at the full model.
 }
 
 impl Default for SimpSettings {
     fn default() -> SimpSettings {
         SimpSettings {
-            grow              : false,
+            grow              : 0,
             clause_lim        : 20,
             subsumption_lim   : 1000,
             simp_garbage_frac : 0.5,
@@ -743,7 +743,7 @@ impl SimpSolver {
                     None            => {}
                     Some(resolvent) => {
                         cnt += 1;
-                        if cnt > cls.len() + (self.set.grow as usize) || (self.set.clause_lim != -1 && (resolvent.len() as i32) > self.set.clause_lim) {
+                        if cnt > cls.len() + self.set.grow || (self.set.clause_lim != -1 && (resolvent.len() as i32) > self.set.clause_lim) {
                             return true;
                         }
                     }
