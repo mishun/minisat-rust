@@ -1,4 +1,4 @@
-use std::ops::{BitXor};
+use std::ops;
 use std::fmt;
 
 #[derive(Copy, Clone)]
@@ -33,7 +33,7 @@ impl LBool {
     }
 }
 
-impl BitXor<bool> for LBool {
+impl ops::BitXor<bool> for LBool {
     type Output = LBool;
 
     #[inline]

@@ -507,40 +507,36 @@ impl SimpSolver {
 
             trace!("ELIM: vars = {}", self.elim.len());
             let mut cnt = 0;
-            loop {
-                match self.elim.pop() {
-                    None       => { break; }
-                    Some(elim) => {
-                        if self.core.asynch_interrupt.load(atomic::Ordering::Relaxed) { break; }
-                        if self.eliminated[&elim] == 0 && self.core.assigns.undef(elim) {
-                            if cnt % 100 == 0 {
-                                trace!("elimination left: {:10}", self.elim.len());
-                            }
+            while let Some(elim) = self.elim.pop() {
+                if self.core.asynch_interrupt.load(atomic::Ordering::Relaxed) { break; }
+                if self.eliminated[&elim] == 0 && self.core.assigns.undef(elim) {
+                    if cnt % 100 == 0 {
+                        trace!("elimination left: {:10}", self.elim.len());
+                    }
 
-                            if self.set.use_asymm {
-                                // Temporarily freeze variable. Otherwise, it would immediately end up on the queue again:
-                                let was_frozen = self.frozen[&elim];
-                                self.frozen[&elim] = 1;
-                                if !self.asymmVar(elim) {
-                                    self.core.ok = false;
-                                    break 'cleanup;
-                                }
-                                self.frozen[&elim] = was_frozen;
-                            }
-
-                            // At this point, the variable may have been set by assymetric branching, so check it
-                            // again. Also, don't eliminate frozen variables:
-                            if self.set.use_elim && self.core.assigns.undef(elim) && self.frozen[&elim] == 0 && !self.eliminateVar(elim) {
-                                self.core.ok = false;
-                                break 'cleanup;
-                            }
-
-                            if self.core.ca.checkGarbage(self.set.simp_garbage_frac) {
-                                self.garbageCollect();
-                            }
+                    if self.set.use_asymm {
+                        // Temporarily freeze variable. Otherwise, it would immediately end up on the queue again:
+                        let was_frozen = self.frozen[&elim];
+                        self.frozen[&elim] = 1;
+                        if !self.asymmVar(elim) {
+                            self.core.ok = false;
+                            break 'cleanup;
                         }
+                        self.frozen[&elim] = was_frozen;
+                    }
+
+                    // At this point, the variable may have been set by assymetric branching, so check it
+                    // again. Also, don't eliminate frozen variables:
+                    if self.set.use_elim && self.core.assigns.undef(elim) && self.frozen[&elim] == 0 && !self.eliminateVar(elim) {
+                        self.core.ok = false;
+                        break 'cleanup;
+                    }
+
+                    if self.core.ca.checkGarbage(self.set.simp_garbage_frac) {
+                        self.garbageCollect();
                     }
                 }
+
                 cnt += 1;
             }
 

@@ -3,6 +3,7 @@ extern crate time;
 use std::default::Default;
 use std::cmp::Ordering;
 use std::sync::atomic;
+use super::util;
 use super::index_map::IndexMap;
 use super::literal::{Var, Lit};
 use super::lbool::LBool;
@@ -381,7 +382,7 @@ impl CoreSolver {
             while status.isUndef() {
                 let rest_base =
                     match self.set.luby_restart {
-                        true  => { luby(self.set.restart_inc, curr_restarts) }
+                        true  => { util::luby(self.set.restart_inc, curr_restarts) }
                         false => { self.set.restart_inc.powi(curr_restarts as i32) }
                     };
                 let conflicts_to_go = rest_base * self.set.restart_first as f64;
@@ -972,27 +973,6 @@ impl CoreSolver {
             self.stats.clauses_literals += c.len() as u64;
         }
     }
-}
-
-
-pub fn luby(y : f64, mut x : u32) -> f64 {
-    // Find the finite subsequence that contains index 'x', and the
-    // size of that subsequence:
-    let mut size = 1;
-    let mut seq = 0;
-
-    while size < x + 1 {
-        seq += 1;
-        size = 2 * size + 1;
-    }
-
-    while size - 1 != x {
-        size = (size - 1) >> 1;
-        seq -= 1;
-        x = x % size;
-    }
-
-    y.powi(seq)
 }
 
 

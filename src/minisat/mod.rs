@@ -10,3 +10,4 @@ mod propagation_trail;
 mod random;
 pub mod solver;
 mod watches;
+mod util;

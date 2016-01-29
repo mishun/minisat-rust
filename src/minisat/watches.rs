@@ -1,6 +1,6 @@
+use super::index_map::IndexMap;
 use super::literal::{Lit, Var};
 use super::clause::{ClauseRef, ClauseAllocator};
-use super::index_map::{IndexMap};
 use super::assignment::*;
 use super::propagation_trail::*;
 
@@ -77,8 +77,7 @@ impl Watches {
         let mut confl = None;
         let mut num_props = 0;
 
-        loop {
-            let p = match trail.dequeue() { Some(p) => p, None => break }; // 'p' is enqueued fact to propagate.
+        while let Some(p) = trail.dequeue() {
             num_props += 1;
             let false_lit = !p;
 
