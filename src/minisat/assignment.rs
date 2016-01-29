@@ -2,6 +2,7 @@ use super::index_map::{HasIndex, IndexMap};
 use super::clause;
 use super::literal::{Var, Lit};
 use super::lbool::*;
+use super::clause::Clause;
 use super::propagation_trail::DecisionLevel;
 
 
@@ -90,4 +91,15 @@ impl Assignment {
     pub fn ofLit(&self, p : Lit) -> LBool {
         self.assigns[p.var().toIndex()] ^ p.sign()
     }
+}
+
+
+// Returns TRUE if a clause is satisfied in the current state.
+pub fn satisfiedWith(c : &Clause, s : &Assignment) -> bool {
+    for i in 0 .. c.len() {
+        if s.sat(c[i]) {
+            return true;
+        }
+    }
+    false
 }

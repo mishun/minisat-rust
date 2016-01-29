@@ -11,3 +11,5 @@ mod random;
 pub mod solver;
 mod watches;
 mod util;
+pub mod conflict;
+pub mod clause_db;

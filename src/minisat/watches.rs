@@ -1,6 +1,6 @@
 use super::index_map::IndexMap;
 use super::literal::{Lit, Var};
-use super::clause::{ClauseRef, ClauseAllocator};
+use super::clause::{Clause, ClauseRef, ClauseAllocator};
 use super::assignment::*;
 use super::propagation_trail::*;
 
@@ -29,12 +29,15 @@ impl WatchesLine {
 
 
 pub struct Watches {
-    watches : IndexMap<Lit, WatchesLine>
+    watches          : IndexMap<Lit, WatchesLine>,
+    pub propagations : u64
 }
 
 impl Watches {
     pub fn new() -> Watches {
-        Watches { watches : IndexMap::new() }
+        Watches { watches      : IndexMap::new()
+                , propagations : 0
+                }
     }
 
     pub fn initVar(&mut self, var : Var) {
@@ -42,7 +45,7 @@ impl Watches {
         self.initLit(Lit::new(var, true));
     }
 
-    pub fn initLit(&mut self, lit : Lit) {
+    fn initLit(&mut self, lit : Lit) {
         self.watches.insert(&lit, WatchesLine {
             watchers : Vec::new(),
             dirty    : false,
@@ -54,25 +57,36 @@ impl Watches {
         self.tryClearLit(Lit::new(var, true));
     }
 
-    pub fn tryClearLit(&mut self, lit : Lit) {
+    fn tryClearLit(&mut self, lit : Lit) {
         if self.watches[&lit].watchers.is_empty() {
             self.watches.remove(&lit);
         }
     }
 
-    pub fn watch(&mut self, lit : Lit, cr : ClauseRef, blocker : Lit) {
-        self.watches[&!lit].watchers.push(Watcher { cref : cr, blocker : blocker });
+    pub fn watchClause(&mut self, c : &Clause, cr : ClauseRef) {
+        assert!(c.len() > 1);
+        self.watches[&!c[0]].watchers.push(Watcher { cref : cr, blocker : c[1] });
+        self.watches[&!c[1]].watchers.push(Watcher { cref : cr, blocker : c[0] });
     }
 
-    pub fn unwatch(&mut self, lit : Lit, cr : ClauseRef, strict : bool) {
-        let wl = &mut self.watches[&!lit];
+    pub fn unwatchClause(&mut self, c : &Clause, cr : ClauseRef, strict : bool)
+    {
+        assert!(c.len() > 1);
         if strict {
-            wl.watchers.retain(|w| w.cref != cr);
+            self.watches[&!c[0]].watchers.retain(|w| w.cref != cr);
+            self.watches[&!c[1]].watchers.retain(|w| w.cref != cr);
         } else {
-            wl.dirty = true;
+            self.watches[&!c[0]].dirty = true;
+            self.watches[&!c[1]].dirty = true;
         }
     }
 
+    // Description:
+    //   Propagates all enqueued facts. If a conflict arises, the conflicting clause is returned,
+    //   otherwise CRef_Undef.
+    //
+    //   Post-conditions:
+    //     * the propagation queue is empty, even if there was a conflict.
     pub fn propagate(&mut self, trail : &mut PropagationTrail<Lit>, assigns : &mut Assignment, ca : &mut ClauseAllocator) -> (Option<ClauseRef>, u64) {
         let mut confl = None;
         let mut num_props = 0;
@@ -132,7 +146,7 @@ impl Watches {
                         let lit = c[k];
                         c[1] = lit;
                         c[k] = false_lit;
-                        self.watch(lit, cw.cref, first);
+                        self.watches[&!lit].watchers.push(Watcher { cref : cw.cref, blocker : first });
                     }
 
                     // Did not find watch -- clause is unit under assignment:
@@ -162,6 +176,7 @@ impl Watches {
             self.watches[&p].watchers.truncate(j);
         }
 
+        self.propagations += num_props;
         (confl, num_props)
     }
 

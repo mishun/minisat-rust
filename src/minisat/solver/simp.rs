@@ -1,17 +1,15 @@
-use std::default::{Default};
-use std::collections::vec_deque::{VecDeque};
+use std::default::Default;
+use std::collections::vec_deque::VecDeque;
 use std::mem;
 use std::borrow::Borrow;
-use std::sync::atomic;
 use minisat::index_map::{HasIndex, IndexMap};
-use minisat::lbool::{LBool};
+use minisat::lbool::LBool;
 use minisat::literal::{Var, Lit};
 use minisat::clause::{Clause, ClauseRef, ClauseAllocator, SubsumesRes, subsumes};
 use minisat::assignment::*;
 use super::Solver;
 
 
-#[derive(Clone, Copy)]
 pub struct SimpSettings {
     pub grow              : usize, // Allow a variable elimination step to grow by a number of clauses (default to zero).
     pub clause_lim        : i32,   // Variables are not eliminated if it produces a resolvent with a length above this limit. -1 means no limit.
@@ -310,32 +308,35 @@ impl Solver for SimpSolver {
         }
         //#endif
 
-        let nclauses = self.core.clauses.len();
-
-        if self.set.use_rcheck && self.implied(ps) { return true; }
-
-        if !self.core.addClause(ps) { return false; }
-
-        if self.use_simplification && self.core.clauses.len() == nclauses + 1 {
-            let cr = *self.core.clauses.last().unwrap();
-            let c  = &mut self.core.ca[cr];
-
-            // NOTE: the clause is added to the queue immediately and then
-            // again during 'gatherTouchedClauses()'. If nothing happens
-            // in between, it will only be checked once. Otherwise, it may
-            // be checked twice unnecessarily. This is an unfortunate
-            // consequence of how backward subsumption is used to mimic
-            // forward subsumption.
-            self.subsumption_queue.push_back(cr);
-            for i in 0 .. c.len() {
-                self.occurs.pushOcc(&c[i].var(), cr);
-                self.touched[&c[i].var()] = 1;
-                self.n_touched += 1;
-                self.elim.bumpLitOcc(&c[i], 1);
-            }
+        if self.set.use_rcheck && self.implied(ps) {
+            return true;
         }
 
-        true
+        match self.core.addClause_(ps) {
+            super::AddClause::UnSAT     => { false }
+            super::AddClause::Consumed  => { true }
+            super::AddClause::Added(cr) => {
+                if self.use_simplification {
+                    // NOTE: the clause is added to the queue immediately and then
+                    // again during 'gatherTouchedClauses()'. If nothing happens
+                    // in between, it will only be checked once. Otherwise, it may
+                    // be checked twice unnecessarily. This is an unfortunate
+                    // consequence of how backward subsumption is used to mimic
+                    // forward subsumption.
+                    self.subsumption_queue.push_back(cr);
+
+                    let ref c = self.core.db.ca[cr];
+                    for i in 0 .. c.len() {
+                        self.occurs.pushOcc(&c[i].var(), cr);
+                        self.touched[&c[i].var()] = 1;
+                        self.n_touched += 1;
+                        self.elim.bumpLitOcc(&c[i], 1);
+                    }
+                }
+
+                true
+            }
+        }
     }
 
     fn getModel(&self) -> &Vec<LBool> {
@@ -349,11 +350,11 @@ impl Solver for SimpSolver {
 
 impl SimpSolver {
 
-    pub fn new(core_s : super::CoreSettings, simp_s : SimpSettings) -> SimpSolver {
+    pub fn new(core_s : super::Settings, simp_s : SimpSettings) -> SimpSolver {
         let mut s = super::CoreSolver::new(core_s);
-        s.ca.set_extra_clause_field(true); // NOTE: must happen before allocating the dummy clause below.
-        s.set.remove_satisfied = false;
-        let temp_clause = s.ca.alloc(&vec![Lit::fromIndex(0)], false);
+        s.db.ca.set_extra_clause_field(true); // NOTE: must happen before allocating the dummy clause below.
+        s.db.settings.remove_satisfied = false;
+        let temp_clause = s.db.ca.alloc(&vec![Lit::fromIndex(0)], false);
         SimpSolver { core               : s
                    , set                : simp_s
 
@@ -497,7 +498,7 @@ impl SimpSolver {
             }
 
             // Empty elim_heap and return immediately on user-interrupt:
-            if self.core.asynch_interrupt.load(atomic::Ordering::Relaxed) {
+            if self.core.budget.interrupted() {
                 assert!(self.bwdsub_assigns == self.core.trail.totalSize());
                 assert!(self.subsumption_queue.len() == 0);
                 assert!(self.n_touched == 0);
@@ -508,7 +509,7 @@ impl SimpSolver {
             trace!("ELIM: vars = {}", self.elim.len());
             let mut cnt = 0;
             while let Some(elim) = self.elim.pop() {
-                if self.core.asynch_interrupt.load(atomic::Ordering::Relaxed) { break; }
+                if self.core.budget.interrupted() { break; }
                 if self.eliminated[&elim] == 0 && self.core.assigns.undef(elim) {
                     if cnt % 100 == 0 {
                         trace!("elimination left: {:10}", self.elim.len());
@@ -532,7 +533,7 @@ impl SimpSolver {
                         break 'cleanup;
                     }
 
-                    if self.core.ca.checkGarbage(self.set.simp_garbage_frac) {
+                    if self.core.db.ca.checkGarbage(self.set.simp_garbage_frac) {
                         self.garbageCollect();
                     }
                 }
@@ -551,8 +552,8 @@ impl SimpSolver {
             self.subsumption_queue.clear();
 
             self.use_simplification = false;
-            self.core.set.remove_satisfied = true;
-            self.core.ca.set_extra_clause_field(false);
+            self.core.db.settings.remove_satisfied = true;
+            self.core.db.ca.set_extra_clause_field(false);
             self.max_simp_var = Var::new(self.core.nVars());
 
             // Force full cleanup (this is safe and desirable since it only happens once):
@@ -560,7 +561,7 @@ impl SimpSolver {
             self.core.garbageCollect();
         } else {
             // Cheaper cleanup:
-            if self.core.ca.checkGarbage(self.core.set.garbage_frac) {
+            if self.core.db.ca.checkGarbage(self.core.settings.garbage_frac) {
                 self.garbageCollect();
             }
         }
@@ -577,7 +578,7 @@ impl SimpSolver {
         assert!(self.use_simplification);
 
         let cls = {
-            let cls = self.occurs.lookup(&v, &self.core.ca);
+            let cls = self.occurs.lookup(&v, &self.core.db.ca);
             if !self.core.assigns.undef(v) || cls.len() == 0 {
                 return true;
             }
@@ -597,8 +598,8 @@ impl SimpSolver {
         assert!(self.core.trail.isGroundLevel());
 
         let c = {
-            let c = &mut self.core.ca[cr];
-            if c.mark() != 0 || super::satisfiedWith(c, &self.core.assigns) {
+            let ref c = self.core.db.ca[cr];
+            if c.mark() != 0 || satisfiedWith(c, &self.core.assigns) {
                 return true;
             }
 
@@ -616,22 +617,19 @@ impl SimpSolver {
             }
         }
 
-        if self.core.propagate().is_some() {
-            self.core.cancelUntil(0);
-            self.asymm_lits += 1;
-            if !self.strengthenClause(cr, l.unwrap()) {
-                return false;
+        match self.core.propagate() {
+            None    => { self.core.cancelUntil(0); true }
+            Some(_) => {
+                self.core.cancelUntil(0);
+                self.asymm_lits += 1;
+                self.strengthenClause(cr, l.unwrap())
             }
-        } else {
-            self.core.cancelUntil(0);
         }
-
-        true
     }
 
     fn removeClause(&mut self, cr : ClauseRef) {
         if self.use_simplification {
-            let c = &self.core.ca[cr];
+            let ref c = self.core.db.ca[cr];
 
             for i in 0 .. c.len() {
                 self.elim.bumpLitOcc(&c[i], -1);
@@ -640,7 +638,7 @@ impl SimpSolver {
             }
         }
 
-        super::removeClause(&mut self.core.ca, &mut self.core.watches, &mut self.core.stats, &mut self.core.assigns, cr);
+        self.core.db.removeClause(&mut self.core.watches, &mut self.core.assigns, cr);
     }
 
     fn strengthenClause(&mut self, cr : ClauseRef, l : Lit) -> bool {
@@ -651,20 +649,25 @@ impl SimpSolver {
         // if (!find(subsumption_queue, &c))
         self.subsumption_queue.push_back(cr);
 
-        let len = self.core.ca[cr].len();
+        let len = self.core.db.ca[cr].len();
         if len == 2 {
             self.removeClause(cr);
             let unit = {
-                let ref mut c = self.core.ca[cr];
+                let ref mut c = self.core.db.ca[cr];
                 c.strengthen(l);
                 c[0]
             };
             self.core.enqueue(unit, None) && self.core.propagate().is_none()
         } else {
-            super::detachClause(&mut self.core.ca, &mut self.core.stats, &mut self.core.watches, cr, true);
-            self.core.ca[cr].strengthen(l);
-            assert!(self.core.ca[cr].len() == len - 1);
-            self.core.attachClause(cr);
+            // TODO: this attach/detach just updates watches and stats
+            self.core.db.detachClause(&mut self.core.watches, cr, true);
+            {
+                let ref mut c = self.core.db.ca[cr];
+                c.strengthen(l);
+                assert!(c.len() == len - 1);
+            }
+            self.core.db.attachClause(&mut self.core.watches, cr);
+
             self.occurs.removeOcc(&l.var(), cr);
             self.elim.bumpLitOcc(&l, -1);
             self.elim.updateElimHeap(&l.var(), &self.frozen, &self.eliminated, &self.core.assigns);
@@ -675,9 +678,9 @@ impl SimpSolver {
     fn merge(&mut self, _ps : ClauseRef, _qs : ClauseRef, v : Var) -> Option<Vec<Lit>> {
         self.merges += 1;
 
-        let ps_smallest = self.core.ca[_ps].len() < self.core.ca[_qs].len();
-        let ps = if ps_smallest { &self.core.ca[_qs] } else { &self.core.ca[_ps] };
-        let qs = if ps_smallest { &self.core.ca[_ps] } else { &self.core.ca[_qs] };
+        let ps_smallest = self.core.db.ca[_ps].len() < self.core.db.ca[_qs].len();
+        let ref ps = self.core.db.ca[ if ps_smallest { _qs } else { _ps } ];
+        let ref qs = self.core.db.ca[ if ps_smallest { _ps } else { _qs } ];
 
         let mut res = Vec::new();
         for i in 0 .. qs.len() {
@@ -716,11 +719,11 @@ impl SimpSolver {
         assert!(self.core.assigns.undef(v));
 
         // Split the occurrences into positive and negative:
-        let cls = self.occurs.lookup(&v, &self.core.ca).clone();
+        let cls = self.occurs.lookup(&v, &self.core.db.ca).clone();
         let mut pos = Vec::new();
         let mut neg = Vec::new();
         for cr in cls.iter() {
-            let c = &self.core.ca[*cr];
+            let c = &self.core.db.ca[*cr];
             for i in 0 .. c.len() {
                 let l = c[i];
                 if l.var() == v {
@@ -754,12 +757,12 @@ impl SimpSolver {
 
         if pos.len() > neg.len() {
             for cr in neg.iter() {
-                mkElimClause(&mut self.elimclauses, v, &self.core.ca[*cr]);
+                mkElimClause(&mut self.elimclauses, v, &self.core.db.ca[*cr]);
             }
             mkElimUnit(&mut self.elimclauses, Lit::new(v, false));
         } else {
             for cr in pos.iter() {
-                mkElimClause(&mut self.elimclauses, v, &self.core.ca[*cr]);
+                mkElimClause(&mut self.elimclauses, v, &self.core.db.ca[*cr]);
             }
             mkElimUnit(&mut self.elimclauses, Lit::new(v, true));
         }
@@ -802,7 +805,7 @@ impl SimpSolver {
 
         loop {
             // Empty subsumption queue and return immediately on user-interrupt:
-            if self.core.asynch_interrupt.load(atomic::Ordering::Relaxed) {
+            if self.core.budget.interrupted() {
                 self.subsumption_queue.clear();
                 self.bwdsub_assigns = self.core.trail.totalSize();
                 break;
@@ -814,7 +817,7 @@ impl SimpSolver {
 
                     // Check top-level assignments by creating a dummy clause and placing it in the queue:
                     None if self.bwdsub_assigns < self.core.trail.totalSize() => {
-                        let ref mut c = self.core.ca[self.bwdsub_tmpunit];
+                        let ref mut c = self.core.db.ca[self.bwdsub_tmpunit];
                         c[0] = self.core.trail[self.bwdsub_assigns];
                         c.calcAbstraction();
 
@@ -826,7 +829,7 @@ impl SimpSolver {
                 };
 
             let best = {
-                let c = &self.core.ca[cr];
+                let ref c = self.core.db.ca[cr];
 
                 if c.mark() != 0 {
                     continue;
@@ -852,11 +855,11 @@ impl SimpSolver {
             };
 
             // Search all candidates:
-            for cj in self.occurs.lookup(&best, &self.core.ca).clone().iter() {
-                if self.core.ca[cr].mark() != 0 {
+            for cj in self.occurs.lookup(&best, &self.core.db.ca).clone().iter() {
+                if self.core.db.ca[cr].mark() != 0 {
                     break;
-                } else if self.core.ca[*cj].mark() == 0 && *cj != cr && (self.set.subsumption_lim == -1 || (self.core.ca[*cj].len() as i32) < self.set.subsumption_lim) {
-                    match subsumes(&self.core.ca[cr], &self.core.ca[*cj]) {
+                } else if self.core.db.ca[*cj].mark() == 0 && *cj != cr && (self.set.subsumption_lim == -1 || (self.core.db.ca[*cj].len() as i32) < self.set.subsumption_lim) {
+                    match subsumes(&self.core.db.ca[cr], &self.core.db.ca[*cj]) {
                         SubsumesRes::Undef      => {
                             subsumed += 1;
                             self.removeClause(*cj);
@@ -882,7 +885,7 @@ impl SimpSolver {
         if self.n_touched == 0 { return; }
 
         for cr in self.subsumption_queue.iter() {
-            let c = &mut self.core.ca[*cr];
+            let ref mut c = self.core.db.ca[*cr];
             if c.mark() == 0 {
                 c.setMark(2);
             }
@@ -891,8 +894,8 @@ impl SimpSolver {
         for i in 0 .. self.core.nVars() {
             let v = Var::new(i);
             if self.touched[&v] != 0 {
-                for cr in self.occurs.lookup(&v, &self.core.ca) {
-                    let c = &mut self.core.ca[*cr];
+                for cr in self.occurs.lookup(&v, &self.core.db.ca) {
+                    let ref mut c = self.core.db.ca[*cr];
                     if c.mark() == 0 {
                         self.subsumption_queue.push_back(*cr);
                         c.setMark(2);
@@ -903,7 +906,7 @@ impl SimpSolver {
         }
 
         for cr in self.subsumption_queue.iter() {
-            let c = &mut self.core.ca[*cr];
+            let ref mut c = self.core.db.ca[*cr];
             if c.mark() == 2 {
                 c.setMark(0);
             }
@@ -913,22 +916,20 @@ impl SimpSolver {
     }
 
     fn garbageCollect(&mut self) {
-        let mut to = ClauseAllocator::newForGC(&self.core.ca);
+        let mut to = ClauseAllocator::newForGC(&self.core.db.ca);
         self.relocAll(&mut to);
-        self.core.relocAll(&mut to);
-        debug!("|  Garbage collection:   {:12} bytes => {:12} bytes             |", self.core.ca.size(), to.size());
-        self.core.ca = to;
+        self.core.relocAll(to);
     }
 
     fn relocAll(&mut self, to : &mut ClauseAllocator) {
         if !self.use_simplification { return; }
 
         // All occurs lists:
-        self.occurs.relocGC(&mut self.core.ca, to);
+        self.occurs.relocGC(&mut self.core.db.ca, to);
 
         // Subsumption queue:
         {
-            let ref mut from = self.core.ca;
+            let ref mut from = self.core.db.ca;
             self.subsumption_queue.retain(|cr| { !from[*cr].is_deleted() });
             for cr in self.subsumption_queue.iter_mut() {
                 *cr = from.relocTo(to, *cr);
@@ -936,7 +937,7 @@ impl SimpSolver {
         }
 
         // Temporary clause:
-        self.bwdsub_tmpunit = self.core.ca.relocTo(to, self.bwdsub_tmpunit);
+        self.bwdsub_tmpunit = self.core.db.ca.relocTo(to, self.bwdsub_tmpunit);
     }
 }
 

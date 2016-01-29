@@ -12,6 +12,7 @@ use std::io::Write;
 use std::fs::File;
 use minisat::lbool::LBool;
 use minisat::decision_heuristic::PhaseSaving;
+use minisat::conflict::CCMinMode;
 use minisat::solver;
 use minisat::solver::Solver;
 use minisat::dimacs;
@@ -80,14 +81,14 @@ fn main() {
     }
 
     let core_options = {
-        let mut s : solver::CoreSettings = Default::default();
+        let mut s : solver::Settings = Default::default();
 
         for x in matches.value_of("var-decay").and_then(|s| s.parse().ok()).iter() {
             if 0.0 < *x && *x < 1.0 { s.heur.var_decay = *x; }
         }
 
         for x in matches.value_of("cla-decay").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < *x && *x < 1.0 { s.clause_decay = *x; }
+            if 0.0 < *x && *x < 1.0 { s.db.clause_decay = *x; }
         }
 
         for x in matches.value_of("rnd-freq").and_then(|s| s.parse().ok()).iter() {
@@ -100,9 +101,9 @@ fn main() {
 
         for x in matches.value_of("ccmin-mode").iter() {
             match *x {
-                "0" => { s.ccmin_mode = solver::CCMinMode::None; }
-                "1" => { s.ccmin_mode = solver::CCMinMode::Basic; }
-                "2" => { s.ccmin_mode = solver::CCMinMode::Deep; }
+                "0" => { s.ccmin_mode = CCMinMode::None; }
+                "1" => { s.ccmin_mode = CCMinMode::Basic; }
+                "2" => { s.ccmin_mode = CCMinMode::Deep; }
                 _   => {}
             }
         }
@@ -119,23 +120,23 @@ fn main() {
         if matches.is_present("rnd-init") { s.heur.rnd_init_act = true; }
         if matches.is_present("no-rnd-init") { s.heur.rnd_init_act = false; }
 
-        if matches.is_present("luby") { s.luby_restart = true; }
-        if matches.is_present("no-luby") { s.luby_restart = false; }
+        if matches.is_present("luby") { s.core.luby_restart = true; }
+        if matches.is_present("no-luby") { s.core.luby_restart = false; }
 
         for x in matches.value_of("rfirst").and_then(|s| s.parse().ok()).iter() {
-            if 0 < *x { s.restart_first = *x; }
+            if 0 < *x { s.core.restart_first = *x; }
         }
 
         for x in matches.value_of("rinc").and_then(|s| s.parse().ok()).iter() {
-            if 1.0 < *x { s.restart_inc = *x; }
+            if 1.0 < *x { s.core.restart_inc = *x; }
         }
 
         for x in matches.value_of("gc-frac").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < *x && *x <= 1.0 { s.garbage_frac = *x; }
+            if 0.0 < *x && *x <= 1.0 { s.core.garbage_frac = *x; }
         }
 
         for x in matches.value_of("min-learnts").and_then(|s| s.parse().ok()).iter() {
-            if 0 <= *x { s.min_learnts_lim = *x; }
+            if 0 <= *x { s.core.min_learnts_lim = *x; }
         }
 
         s

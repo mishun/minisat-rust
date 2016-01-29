@@ -6,18 +6,17 @@ use super::lbool::LBool;
 use super::assignment::*;
 
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq)]
 pub enum PhaseSaving { None, Limited, Full }
 
 
-#[derive(Clone, Copy)]
 pub struct DecisionHeuristicSettings {
-    pub var_decay         : f64,
-    pub random_seed       : f64,
-    pub random_var_freq   : f64,
-    pub phase_saving      : PhaseSaving, // Controls the level of phase saving
-    pub rnd_pol           : bool,        // Use random polarities for branching heuristics.
-    pub rnd_init_act      : bool,        // Initialize variable activities with a small random value.
+    pub var_decay       : f64,
+    pub random_seed     : f64,
+    pub random_var_freq : f64,
+    pub phase_saving    : PhaseSaving, // Controls the level of phase saving
+    pub rnd_pol         : bool,        // Use random polarities for branching heuristics.
+    pub rnd_init_act    : bool,        // Initialize variable activities with a small random value.
 }
 
 impl Default for DecisionHeuristicSettings {
@@ -48,9 +47,10 @@ pub struct DecisionHeuristic {
 
 impl DecisionHeuristic {
     pub fn new(settings : DecisionHeuristicSettings) -> DecisionHeuristic {
+        let seed = settings.random_seed;
         DecisionHeuristic { settings       : settings
                           , var_inc        : 1.0
-                          , rand           : random::Random::new(settings.random_seed)
+                          , rand           : random::Random::new(seed)
                           , polarity       : IndexMap::new()
                           , user_pol       : IndexMap::new()
                           , decision       : IndexMap::new()
