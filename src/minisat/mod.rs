@@ -1,5 +1,5 @@
 
-mod activity_queue;
+pub mod decision_heuristic;
 mod assignment;
 mod clause;
 pub mod dimacs;

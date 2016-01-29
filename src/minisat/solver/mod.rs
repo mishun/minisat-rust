@@ -3,15 +3,14 @@ extern crate time;
 use std::default::Default;
 use std::cmp::Ordering;
 use std::sync::atomic;
-use super::lbool::{LBool};
+use super::index_map::IndexMap;
 use super::literal::{Var, Lit};
-use super::clause::{Clause, ClauseRef, ClauseAllocator};
-use super::index_map::{IndexMap};
-use super::random;
-use super::watches::*;
-use super::activity_queue::{ActivityQueue};
-use super::assignment::*;
+use super::lbool::LBool;
+use super::clause::*;
 use super::propagation_trail::{DecisionLevel, PropagationTrail};
+use super::assignment::*;
+use super::watches::*;
+use super::decision_heuristic::*;
 
 pub mod simp;
 
@@ -31,10 +30,8 @@ struct Stats {
     solves           : u64,
     starts           : u64,
     decisions        : u64,
-    rnd_decisions    : u64,
     propagations     : u64,
     conflicts        : u64,
-    dec_vars         : u64,
     num_clauses      : u64,
     num_learnts      : u64,
     clauses_literals : u64,
@@ -48,49 +45,18 @@ impl Stats {
     fn new() -> Stats {
         Stats { start_time : time::precise_time_s(), ..Default::default() }
     }
-
-    pub fn print(&self) {
-        let cpu_time = time::precise_time_s() - self.start_time;
-        //double mem_used = memUsedPeak();
-        info!("restarts              : {:12}", self.starts);
-        info!("conflicts             : {:12}   ({:.0} / sec)", self.conflicts, self.conflicts as f64 / cpu_time);
-
-        info!("decisions             : {:12}   ({:4.2} % random) ({:.0} / sec)",
-            self.decisions,
-            self.rnd_decisions as f64 * 100.0 / self.decisions as f64,
-            self.decisions as f64 / cpu_time
-        );
-
-        info!("propagations          : {:12}   ({:.0} / sec)", self.propagations, self.propagations as f64 / cpu_time);
-
-        info!("conflict literals     : {:12}   ({:4.2} % deleted)",
-            self.tot_literals,
-            (self.max_literals - self.tot_literals) as f64 * 100.0 / self.max_literals as f64
-        );
-
-        //if (mem_used != 0) printf("Memory used           : %.2f MB\n", mem_used);
-        info!("CPU time              : {} s", cpu_time);
-    }
 }
 
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum CCMinMode { None, Basic, Deep }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub enum PhaseSaving { None, Limited, Full }
-
 #[derive(Clone, Copy)]
 pub struct CoreSettings {
-    pub var_decay         : f64,
+    pub heur              : DecisionHeuristicSettings,
     pub clause_decay      : f64,
-    pub random_seed       : f64,
-    pub random_var_freq   : f64,
     pub luby_restart      : bool,
     pub ccmin_mode        : CCMinMode,   // Controls conflict clause minimization
-    pub phase_saving      : PhaseSaving, // Controls the level of phase saving
-    pub rnd_pol           : bool,        // Use random polarities for branching heuristics.
-    pub rnd_init_act      : bool,        // Initialize variable activities with a small random value.
     pub garbage_frac      : f64,         // The fraction of wasted memory allowed before a garbage collection is triggered.
     pub min_learnts_lim   : i32,         // Minimum number to set the learnts limit to.
     pub restart_first     : i32,         // The initial restart limit.                                                                (default 100)
@@ -106,15 +72,10 @@ pub struct CoreSettings {
 impl Default for CoreSettings {
     fn default() -> CoreSettings {
         CoreSettings {
-            var_decay         : 0.95,
+            heur              : Default::default(),
             clause_decay      : 0.999,
-            random_seed       : 91648253.0,
-            random_var_freq   : 0.0,
             luby_restart      : true,
             ccmin_mode        : CCMinMode::Deep,
-            phase_saving      : PhaseSaving::Full,
-            rnd_pol           : false,
-            rnd_init_act      : false,
             garbage_frac      : 0.20,
             min_learnts_lim   : 0,
             restart_first     : 100,
@@ -139,13 +100,13 @@ enum Seen {
     Failed    = 3
 }
 
+
 pub struct CoreSolver {
     set                : CoreSettings,
 
     model              : Vec<LBool>,             // If problem is satisfiable, this vector contains the model (if any).
     conflict           : IndexMap<Lit, ()>,
 
-    rand               : random::Random,
     stats              : Stats,   // Statistics: (read-only member variable)
 
     // Solver state:
@@ -155,15 +116,11 @@ pub struct CoreSolver {
     trail              : PropagationTrail<Lit>,       // Assignment stack; stores all assigments made in the order they were made.
     assumptions        : Vec<Lit>,                    // Current set of assumptions provided to solve by the user.
     assigns            : Assignment,                  // The current assignments.
-    polarity           : IndexMap<Var, bool>,         // The preferred polarity of each variable.
-    user_pol           : IndexMap<Var, LBool>,        // The users preferred polarity of each variable.
-    decision           : IndexMap<Var, bool>,         // Declares if a variable is eligible for selection in the decision heuristic.
     watches            : Watches,                     // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
-    activity_queue     : ActivityQueue<Var>,          // A priority queue of variables ordered with respect to the variable activity.
+    heur               : DecisionHeuristic,
 
     ok                 : bool,   // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
     cla_inc            : f64,    // Amount to bump next clause with.
-    var_inc            : f64,    // Amount to bump next variable with.
     simpDB_assigns     : i32,    // Number of top-level assignments since last execution of 'simplify()'.
     simpDB_props       : i64,    // Remaining number of propagations that must be made before next execution of 'simplify()'.
     progress_estimate  : f64,    // Set by 'search()'.
@@ -198,12 +155,8 @@ impl Solver for CoreSolver {
     fn newVar(&mut self, upol : LBool, dvar : bool) -> Var {
         let v = self.assigns.newVar(VarData { reason : None, level : 0 });
         self.watches.initVar(v);
-        self.activity_queue.setActivity(&v, if self.set.rnd_init_act { self.rand.drand() * 0.00001 } else { 0.0 });
+        self.heur.initVar(v, upol, dvar);
         self.seen.insert(&v, Seen::Undef);
-        self.polarity.insert(&v, true);
-        self.user_pol.insert(&v, upol);
-        self.decision.insert(&v, false);
-        self.setDecisionVar(v, dvar);
         v
     }
 
@@ -251,7 +204,24 @@ impl Solver for CoreSolver {
     }
 
     fn printStats(&self) {
-        self.stats.print();
+        let cpu_time = time::precise_time_s() - self.stats.start_time;
+        //double mem_used = memUsedPeak();
+        info!("restarts              : {:12}", self.stats.starts);
+        info!("conflicts             : {:12}   ({:.0} / sec)", self.stats.conflicts, self.stats.conflicts as f64 / cpu_time);
+
+        info!("decisions             : {:12}   ({:4.2} % random) ({:.0} / sec)",
+            self.stats.decisions,
+            self.heur.rnd_decisions as f64 * 100.0 / self.stats.decisions as f64,
+            self.stats.decisions as f64 / cpu_time);
+
+        info!("propagations          : {:12}   ({:.0} / sec)", self.stats.propagations, self.stats.propagations as f64 / cpu_time);
+
+        info!("conflict literals     : {:12}   ({:4.2} % deleted)",
+            self.stats.tot_literals,
+            (self.stats.max_literals - self.stats.tot_literals) as f64 * 100.0 / self.stats.max_literals as f64);
+
+        //if (mem_used != 0) printf("Memory used           : %.2f MB\n", mem_used);
+        info!("CPU time              : {} s", cpu_time);
         info!("");
     }
 }
@@ -264,8 +234,6 @@ impl CoreSolver {
             model : Vec::new(),
             conflict : IndexMap::new(),
 
-            rand : random::Random::new(settings.random_seed),
-
             stats : Stats::new(),
 
             clauses : Vec::new(),
@@ -274,15 +242,11 @@ impl CoreSolver {
             assumptions : Vec::new(),
 
             assigns : Assignment::new(),
-            polarity : IndexMap::new(),
-            user_pol : IndexMap::new(),
-            decision : IndexMap::new(),
             watches : Watches::new(),
-            activity_queue : ActivityQueue::new(),
+            heur    : DecisionHeuristic::new(settings.heur),
 
             ok : true,
             cla_inc : 1.0,
-            var_inc : 1.0,
             simpDB_assigns : -1,
             simpDB_props : 0,
             progress_estimate : 0.0,
@@ -373,7 +337,8 @@ impl CoreSolver {
         if self.ca.checkGarbage(self.set.garbage_frac) {
             self.garbageCollect();
         }
-        self.rebuildOrderHeap();
+
+        self.heur.rebuildOrderHeap(&self.assigns);
 
         self.simpDB_assigns = self.nAssigns() as i32;
         self.simpDB_props   = (self.stats.clauses_literals + self.stats.learnts_literals) as i64; // (shouldn't depend on stats really, but it will do for now)
@@ -384,35 +349,14 @@ impl CoreSolver {
     // Revert to the state at given level (keeping all assignment at 'level' but not beyond).
     fn cancelUntil(&mut self, target_level : DecisionLevel) {
         let ref mut assigns = self.assigns;
-        let ref mut polarity = self.polarity;
-        let ref mut activity_queue = self.activity_queue;
-        let ref decision = self.decision;
-        let phase_saving = self.set.phase_saving;
+        let ref mut heur = self.heur;
 
         let top_level = self.trail.decisionLevel();
         self.trail.cancelUntil(target_level, move |level, lit| {
             let x = lit.var();
             assigns.cancel(x);
-            if phase_saving == PhaseSaving::Full || (phase_saving == PhaseSaving::Limited && level == top_level) {
-                polarity[&x] = lit.sign();
-            }
-            if decision[&x] {
-                activity_queue.insert(x);
-            }
+            heur.cancel(lit, level == top_level);
         });
-    }
-
-    fn setDecisionVar(&mut self, v : Var, b : bool) {
-        let pb = self.decision[&v];
-        if b != pb {
-            if b {
-                self.stats.dec_vars += 1;
-                self.activity_queue.insert(v);
-            } else {
-                self.stats.dec_vars -= 1;
-            }
-            self.decision[&v] = b;
-        }
     }
 
     fn solve_(&mut self) -> LBool {
@@ -501,7 +445,7 @@ impl CoreSolver {
                         }
                     }
 
-                    self.var_inc *= 1.0 / self.set.var_decay;
+                    self.heur.decayActivity();
                     self.cla_inc *= 1.0 / self.set.clause_decay;
 
                     self.learntsize_adjust_cnt -= 1;
@@ -512,7 +456,7 @@ impl CoreSolver {
 
                         info!("| {:9} | {:7} {:8} {:8} | {:8} {:8} {:6.0} | {:6.3} % |",
                                self.stats.conflicts,
-                               self.stats.dec_vars - (self.trail.levelSize(0) as u64),
+                               self.heur.dec_vars - self.trail.levelSize(0),
                                self.nClauses(),
                                self.stats.clauses_literals,
                                self.max_learnts as u64,
@@ -565,7 +509,7 @@ impl CoreSolver {
                         None    => {
                             // New variable decision:
                             self.stats.decisions += 1;
-                            match self.pickBranchLit() {
+                            match self.heur.pickBranchLit(&self.assigns) {
                                 Some(n) => { next = Some(n) }
                                 None    => {
                                     // Model found:
@@ -653,47 +597,6 @@ impl CoreSolver {
         }
     }
 
-    fn rebuildOrderHeap(&mut self) {
-        let mut tmp = Vec::new();
-        for vi in 0 .. self.nVars() {
-            let v = Var::new(vi);
-            if self.decision[&v] && self.assigns.undef(v) {
-                tmp.push(v);
-            }
-        }
-        self.activity_queue.heapifyFrom(tmp);
-    }
-
-    fn pickBranchLit(&mut self) -> Option<Lit> {
-        let mut next = None;
-
-        // Random decision:
-        if self.rand.chance(self.set.random_var_freq) && !self.activity_queue.is_empty() {
-            let v = self.activity_queue[self.rand.irand(self.activity_queue.len())];
-            if self.assigns.undef(v) && self.decision[&v] {
-                self.stats.rnd_decisions += 1;
-            }
-            next = Some(v);
-        }
-
-        // Activity based decision:
-        while next.is_none() || !self.assigns.undef(next.unwrap()) || !self.decision[&next.unwrap()] {
-            next = self.activity_queue.pop();
-            if next.is_none() { break; }
-        }
-
-        // Choose polarity based on different polarity modes (global or per-variable):
-        next.map(|v| {
-            if !self.user_pol[&v].isUndef() {
-                Lit::new(v, self.user_pol[&v].isTrue())
-            } else if self.set.rnd_pol {
-                Lit::new(v, self.rand.chance(0.5))
-            } else {
-                Lit::new(v, self.polarity[&v])
-            }
-        })
-    }
-
     //_________________________________________________________________________________________________
     //
     // analyze : (confl : Clause*) (out_learnt : vec<Lit>&) (out_btlevel : int&)  ->  [void]
@@ -731,7 +634,7 @@ impl CoreSolver {
                 let v = q.var();
 
                 if self.seen[&v] == Seen::Undef && self.assigns.vardata[&v].level > 0 {
-                    varBumpActivity(&mut self.activity_queue, &mut self.var_inc, v);
+                    self.heur.bumpActivity(v);
 
                     self.seen[&v] = Seen::Source;
                     if self.assigns.vardata[&v].level >= self.trail.decisionLevel() {
@@ -889,7 +792,6 @@ impl CoreSolver {
         true
     }
 
-
     //_________________________________________________________________________________________________
     //
     // analyzeFinal : (p : Lit)  ->  [void]
@@ -932,7 +834,6 @@ impl CoreSolver {
         out_conflict
     }
 
-
 //    pub fn implies(&mut self, assumps : &Vec<Lit>, out : &mut Vec<Lit>) -> bool {
 //        self.trail.newDecisionLevel();
 //
@@ -962,7 +863,6 @@ impl CoreSolver {
 //        ret
 //    }
 
-
     fn budgetOff(&mut self) {
         self.conflict_budget = -1;
         self.propagation_budget = -1;
@@ -972,13 +872,6 @@ impl CoreSolver {
         !self.asynch_interrupt.load(atomic::Ordering::Relaxed) &&
             (self.conflict_budget    < 0 || self.stats.conflicts < self.conflict_budget as u64) &&
             (self.propagation_budget < 0 || self.stats.propagations < self.propagation_budget as u64)
-    }
-
-    // Insert a variable in the decision order priority queue.
-    fn insertVarOrder(&mut self, x : Var) {
-        if self.decision[&x] {
-            self.activity_queue.insert(x);
-        }
     }
 
     fn uncheckedEnqueue(&mut self, p : Lit, from : Option<ClauseRef>) {
@@ -1162,17 +1055,6 @@ fn detachClause(ca : &ClauseAllocator, stats : &mut Stats, watches : &mut Watche
     } else {
         stats.num_clauses -= 1;
         stats.clauses_literals -= c.len() as u64;
-    }
-}
-
-fn varBumpActivity(q : &mut ActivityQueue<Var>, var_inc : &mut f64, v : Var) {
-    let new = q.getActivity(&v) + *var_inc;
-    if new > 1e100 {
-        *var_inc *= 1e-100;
-        q.scaleActivity(1e-100);
-        q.setActivity(&v, new * 1e-100);
-    } else {
-        q.setActivity(&v, new);
     }
 }
 

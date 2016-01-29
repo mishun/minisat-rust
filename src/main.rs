@@ -10,10 +10,11 @@ use std::default::Default;
 use std::io;
 use std::io::Write;
 use std::fs::File;
+use minisat::lbool::LBool;
+use minisat::decision_heuristic::PhaseSaving;
 use minisat::solver;
 use minisat::solver::Solver;
 use minisat::dimacs;
-use minisat::lbool::LBool;
 
 mod minisat;
 
@@ -82,7 +83,7 @@ fn main() {
         let mut s : solver::CoreSettings = Default::default();
 
         for x in matches.value_of("var-decay").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < *x && *x < 1.0 { s.var_decay = *x; }
+            if 0.0 < *x && *x < 1.0 { s.heur.var_decay = *x; }
         }
 
         for x in matches.value_of("cla-decay").and_then(|s| s.parse().ok()).iter() {
@@ -90,11 +91,11 @@ fn main() {
         }
 
         for x in matches.value_of("rnd-freq").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 <= *x && *x <= 1.0 { s.random_var_freq = *x; }
+            if 0.0 <= *x && *x <= 1.0 { s.heur.random_var_freq = *x; }
         }
 
         for x in matches.value_of("rnd-seed").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < *x { s.random_seed = *x; }
+            if 0.0 < *x { s.heur.random_seed = *x; }
         }
 
         for x in matches.value_of("ccmin-mode").iter() {
@@ -108,15 +109,15 @@ fn main() {
 
         for x in matches.value_of("phase_saving").iter() {
             match *x {
-                "0" => { s.phase_saving = solver::PhaseSaving::None; }
-                "1" => { s.phase_saving = solver::PhaseSaving::Limited; }
-                "2" => { s.phase_saving = solver::PhaseSaving::Full; }
+                "0" => { s.heur.phase_saving = PhaseSaving::None; }
+                "1" => { s.heur.phase_saving = PhaseSaving::Limited; }
+                "2" => { s.heur.phase_saving = PhaseSaving::Full; }
                 _   => {}
             }
         }
 
-        if matches.is_present("rnd-init") { s.rnd_init_act = true; }
-        if matches.is_present("no-rnd-init") { s.rnd_init_act = false; }
+        if matches.is_present("rnd-init") { s.heur.rnd_init_act = true; }
+        if matches.is_present("no-rnd-init") { s.heur.rnd_init_act = false; }
 
         if matches.is_present("luby") { s.luby_restart = true; }
         if matches.is_present("no-luby") { s.luby_restart = false; }

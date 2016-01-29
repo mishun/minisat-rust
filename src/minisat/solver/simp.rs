@@ -560,7 +560,7 @@ impl SimpSolver {
             self.max_simp_var = Var::new(self.core.nVars());
 
             // Force full cleanup (this is safe and desirable since it only happens once):
-            self.core.rebuildOrderHeap();
+            self.core.heur.rebuildOrderHeap(&self.core.assigns);
             self.core.garbageCollect();
         } else {
             // Cheaper cleanup:
@@ -753,7 +753,7 @@ impl SimpSolver {
 
         // Delete and store old clauses:
         self.eliminated[&v] = 1;
-        self.core.setDecisionVar(v, false);
+        self.core.heur.setDecisionVar(v, false);
         self.eliminated_vars += 1;
 
         if pos.len() > neg.len() {
