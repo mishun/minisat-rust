@@ -104,19 +104,17 @@ impl Assignment {
     }
 
     #[inline]
-    pub fn ofVar(&self, x : Var) -> Option<bool> {
-        let ref line = self.assignment[x.toIndex()];
-        if line.assign.isUndef() {
-            None
-        } else {
-            Some(line.assign.isTrue())
-        }
-    }
-
-    #[inline]
     pub fn ofLit(&self, p : Lit) -> LBool {
         let ref line = self.assignment[p.var().toIndex()];
         line.assign ^ p.sign()
+    }
+
+    pub fn extractModel(&self) -> Vec<Option<bool>> {
+        let mut model = Vec::with_capacity(self.assignment.len());
+        for line in self.assignment.iter() {
+            model.push(if line.assign.isUndef() { None } else { Some(line.assign.isTrue()) });
+        }
+        model
     }
 
     pub fn relocGC(&mut self, trail : &PropagationTrail<Lit>, from : &mut clause::ClauseAllocator, to : &mut clause::ClauseAllocator) {

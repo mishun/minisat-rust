@@ -437,11 +437,7 @@ impl CoreSolver {
 
             match self.search(conflicts_to_go) {
                 SearchResult::SAT             => {
-                    let mut model = Vec::new();
-                    for i in 0 .. self.assigns.nVars() {
-                        model.push(self.assigns.ofVar(Var::new(i)));
-                    }
-                    return PartialResult::SAT(model);
+                    return PartialResult::SAT(self.assigns.extractModel());
                 }
 
                 SearchResult::UnSAT           => {
