@@ -5,7 +5,7 @@ pub type DecisionLevel = usize;
 pub struct PropagationTrail<V> {
     qhead     : usize,
     pub trail : Vec<V>,
-    pub lim   : Vec<usize>
+    lim       : Vec<usize>
 }
 
 impl<V> PropagationTrail<V> {
@@ -89,6 +89,15 @@ impl<V : Clone> PropagationTrail<V> {
             Some(p)
         } else {
             None
+        }
+    }
+
+    #[inline]
+    pub fn inspectAssignmentsUntilLevel<F : FnMut(V) -> ()>(&self, target_level : DecisionLevel, mut f : F) {
+        if self.decisionLevel() > target_level {
+            for i in (self.lim[target_level] .. self.trail.len()).rev() {
+                f(self.trail[i].clone());
+            }
         }
     }
 }

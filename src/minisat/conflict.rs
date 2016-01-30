@@ -246,31 +246,27 @@ impl AnalyzeContext {
         let mut out_conflict = IndexMap::new();
         out_conflict.insert(&p, ());
 
-        if !trail.isGroundLevel() {
-            self.seen[&p.var()] = Seen::Source;
-            for i in (trail.lim[0] .. trail.totalSize()).rev() {
-                let x = trail[i].var();
-                if self.seen[&x] != Seen::Undef {
-                    match assigns.vardata(x).reason {
-                        None     => {
-                            assert!(assigns.vardata(x).level > 0);
-                            out_conflict.insert(&!trail[i], ());
-                        }
+        trail.inspectAssignmentsUntilLevel(0, |lit| {
+            let x = lit.var();
+            if self.seen[&x] != Seen::Undef {
+                match assigns.vardata(x).reason {
+                    None     => {
+                        assert!(assigns.vardata(x).level > 0);
+                        out_conflict.insert(&!lit, ());
+                    }
 
-                        Some(cr) => {
-                            let ref c = db.ca[cr];
-                            for j in 1 .. c.len() {
-                                let v = c[j].var();
-                                if assigns.vardata(v).level > 0 {
-                                    self.seen[&v] = Seen::Source;
-                                }
+                    Some(cr) => {
+                        let ref c = db.ca[cr];
+                        for j in 1 .. c.len() {
+                            let v = c[j].var();
+                            if assigns.vardata(v).level > 0 {
+                                self.seen[&v] = Seen::Source;
                             }
                         }
                     }
                 }
             }
-            self.seen[&p.var()] = Seen::Undef;
-        }
+        });
 
         out_conflict
     }
