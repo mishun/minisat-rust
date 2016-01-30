@@ -964,6 +964,10 @@ fn extendModel(elimclauses : &Vec<u32>, model : &mut Vec<Option<bool>>) {
             model[x.var().toIndex()] = Some(!x.sign());
         }
 
-        i -= j;
+        if i > j {
+            i -= j;
+        } else {
+            i = 0;
+        }
     }
 }
