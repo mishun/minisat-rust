@@ -475,7 +475,11 @@ impl SimpSolver {
                 self.core.model[x.var().toIndex()] = LBool::new(!x.sign());
             }
 
-            i -= j;
+            if i > j {
+                i -= j;
+            } else {
+                i = 0;
+            }
         }
     }
 
