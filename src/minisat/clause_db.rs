@@ -143,7 +143,7 @@ impl ClauseDB {
 
                 let remove = {
                     let ref c = self.ca[cr];
-                    c.len() > 2 && !isLocked(&self.ca, assigns, cr)
+                    c.len() > 2 && !assigns.isLocked(&self.ca, cr)
                                 && (i < self.learnts.len() / 2 || c.activity() < extra_lim)
                 };
                 if remove {

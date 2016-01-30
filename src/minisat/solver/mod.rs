@@ -538,15 +538,15 @@ impl CoreSolver {
                         // Perform user provided assumption:
                         let p = self.assumptions[self.trail.decisionLevel()];
                         match self.assigns.ofLit(p) {
-                            v if v.isTrue()  => {
+                            Value::True  => {
                                 // Dummy decision level:
                                 self.trail.newDecisionLevel();
                             }
-                            v if v.isFalse() => {
+                            Value::False => {
                                 let conflict = self.analyze.analyzeFinal(&self.db, &self.assigns, &self.trail, !p);
                                 return SearchResult::AssumpsConfl(conflict);
                             }
-                            _                => {
+                            Value::Undef => {
                                 next = Some(p);
                                 break;
                             }
@@ -584,12 +584,10 @@ impl CoreSolver {
 
     // NOTE: enqueue does not set the ok flag! (only public methods do)
     fn enqueue(&mut self, p : Lit, from : Option<ClauseRef>) -> bool {
-        let val = self.assigns.ofLit(p);
-        if val.isUndef() {
-            self.uncheckedEnqueue(p, from);
-            true
-        } else {
-            val.isTrue()
+        match self.assigns.ofLit(p) {
+            Value::Undef => { self.uncheckedEnqueue(p, from); true }
+            Value::True  => { true }
+            Value::False => { false }
         }
     }
 

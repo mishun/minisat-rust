@@ -1,8 +1,30 @@
 use super::index_map::HasIndex;
 use super::literal::{Var, Lit};
-use super::lbool::*;
 use super::clause;
 use super::propagation_trail::*;
+
+
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum Value { Undef, False, True }
+
+impl Value {
+    #[inline]
+    fn isUndef(&self) -> bool {
+        match *self {
+            Value::Undef => { true }
+            _            => { false }
+        }
+    }
+
+    fn extractBool(&self) -> Option<bool> {
+        match *self {
+            Value::Undef  => { None }
+            Value::False  => { Some(false) }
+            Value::True   => { Some(true) }
+        }
+    }
+}
 
 
 struct VarData {
@@ -12,7 +34,7 @@ struct VarData {
 
 
 struct VarLine {
-    assign : LBool,
+    assign : [Value; 2],
     vd     : VarData
 }
 
@@ -35,7 +57,7 @@ impl Assignment {
     }
 
     pub fn newVar(&mut self) -> Var {
-        let line = VarLine { assign : LBool::Undef(), vd : VarData { reason : None, level : 0 } };
+        let line = VarLine { assign : [Value::Undef, Value::Undef], vd : VarData { reason : None, level : 0 } };
         let vid =
             match self.free_vars.pop() {
                 Some(v) => {
@@ -56,27 +78,12 @@ impl Assignment {
         self.free_vars.push(v.toIndex());
     }
 
-    pub fn forgetReason(&mut self, ca : &clause::ClauseAllocator, cr : clause::ClauseRef) {
-        // Don't leave pointers to free'd memory!
-        if isLocked(ca, self, cr) {
-            let ref mut line = self.assignment[ca[cr][0].var().toIndex()];
-            assert!(!line.assign.isUndef());
-            line.vd.reason = None;
-        }
-    }
-
-    #[inline]
-    pub fn vardata(&self, v : Var) -> &VarData {
-        let ref line = self.assignment[v.toIndex()];
-        assert!(!line.assign.isUndef());
-        &line.vd
-    }
-
     #[inline]
     pub fn assignLit(&mut self, p : Lit, level : DecisionLevel, reason : Option<clause::ClauseRef>) {
         let ref mut line = self.assignment[p.var().toIndex()];
-        assert!(line.assign.isUndef());
-        line.assign = LBool::new(!p.sign());
+        assert!(line.assign[0].isUndef());
+        line.assign[p.sign() as usize] = Value::True;
+        line.assign[(p.sign() as usize) ^ 1] = Value::False;
         line.vd.level = level;
         line.vd.reason = reason;
     }
@@ -84,35 +91,48 @@ impl Assignment {
     #[inline]
     pub fn cancel(&mut self, x : Var) {
         let ref mut line = self.assignment[x.toIndex()];
-        line.assign = LBool::Undef();
+        line.assign = [Value::Undef, Value::Undef];
     }
 
     #[inline]
     pub fn undef(&self, x : Var) -> bool {
         let ref line = self.assignment[x.toIndex()];
-        line.assign.isUndef()
+        line.assign[0].isUndef()
     }
 
     #[inline]
     pub fn sat(&self, p : Lit) -> bool {
-        self.ofLit(p).isTrue()
+        match self.ofLit(p) {
+            Value::True => { true }
+            _           => { false }
+        }
     }
 
     #[inline]
     pub fn unsat(&self, p : Lit) -> bool {
-        self.ofLit(p).isFalse()
+        match self.ofLit(p) {
+            Value::False => { true }
+            _            => { false }
+        }
     }
 
     #[inline]
-    pub fn ofLit(&self, p : Lit) -> LBool {
+    pub fn ofLit(&self, p : Lit) -> Value {
         let ref line = self.assignment[p.var().toIndex()];
-        line.assign ^ p.sign()
+        line.assign[p.sign() as usize]
+    }
+
+    #[inline]
+    pub fn vardata(&self, v : Var) -> &VarData {
+        let ref line = self.assignment[v.toIndex()];
+        assert!(!line.assign[0].isUndef());
+        &line.vd
     }
 
     pub fn extractModel(&self) -> Vec<Option<bool>> {
         let mut model = Vec::with_capacity(self.assignment.len());
         for line in self.assignment.iter() {
-            model.push(if line.assign.isUndef() { None } else { Some(line.assign.isTrue()) });
+            model.push(line.assign[0].extractBool());
         }
         model
     }
@@ -124,13 +144,30 @@ impl Assignment {
             // Note: it is not safe to call 'locked()' on a relocated clause. This is why we keep
             // 'dangling' reasons here. It is safe and does not hurt.
             match self.assignment[v.toIndex()].vd.reason {
-                Some(cr) if from[cr].reloced() || isLocked(from, self, cr) => {
+                Some(cr) if from[cr].reloced() || self.isLocked(from, cr) => {
                     assert!(!from[cr].is_deleted());
                     self.assignment[v.toIndex()].vd.reason = Some(from.relocTo(to, cr));
                 }
 
                 _ => {}
             }
+        }
+    }
+
+    pub fn isLocked(&self, ca : &clause::ClauseAllocator, cr : clause::ClauseRef) -> bool {
+        let lit = ca[cr][0];
+        if !self.sat(lit) { return false; }
+        match self.vardata(lit.var()).reason {
+            Some(r) if cr == r => { true }
+            _                  => { false }
+        }
+    }
+
+    pub fn forgetReason(&mut self, ca : &clause::ClauseAllocator, cr : clause::ClauseRef) {
+        // Don't leave pointers to free'd memory!
+        if self.isLocked(ca, cr) {
+            let ref mut line = self.assignment[ca[cr][0].var().toIndex()];
+            line.vd.reason = None;
         }
     }
 }
@@ -144,14 +181,4 @@ pub fn satisfiedWith(c : &clause::Clause, s : &Assignment) -> bool {
         }
     }
     false
-}
-
-
-pub fn isLocked(ca : &clause::ClauseAllocator, assigns : &Assignment, cr : clause::ClauseRef) -> bool {
-    let lit = ca[cr][0];
-    if !assigns.sat(lit) { return false; }
-    match assigns.vardata(lit.var()).reason {
-        Some(r) if cr == r => { true }
-        _                  => { false }
-    }
 }
