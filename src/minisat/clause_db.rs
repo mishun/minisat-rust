@@ -84,7 +84,7 @@ impl ClauseDB {
     }
 
     pub fn editClause<F : FnOnce(&mut Clause) -> ()>(&mut self, cr : ClauseRef, f : F) {
-        let ref mut c = self.ca[cr];
+        let c = self.ca.edit(cr);
         if c.is_learnt() { self.learnts_literals -= c.len() as u64; } else { self.clauses_literals -= c.len() as u64; }
         f(c);
         if c.is_learnt() { self.learnts_literals += c.len() as u64; } else { self.clauses_literals += c.len() as u64; }
@@ -92,7 +92,7 @@ impl ClauseDB {
 
     pub fn bumpActivity(&mut self, cr : ClauseRef) {
         let new = {
-            let ref mut c = self.ca[cr];
+            let c = self.ca.edit(cr);
             if !c.is_learnt() { return; }
 
             let new = c.activity() + self.cla_inc;
@@ -103,7 +103,7 @@ impl ClauseDB {
         if new > 1e20 {
             self.cla_inc *= 1e-20;
             for cri in self.learnts.iter() {
-                let ref mut c = self.ca[*cri];
+                let c = self.ca.edit(*cri);
                 let scaled = c.activity() * 1e-10;
                 c.setActivity(scaled);
             }
@@ -150,7 +150,7 @@ impl ClauseDB {
                                 && (i < self.learnts.len() / 2 || c.activity() < extra_lim)
                 };
                 if remove {
-                    watches.unwatchClause(&self.ca[cr], cr, false);
+                    watches.unwatchClauseLazy(&self.ca[cr]);
                     self.removeClause(assigns, cr);
                 } else {
                     self.learnts[j] = cr;
@@ -165,11 +165,11 @@ impl ClauseDB {
         if self.ca[cr].is_deleted() {
             false
         } else if satisfiedWith(&self.ca[cr], assigns) {
-            watches.unwatchClause(&self.ca[cr], cr, false);
+            watches.unwatchClauseLazy(&self.ca[cr]);
             self.removeClause(assigns, cr);
             false
         } else {
-            let ref mut c = self.ca[cr];
+            let c = self.ca.edit(cr);
             assert!(assigns.undef(c[0].var()) && assigns.undef(c[1].var()));
             c.retainSuffix(2, |lit| !assigns.unsat(*lit));
             true

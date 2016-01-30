@@ -69,16 +69,18 @@ impl Watches {
         self.watches[&!c[1]].watchers.push(Watcher { cref : cr, blocker : c[0] });
     }
 
-    pub fn unwatchClause(&mut self, c : &Clause, cr : ClauseRef, strict : bool)
+    pub fn unwatchClauseStrict(&mut self, c : &Clause, cr : ClauseRef)
     {
         assert!(c.len() > 1);
-        if strict {
-            self.watches[&!c[0]].watchers.retain(|w| w.cref != cr);
-            self.watches[&!c[1]].watchers.retain(|w| w.cref != cr);
-        } else {
-            self.watches[&!c[0]].dirty = true;
-            self.watches[&!c[1]].dirty = true;
-        }
+        self.watches[&!c[0]].watchers.retain(|w| w.cref != cr);
+        self.watches[&!c[1]].watchers.retain(|w| w.cref != cr);
+    }
+
+    pub fn unwatchClauseLazy(&mut self, c : &Clause)
+    {
+        assert!(c.len() > 1);
+        self.watches[&!c[0]].dirty = true;
+        self.watches[&!c[1]].dirty = true;
     }
 
     // Description:
@@ -100,19 +102,19 @@ impl Watches {
             let mut i = 0;
             let mut j = 0;
             loop {
-                let (cw, first, new_watch) = {
+                let (cw, new_watch) = {
                     let ref mut p_watches = self.watches[&p].watchers;
                     if i >= p_watches.len() { break; }
 
-                    let cw = p_watches[i].clone();
-                    if assigns.sat(cw.blocker) {
-                        p_watches[j] = p_watches[i].clone();
+                    let pwi = p_watches[i].clone();
+                    if assigns.sat(pwi.blocker) {
+                        p_watches[j] = pwi;
                         i += 1;
                         j += 1;
                         continue;
                     }
 
-                    let ref mut c = ca[cw.cref];
+                    let c = ca.edit(pwi.cref);
                     if c[0] == false_lit {
                         c[0] = c[1];
                         c[1] = false_lit;
@@ -121,9 +123,9 @@ impl Watches {
                     i += 1;
 
                     // If 0th watch is true, then clause is already satisfied.
-                    let first = c[0];
-                    if first != cw.blocker && assigns.sat(first) {
-                        p_watches[j] = Watcher { cref : cw.cref, blocker : first };
+                    let cw = Watcher { cref : pwi.cref, blocker : c[0] };
+                    if cw.blocker != pwi.blocker && assigns.sat(cw.blocker) {
+                        p_watches[j] = cw;
                         j += 1;
                         continue;
                     }
@@ -132,30 +134,29 @@ impl Watches {
                     let mut new_watch = None;
                     for k in 2 .. c.len() {
                         if !assigns.unsat(c[k]) {
-                            new_watch = Some(k);
+                            let lit = c[k];
+                            c[1] = lit;
+                            c[k] = false_lit;
+                            new_watch = Some(lit);
                             break;
                         }
                     }
 
-                    (cw, first, new_watch)
+                    (cw, new_watch)
                 };
 
                 match new_watch {
-                    Some(k) => {
-                        let ref mut c = ca[cw.cref];
-                        let lit = c[k];
-                        c[1] = lit;
-                        c[k] = false_lit;
-                        self.watches[&!lit].watchers.push(Watcher { cref : cw.cref, blocker : first });
+                    Some(lit) => {
+                        self.watches[&!lit].watchers.push(cw);
                     }
 
                     // Did not find watch -- clause is unit under assignment:
                     None    => {
                         let ref mut p_watches = self.watches[&p].watchers;
-                        p_watches[j] = Watcher { cref : cw.cref, blocker : first };
+                        p_watches[j] = cw.clone();
                         j += 1;
 
-                        if assigns.unsat(first) {
+                        if assigns.unsat(cw.blocker) {
                             confl = Some(cw.cref);
                             trail.dequeueAll();
 
@@ -166,8 +167,8 @@ impl Watches {
                                 i += 1;
                             }
                         } else {
-                            assigns.assignLit(first, VarData { level : trail.decisionLevel(), reason : Some(cw.cref) });
-                            trail.push(first);
+                            assigns.assignLit(cw.blocker, trail.decisionLevel(), Some(cw.cref));
+                            trail.push(cw.blocker);
                         }
                     }
                 }

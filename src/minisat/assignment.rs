@@ -32,7 +32,7 @@ impl Assignment {
         self.assigns.len()
     }
 
-    pub fn newVar(&mut self, vd : VarData) -> Var {
+    pub fn newVar(&mut self) -> Var {
         let vid =
             match self.free_vars.pop() {
                 Some(vid) => {
@@ -46,7 +46,7 @@ impl Assignment {
                 }
             };
         let v = Var::new(vid);
-        self.vardata.insert(&v, vd);
+        self.vardata.insert(&v, VarData { reason : None, level : 0 });
         v
     }
 
@@ -55,11 +55,11 @@ impl Assignment {
     }
 
     #[inline]
-    pub fn assignLit(&mut self, p : Lit, vd : VarData) {
+    pub fn assignLit(&mut self, p : Lit, level : DecisionLevel, reason : Option<clause::ClauseRef>) {
         let i = p.var().toIndex();
         assert!(self.assigns[i].isUndef());
         self.assigns[i] = LBool::new(!p.sign());
-        self.vardata.insert(&p.var(), vd);
+        self.vardata.insert(&p.var(), VarData { level : level, reason : reason });
     }
 
     #[inline]

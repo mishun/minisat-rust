@@ -20,11 +20,6 @@ impl<K : HasIndex, V> IndexMap<K, V> {
                  }
     }
 
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
-    }
-
     pub fn clear(&mut self) {
         self.map.clear();
     }

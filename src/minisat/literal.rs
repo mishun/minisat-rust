@@ -85,6 +85,6 @@ impl ops::BitXor<bool> for Lit {
 
 impl fmt::Display for Lit {
     fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}{}", if self.sign() { "~" } else { "" }, self.var())
+        write!(f, "{}{}", if self.sign() { "¬" } else { "" }, self.var())
     }
 }

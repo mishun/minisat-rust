@@ -611,7 +611,7 @@ impl SimpSolver {
             }
         }
 
-        self.core.watches.unwatchClause(&self.core.db.ca[cr], cr, false);
+        self.core.watches.unwatchClauseLazy(&self.core.db.ca[cr]);
         self.core.db.removeClause(&mut self.core.assigns, cr);
     }
 
@@ -627,13 +627,13 @@ impl SimpSolver {
         if len == 2 {
             self.removeClause(cr);
             let unit = {
-                let ref mut c = self.core.db.ca[cr];
+                let c = self.core.db.ca.edit(cr);
                 c.strengthen(l);
                 c[0]
             };
             self.core.enqueue(unit, None) && self.core.propagate().is_none()
         } else {
-            self.core.watches.unwatchClause(&self.core.db.ca[cr], cr, true);
+            self.core.watches.unwatchClauseStrict(&self.core.db.ca[cr], cr);
             self.core.db.editClause(cr, |c| { c.strengthen(l); assert!(c.len() == len - 1); });
             self.core.watches.watchClause(&self.core.db.ca[cr], cr);
 
@@ -786,7 +786,7 @@ impl SimpSolver {
 
                     // Check top-level assignments by creating a dummy clause and placing it in the queue:
                     None if self.bwdsub_assigns < self.core.trail.totalSize() => {
-                        let ref mut c = self.core.db.ca[self.bwdsub_tmpunit];
+                        let c = self.core.db.ca.edit(self.bwdsub_tmpunit);
                         c[0] = self.core.trail[self.bwdsub_assigns];
                         c.calcAbstraction();
 
@@ -854,7 +854,7 @@ impl SimpSolver {
         if self.n_touched == 0 { return; }
 
         for cr in self.subsumption_queue.iter() {
-            let ref mut c = self.core.db.ca[*cr];
+            let c = self.core.db.ca.edit(*cr);
             if c.mark() == 0 {
                 c.setMark(2);
             }
@@ -864,7 +864,7 @@ impl SimpSolver {
             let v = Var::new(i);
             if self.touched[&v] != 0 {
                 for cr in self.occurs.lookup(&v, &self.core.db.ca) {
-                    let ref mut c = self.core.db.ca[*cr];
+                    let c = self.core.db.ca.edit(*cr);
                     if c.mark() == 0 {
                         self.subsumption_queue.push_back(*cr);
                         c.setMark(2);
@@ -875,7 +875,7 @@ impl SimpSolver {
         }
 
         for cr in self.subsumption_queue.iter() {
-            let ref mut c = self.core.db.ca[*cr];
+            let c = self.core.db.ca.edit(*cr);
             if c.mark() == 2 {
                 c.setMark(0);
             }

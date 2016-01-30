@@ -135,7 +135,7 @@ impl fmt::Display for Clause {
         }
         try!(write!(f, "("));
         for i in 0 .. self.len() {
-            if i > 0 { try!(write!(f, " | ")); }
+            if i > 0 { try!(write!(f, " ∨ ")); }
             try!(write!(f, "{}", self[i]));
         }
         write!(f, ")")
@@ -143,7 +143,7 @@ impl fmt::Display for Clause {
 }
 
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub enum SubsumesRes {
     Error,
     Undef,
@@ -245,7 +245,7 @@ impl ClauseAllocator {
     }
 
     pub fn relocTo(&mut self, to : &mut ClauseAllocator, src : ClauseRef) -> ClauseRef {
-        let ref mut c = self[src];
+        let c = self.edit(src);
         if c.header.reloced {
             c.data_rel.unwrap()
         } else {
@@ -267,6 +267,12 @@ impl ClauseAllocator {
     pub fn checkGarbage(&mut self, gf : f64) -> bool {
         (self.wasted as f64) > (self.size as f64) * gf
     }
+
+    #[inline]
+    pub fn edit<'a>(&'a mut self, cr : ClauseRef) -> &'a mut Clause {
+        assert!(cr < self.clauses.len());
+        &mut(*self.clauses[cr])
+    }
 }
 
 impl ops::Index<ClauseRef> for ClauseAllocator {
@@ -276,13 +282,5 @@ impl ops::Index<ClauseRef> for ClauseAllocator {
     fn index<'a>(&'a self, index : ClauseRef) -> &'a Clause {
         assert!(index < self.clauses.len());
         &(*self.clauses[index])
-    }
-}
-
-impl ops::IndexMut<ClauseRef> for ClauseAllocator {
-    #[inline]
-    fn index_mut<'a>(&'a mut self, index : ClauseRef) -> &'a mut Clause {
-        assert!(index < self.clauses.len());
-        &mut(*self.clauses[index])
     }
 }

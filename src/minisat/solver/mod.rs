@@ -213,7 +213,7 @@ impl Solver for CoreSolver {
     }
 
     fn newVar(&mut self, upol : Option<bool>, dvar : bool) -> Var {
-        let v = self.assigns.newVar(VarData { reason : None, level : 0 });
+        let v = self.assigns.newVar();
         self.watches.initVar(v);
         self.heur.initVar(v, upol, dvar);
         self.analyze.initVar(v);
@@ -582,7 +582,7 @@ impl CoreSolver {
     }
 
     fn uncheckedEnqueue(&mut self, p : Lit, from : Option<ClauseRef>) {
-        self.assigns.assignLit(p, VarData { level : self.trail.decisionLevel(), reason : from });
+        self.assigns.assignLit(p, self.trail.decisionLevel(), from);
         self.trail.push(p);
     }
 
@@ -617,10 +617,9 @@ impl CoreSolver {
             // Note: it is not safe to call 'locked()' on a relocated clause. This is why we keep
             // 'dangling' reasons here. It is safe and does not hurt.
             match self.assigns.vardata[&v].reason {
-                Some(mut cr) if self.db.ca[cr].reloced() || isLocked(&self.db.ca, &self.assigns, cr) => {
+                Some(cr) if self.db.ca[cr].reloced() || isLocked(&self.db.ca, &self.assigns, cr) => {
                     assert!(!self.db.ca[cr].is_deleted());
-                    cr = self.db.ca.relocTo(&mut to, cr);
-                    self.assigns.vardata[&v].reason = Some(cr);
+                    self.assigns.vardata[&v].reason = Some(self.db.ca.relocTo(&mut to, cr));
                 }
 
                 _ => {}
