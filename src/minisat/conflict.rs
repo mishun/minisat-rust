@@ -76,11 +76,11 @@ impl AnalyzeContext {
                     let q = c[j];
                     let v = q.var();
 
-                    if self.seen[&v] == Seen::Undef && assigns.vardata[&v].level > 0 {
+                    if self.seen[&v] == Seen::Undef && assigns.vardata(v).level > 0 {
                         heur.bumpActivity(v);
 
                         self.seen[&v] = Seen::Source;
-                        if assigns.vardata[&v].level >= trail.decisionLevel() {
+                        if assigns.vardata(v).level >= trail.decisionLevel() {
                             pathC += 1;
                         } else {
                             out_learnt.push(q);
@@ -94,7 +94,7 @@ impl AnalyzeContext {
                     if self.seen[&trail[index].var()] != Seen::Undef { break; }
                 }
                 let pl = trail[index];
-                confl = assigns.vardata[&pl.var()].reason;
+                confl = assigns.vardata(pl.var()).reason;
                 self.seen[&pl.var()] = Seen::Undef;
                 p = Some(pl);
 
@@ -116,7 +116,7 @@ impl AnalyzeContext {
                     let mut j = 1;
                     for i in 1 .. out_learnt.len() {
                         let l = out_learnt[i];
-                        if assigns.vardata[&l.var()].reason.is_none() || !self.litRedundant(db, assigns, l) {
+                        if assigns.vardata(l.var()).reason.is_none() || !self.litRedundant(db, assigns, l) {
                             out_learnt[j] = out_learnt[i];
                             j += 1;
                         }
@@ -128,13 +128,13 @@ impl AnalyzeContext {
                     let mut j = 1;
                     for i in 1 .. out_learnt.len() {
                         let x = out_learnt[i].var();
-                        match assigns.vardata[&x].reason {
+                        match assigns.vardata(x).reason {
                             None     => { out_learnt[j] = out_learnt[i]; j += 1; }
                             Some(cr) => {
                                 let ref c = db.ca[cr];
                                 for k in 1 .. c.len() {
                                     let y = c[k].var();
-                                    if self.seen[&y] == Seen::Undef && assigns.vardata[&y].level > 0 {
+                                    if self.seen[&y] == Seen::Undef && assigns.vardata(y).level > 0 {
                                         out_learnt[j] = out_learnt[i];
                                         j += 1;
                                         break;
@@ -159,9 +159,9 @@ impl AnalyzeContext {
             } else {
                 // Find the first literal assigned at the next-highest level:
                 let mut max_i = 1;
-                let mut max_level = assigns.vardata[&out_learnt[1].var()].level;
+                let mut max_level = assigns.vardata(out_learnt[1].var()).level;
                 for i in 2 .. out_learnt.len() {
-                    let level = assigns.vardata[&out_learnt[i].var()].level;
+                    let level = assigns.vardata(out_learnt[i].var()).level;
                     if level > max_level {
                         max_i = i;
                         max_level = level;
@@ -189,20 +189,20 @@ impl AnalyzeContext {
         loop {
             i += 1;
 
-            assert!(assigns.vardata[&p.var()].reason.is_some());
-            let ref c = db.ca[assigns.vardata[&p.var()].reason.unwrap()];
+            assert!(assigns.vardata(p.var()).reason.is_some());
+            let ref c = db.ca[assigns.vardata(p.var()).reason.unwrap()];
 
             if i < c.len() {
                 // Checking 'p'-parents 'l':
                 let l = c[i];
 
                 // Variable at level 0 or previously removable:
-                if assigns.vardata[&l.var()].level == 0 || self.seen[&l.var()] == Seen::Source || self.seen[&l.var()] == Seen::Removable {
+                if assigns.vardata(l.var()).level == 0 || self.seen[&l.var()] == Seen::Source || self.seen[&l.var()] == Seen::Removable {
                     continue;
                 }
 
                 // Check variable can not be removed for some local reason:
-                if assigns.vardata[&l.var()].reason.is_none() || self.seen[&l.var()] == Seen::Failed {
+                if assigns.vardata(l.var()).reason.is_none() || self.seen[&l.var()] == Seen::Failed {
                     stack.push((0, p));
                     for &(_, l) in stack.iter() {
                         if self.seen[&l.var()] == Seen::Undef {
@@ -251,9 +251,9 @@ impl AnalyzeContext {
             for i in (trail.lim[0] .. trail.totalSize()).rev() {
                 let x = trail[i].var();
                 if self.seen[&x] != Seen::Undef {
-                    match assigns.vardata[&x].reason {
+                    match assigns.vardata(x).reason {
                         None     => {
-                            assert!(assigns.vardata[&x].level > 0);
+                            assert!(assigns.vardata(x).level > 0);
                             out_conflict.insert(&!trail[i], ());
                         }
 
@@ -261,7 +261,7 @@ impl AnalyzeContext {
                             let ref c = db.ca[cr];
                             for j in 1 .. c.len() {
                                 let v = c[j].var();
-                                if assigns.vardata[&v].level > 0 {
+                                if assigns.vardata(v).level > 0 {
                                     self.seen[&v] = Seen::Source;
                                 }
                             }

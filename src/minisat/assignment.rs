@@ -1,75 +1,96 @@
-use super::index_map::{HasIndex, IndexMap};
-use super::clause;
+use super::index_map::HasIndex;
 use super::literal::{Var, Lit};
 use super::lbool::*;
-use super::clause::Clause;
-use super::propagation_trail::DecisionLevel;
+use super::clause;
+use super::propagation_trail::*;
 
 
-pub struct VarData {
+struct VarData {
     pub reason : Option<clause::ClauseRef>,
     pub level  : DecisionLevel
 }
 
 
+struct VarLine {
+    assign : LBool,
+    vd     : VarData
+}
+
+
 pub struct Assignment {
-    assigns     : Vec<LBool>,
-    free_vars   : Vec<usize>,
-    pub vardata : IndexMap<Var, VarData>
+    assignment : Vec<VarLine>,
+    free_vars  : Vec<usize>
 }
 
 impl Assignment {
     pub fn new() -> Assignment {
-        Assignment {
-            assigns   : Vec::new(),
-            free_vars : Vec::new(),
-            vardata   : IndexMap::new()
-        }
+        Assignment { assignment : Vec::new()
+                   , free_vars  : Vec::new()
+                   }
     }
 
     #[inline]
     pub fn nVars(&self) -> usize {
-        self.assigns.len()
+        self.assignment.len()
     }
 
     pub fn newVar(&mut self) -> Var {
+        let line = VarLine { assign : LBool::Undef(), vd : VarData { reason : None, level : 0 } };
         let vid =
             match self.free_vars.pop() {
-                Some(vid) => {
-                    self.assigns[vid] = LBool::Undef();
-                    vid
+                Some(v) => {
+                    self.assignment[v] = line;
+                    v
                 }
 
                 None    => {
-                    self.assigns.push(LBool::Undef());
-                    self.assigns.len() - 1
+                    self.assignment.push(line);
+                    self.assignment.len() - 1
                 }
             };
-        let v = Var::new(vid);
-        self.vardata.insert(&v, VarData { reason : None, level : 0 });
-        v
+
+        Var::new(vid)
     }
 
     pub fn freeVar(&mut self, v : &Var) {
         self.free_vars.push(v.toIndex());
     }
 
+    pub fn forgetReason(&mut self, ca : &clause::ClauseAllocator, cr : clause::ClauseRef) {
+        // Don't leave pointers to free'd memory!
+        if isLocked(ca, self, cr) {
+            let ref mut line = self.assignment[ca[cr][0].var().toIndex()];
+            assert!(!line.assign.isUndef());
+            line.vd.reason = None;
+        }
+    }
+
+    #[inline]
+    pub fn vardata(&self, v : Var) -> &VarData {
+        let ref line = self.assignment[v.toIndex()];
+        assert!(!line.assign.isUndef());
+        &line.vd
+    }
+
     #[inline]
     pub fn assignLit(&mut self, p : Lit, level : DecisionLevel, reason : Option<clause::ClauseRef>) {
-        let i = p.var().toIndex();
-        assert!(self.assigns[i].isUndef());
-        self.assigns[i] = LBool::new(!p.sign());
-        self.vardata.insert(&p.var(), VarData { level : level, reason : reason });
+        let ref mut line = self.assignment[p.var().toIndex()];
+        assert!(line.assign.isUndef());
+        line.assign = LBool::new(!p.sign());
+        line.vd.level = level;
+        line.vd.reason = reason;
     }
 
     #[inline]
     pub fn cancel(&mut self, x : Var) {
-        self.assigns[x.toIndex()] = LBool::Undef();
+        let ref mut line = self.assignment[x.toIndex()];
+        line.assign = LBool::Undef();
     }
 
     #[inline]
     pub fn undef(&self, x : Var) -> bool {
-        self.assigns[x.toIndex()].isUndef()
+        let ref line = self.assignment[x.toIndex()];
+        line.assign.isUndef()
     }
 
     #[inline]
@@ -84,23 +105,55 @@ impl Assignment {
 
     #[inline]
     pub fn ofVar(&self, x : Var) -> Option<bool> {
-        let b = self.assigns[x.toIndex()];
-        if b.isUndef() { None } else { Some(b.isTrue()) }
+        let ref line = self.assignment[x.toIndex()];
+        if line.assign.isUndef() {
+            None
+        } else {
+            Some(line.assign.isTrue())
+        }
     }
 
     #[inline]
     pub fn ofLit(&self, p : Lit) -> LBool {
-        self.assigns[p.var().toIndex()] ^ p.sign()
+        let ref line = self.assignment[p.var().toIndex()];
+        line.assign ^ p.sign()
+    }
+
+    pub fn relocGC(&mut self, trail : &PropagationTrail<Lit>, from : &mut clause::ClauseAllocator, to : &mut clause::ClauseAllocator) {
+        for l in trail.trail.iter() {
+            let v = l.var();
+
+            // Note: it is not safe to call 'locked()' on a relocated clause. This is why we keep
+            // 'dangling' reasons here. It is safe and does not hurt.
+            match self.assignment[v.toIndex()].vd.reason {
+                Some(cr) if from[cr].reloced() || isLocked(from, self, cr) => {
+                    assert!(!from[cr].is_deleted());
+                    self.assignment[v.toIndex()].vd.reason = Some(from.relocTo(to, cr));
+                }
+
+                _ => {}
+            }
+        }
     }
 }
 
 
 // Returns TRUE if a clause is satisfied in the current state.
-pub fn satisfiedWith(c : &Clause, s : &Assignment) -> bool {
+pub fn satisfiedWith(c : &clause::Clause, s : &Assignment) -> bool {
     for i in 0 .. c.len() {
         if s.sat(c[i]) {
             return true;
         }
     }
     false
+}
+
+
+pub fn isLocked(ca : &clause::ClauseAllocator, assigns : &Assignment, cr : clause::ClauseRef) -> bool {
+    let lit = ca[cr][0];
+    if !assigns.sat(lit) { return false; }
+    match assigns.vardata(lit.var()).reason {
+        Some(r) if cr == r => { true }
+        _                  => { false }
+    }
 }

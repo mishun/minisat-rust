@@ -606,26 +606,8 @@ impl CoreSolver {
     }
 
     fn relocAll(&mut self, mut to : ClauseAllocator) {
-
-        // All watchers:
         self.watches.relocGC(&mut self.db.ca, &mut to);
-
-        // All reasons:
-        for l in self.trail.trail.iter() {
-            let v = l.var();
-
-            // Note: it is not safe to call 'locked()' on a relocated clause. This is why we keep
-            // 'dangling' reasons here. It is safe and does not hurt.
-            match self.assigns.vardata[&v].reason {
-                Some(cr) if self.db.ca[cr].reloced() || isLocked(&self.db.ca, &self.assigns, cr) => {
-                    assert!(!self.db.ca[cr].is_deleted());
-                    self.assigns.vardata[&v].reason = Some(self.db.ca.relocTo(&mut to, cr));
-                }
-
-                _ => {}
-            }
-        }
-
+        self.assigns.relocGC(&self.trail, &mut self.db.ca, &mut to);
         self.db.relocGC(to);
     }
 }

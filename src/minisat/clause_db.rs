@@ -74,11 +74,8 @@ impl ClauseDB {
             }
         }
 
-        // Don't leave pointers to free'd memory!
         // TODO: do we really need this?
-        if isLocked(&self.ca, assigns, cr) {
-            assigns.vardata[&self.ca[cr][0].var()].reason = None;
-        }
+        assigns.forgetReason(&self.ca, cr);
 
         self.ca.free(cr);
     }
@@ -231,15 +228,5 @@ impl ClauseDB {
 
         debug!("|  Garbage collection:   {:12} bytes => {:12} bytes             |", self.ca.size(), to.size());
         self.ca = to;
-    }
-}
-
-
-pub fn isLocked(ca : &ClauseAllocator, assigns : &Assignment, cr : ClauseRef) -> bool {
-    let lit = ca[cr][0];
-    if !assigns.sat(lit) { return false; }
-    match assigns.vardata[&lit.var()].reason {
-        Some(r) if cr == r => { true }
-        _                  => { false }
     }
 }

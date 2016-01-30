@@ -65,7 +65,7 @@ impl<V> PropagationTrail<V> {
 
     #[inline]
     pub fn totalSize(&self) -> usize {
-            self.trail.len()
+        self.trail.len()
     }
 
     pub fn levelSize(&self, level : DecisionLevel) -> usize {
