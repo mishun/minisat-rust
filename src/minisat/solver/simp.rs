@@ -540,7 +540,7 @@ impl SimpSolver {
         }
 
         if self.elimclauses.len() > 0 {
-            info!("|  Eliminated clauses:     {:10.2} Mb                                      |\n",
+            info!("|  Eliminated clauses:     {:10.2} Mb                                      |",
                   ((self.elimclauses.len() * mem::size_of::<u32>()) as f64) / (1024.0 * 1024.0));
         }
 
