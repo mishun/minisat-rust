@@ -83,8 +83,9 @@ impl Assignment {
     }
 
     #[inline]
-    pub fn ofVar(&self, x : Var) -> LBool {
-        self.assigns[x.toIndex()]
+    pub fn ofVar(&self, x : Var) -> Option<bool> {
+        let b = self.assigns[x.toIndex()];
+        if b.isUndef() { None } else { Some(b.isTrue()) }
     }
 
     #[inline]

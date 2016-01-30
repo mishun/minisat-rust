@@ -87,7 +87,7 @@ impl Watches {
     //
     //   Post-conditions:
     //     * the propagation queue is empty, even if there was a conflict.
-    pub fn propagate(&mut self, trail : &mut PropagationTrail<Lit>, assigns : &mut Assignment, ca : &mut ClauseAllocator) -> (Option<ClauseRef>, u64) {
+    pub fn propagate(&mut self, trail : &mut PropagationTrail<Lit>, assigns : &mut Assignment, ca : &mut ClauseAllocator) -> Option<ClauseRef> {
         let mut confl = None;
         let mut num_props = 0;
 
@@ -177,7 +177,7 @@ impl Watches {
         }
 
         self.propagations += num_props;
-        (confl, num_props)
+        confl
     }
 
     pub fn relocGC(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {

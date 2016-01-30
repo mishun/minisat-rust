@@ -2,7 +2,6 @@ use std::ops;
 use super::index_map::{HasIndex, IndexMap};
 use super::random;
 use super::literal::{Var, Lit};
-use super::lbool::LBool;
 use super::assignment::*;
 
 
@@ -32,13 +31,17 @@ impl Default for DecisionHeuristicSettings {
 }
 
 
+struct VarLine {
+    polarity : bool,         // The preferred polarity of each variable.
+    user_pol : Option<bool>, // The users preferred polarity of each variable.
+    decision : bool          // Declares if a variable is eligible for selection in the decision heuristic.
+}
+
 pub struct DecisionHeuristic {
     settings          : DecisionHeuristicSettings,
     var_inc           : f64,                         // Amount to bump next variable with.
     rand              : random::Random,
-    polarity          : IndexMap<Var, bool>,         // The preferred polarity of each variable.
-    user_pol          : IndexMap<Var, LBool>,        // The users preferred polarity of each variable.
-    decision          : IndexMap<Var, bool>,         // Declares if a variable is eligible for selection in the decision heuristic.
+    var               : IndexMap<Var, VarLine>,
     activity_queue    : ActivityQueue<Var>,          // A priority queue of variables ordered with respect to the variable activity.
 
     pub dec_vars      : usize,
@@ -51,37 +54,34 @@ impl DecisionHeuristic {
         DecisionHeuristic { settings       : settings
                           , var_inc        : 1.0
                           , rand           : random::Random::new(seed)
-                          , polarity       : IndexMap::new()
-                          , user_pol       : IndexMap::new()
-                          , decision       : IndexMap::new()
+                          , var            : IndexMap::new()
                           , activity_queue : ActivityQueue::new()
                           , dec_vars       : 0
                           , rnd_decisions  : 0
                           }
     }
 
-    pub fn initVar(&mut self, v : Var, upol : LBool, dvar : bool) {
+    pub fn initVar(&mut self, v : Var, upol : Option<bool>, dvar : bool) {
         self.activity_queue.setActivity(&v,
             if self.settings.rnd_init_act {
                 self.rand.drand() * 0.00001
             } else {
                 0.0
             });
-        self.polarity.insert(&v, true);
-        self.user_pol.insert(&v, upol);
-        self.decision.insert(&v, false);
+
+        self.var.insert(&v, VarLine { polarity : true, user_pol : upol, decision : false });
         self.setDecisionVar(v, dvar);
     }
 
     pub fn cancel(&mut self, lit : Lit, top_level : bool) {
-        let x = lit.var();
+        let ref mut ln = self.var[&lit.var()];
         match self.settings.phase_saving {
-            PhaseSaving::Full                 => { self.polarity[&x] = lit.sign(); }
-            PhaseSaving::Limited if top_level => { self.polarity[&x] = lit.sign(); }
+            PhaseSaving::Full                 => { ln.polarity = lit.sign(); }
+            PhaseSaving::Limited if top_level => { ln.polarity = lit.sign(); }
             _                                 => {}
         }
-        if self.decision[&x] {
-            self.activity_queue.insert(x);
+        if ln.decision {
+            self.activity_queue.insert(lit.var());
         }
     }
 
@@ -101,15 +101,15 @@ impl DecisionHeuristic {
     }
 
     pub fn setDecisionVar(&mut self, v : Var, b : bool) {
-        let pb = self.decision[&v];
-        if b != pb {
+        let ref mut ln = self.var[&v];
+        if b != ln.decision {
             if b {
                 self.dec_vars += 1;
                 self.activity_queue.insert(v);
             } else {
                 self.dec_vars -= 1;
             }
-            self.decision[&v] = b;
+            ln.decision = b;
         }
     }
 
@@ -117,7 +117,7 @@ impl DecisionHeuristic {
         let mut tmp = Vec::new();
         for vi in 0 .. assigns.nVars() {
             let v = Var::new(vi);
-            if self.decision[&v] && assigns.undef(v) {
+            if self.var[&v].decision && assigns.undef(v) {
                 tmp.push(v);
             }
         }
@@ -128,7 +128,7 @@ impl DecisionHeuristic {
         // Random decision:
         if self.rand.chance(self.settings.random_var_freq) && !self.activity_queue.is_empty() {
             let v = self.activity_queue[self.rand.irand(self.activity_queue.len())];
-            if assigns.undef(v) && self.decision[&v] {
+            if assigns.undef(v) && self.var[&v].decision {
                 self.rnd_decisions += 1;
                 return Some(v);
             }
@@ -136,7 +136,7 @@ impl DecisionHeuristic {
 
         // Activity based decision:
         while let Some(v) = self.activity_queue.pop() {
-            if assigns.undef(v) && self.decision[&v] {
+            if assigns.undef(v) && self.var[&v].decision {
                 return Some(v);
             }
         }
@@ -147,12 +147,11 @@ impl DecisionHeuristic {
     pub fn pickBranchLit(&mut self, assigns : &Assignment) -> Option<Lit> {
         // Choose polarity based on different polarity modes (global or per-variable):
         self.pickBranchVar(assigns).map(|v| {
-            if !self.user_pol[&v].isUndef() {
-                Lit::new(v, self.user_pol[&v].isTrue())
-            } else if self.settings.rnd_pol {
-                Lit::new(v, self.rand.chance(0.5))
-            } else {
-                Lit::new(v, self.polarity[&v])
+            let ref ln = self.var[&v];
+            match ln.user_pol {
+                Some(s)                       => { Lit::new(v, s) }
+                None if self.settings.rnd_pol => { Lit::new(v, self.rand.chance(0.5)) }
+                None                          => { Lit::new(v, ln.polarity) }
             }
         })
     }

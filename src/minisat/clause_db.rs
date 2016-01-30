@@ -48,6 +48,8 @@ impl ClauseDB {
     pub fn addClause(&mut self, ps : &Vec<Lit>) -> ClauseRef {
         let cr = self.ca.alloc(ps, false);
         self.clauses.push(cr);
+        self.num_clauses += 1;
+        self.clauses_literals += ps.len() as u64;
         cr
     }
 
@@ -55,43 +57,37 @@ impl ClauseDB {
         let cr = self.ca.alloc(learnt_clause, true);
         self.learnts.push(cr);
         self.bumpActivity(cr);
+        self.num_learnts += 1;
+        self.learnts_literals += learnt_clause.len() as u64;
         cr
     }
 
-    pub fn attachClause(&mut self, watches : &mut Watches, cr : ClauseRef) {
-        let ref c = self.ca[cr];
-        watches.watchClause(c, cr);
-
-        if c.is_learnt() {
-            self.num_learnts += 1;
-            self.learnts_literals += c.len() as u64;
-        } else {
-            self.num_clauses += 1;
-            self.clauses_literals += c.len() as u64;
+    pub fn removeClause(&mut self, assigns : &mut Assignment, cr : ClauseRef) {
+        {
+            let ref c = self.ca[cr];
+            if c.is_learnt() {
+                self.num_learnts -= 1;
+                self.learnts_literals -= c.len() as u64;
+            } else {
+                self.num_clauses -= 1;
+                self.clauses_literals -= c.len() as u64;
+            }
         }
-    }
 
-    pub fn removeClause(&mut self, watches : &mut Watches, assigns : &mut Assignment, cr : ClauseRef) {
-        self.detachClause(watches, cr, false);
         // Don't leave pointers to free'd memory!
         // TODO: do we really need this?
         if isLocked(&self.ca, assigns, cr) {
             assigns.vardata[&self.ca[cr][0].var()].reason = None;
         }
+
         self.ca.free(cr);
     }
 
-    pub fn detachClause(&mut self, watches : &mut Watches, cr : ClauseRef, strict : bool) {
-        let ref c = self.ca[cr];
-        watches.unwatchClause(c, cr, strict);
-
-        if c.is_learnt() {
-            self.num_learnts -= 1;
-            self.learnts_literals -= c.len() as u64;
-        } else {
-            self.num_clauses -= 1;
-            self.clauses_literals -= c.len() as u64;
-        }
+    pub fn editClause<F : FnOnce(&mut Clause) -> ()>(&mut self, cr : ClauseRef, f : F) {
+        let ref mut c = self.ca[cr];
+        if c.is_learnt() { self.learnts_literals -= c.len() as u64; } else { self.clauses_literals -= c.len() as u64; }
+        f(c);
+        if c.is_learnt() { self.learnts_literals += c.len() as u64; } else { self.clauses_literals += c.len() as u64; }
     }
 
     pub fn bumpActivity(&mut self, cr : ClauseRef) {
@@ -154,7 +150,8 @@ impl ClauseDB {
                                 && (i < self.learnts.len() / 2 || c.activity() < extra_lim)
                 };
                 if remove {
-                    self.removeClause(watches, assigns, cr);
+                    watches.unwatchClause(&self.ca[cr], cr, false);
+                    self.removeClause(assigns, cr);
                 } else {
                     self.learnts[j] = cr;
                     j += 1;
@@ -168,7 +165,8 @@ impl ClauseDB {
         if self.ca[cr].is_deleted() {
             false
         } else if satisfiedWith(&self.ca[cr], assigns) {
-            self.removeClause(watches, assigns, cr);
+            watches.unwatchClause(&self.ca[cr], cr, false);
+            self.removeClause(assigns, cr);
             false
         } else {
             let ref mut c = self.ca[cr];

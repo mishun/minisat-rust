@@ -10,7 +10,6 @@ use std::default::Default;
 use std::io;
 use std::io::Write;
 use std::fs::File;
-use minisat::lbool::LBool;
 use minisat::decision_heuristic::PhaseSaving;
 use minisat::conflict::CCMinMode;
 use minisat::solver;
@@ -120,15 +119,15 @@ fn main() {
         if matches.is_present("rnd-init") { s.heur.rnd_init_act = true; }
         if matches.is_present("no-rnd-init") { s.heur.rnd_init_act = false; }
 
-        if matches.is_present("luby") { s.core.luby_restart = true; }
-        if matches.is_present("no-luby") { s.core.luby_restart = false; }
+        if matches.is_present("luby") { s.restart.luby_restart = true; }
+        if matches.is_present("no-luby") { s.restart.luby_restart = false; }
 
         for x in matches.value_of("rfirst").and_then(|s| s.parse().ok()).iter() {
-            if 0 < *x { s.core.restart_first = *x; }
+            if 0.0 < *x { s.restart.restart_first = *x; }
         }
 
         for x in matches.value_of("rinc").and_then(|s| s.parse().ok()).iter() {
-            if 1.0 < *x { s.core.restart_inc = *x; }
+            if 1.0 < *x { s.restart.restart_inc = *x; }
         }
 
         for x in matches.value_of("gc-frac").and_then(|s| s.parse().ok()).iter() {
@@ -184,11 +183,11 @@ fn main() {
     }
 }
 
-fn resToString(ret : LBool) -> &'static str {
-    match () {
-        _ if ret.isTrue()  => { "SATISFIABLE" }
-        _ if ret.isFalse() => { "UNSATISFIABLE" }
-        _                  => { "INDETERMINATE" }
+fn resToString(ret : &solver::PartialResult) -> &'static str {
+    match *ret {
+        solver::PartialResult::SAT(_) => { "SATISFIABLE" }
+        solver::PartialResult::UnSAT  => { "UNSATISFIABLE" }
+        _                             => { "INDETERMINATE" }
     }
 }
 
@@ -218,26 +217,28 @@ fn solveFile(mut solver : solver::CoreSolver, strict : bool, in_path : String, o
     } else {
         let ret = solver.solveLimited(&[]);
         solver.printStats();
-        println!("{}", resToString(ret));
+        println!("{}", resToString(&ret));
         match out_path {
             None       => {}
             Some(path) => {
                 let mut out = try!(File::create(path));
-                match () {
-                    _ if ret.isTrue()  => {
+                match ret {
+                    solver::PartialResult::SAT(model) => {
                         try!(writeln!(&mut out, "SAT"));
-                        let model = solver.getModel();
-                        for i in 0 .. solver.nVars() {
-                            let val = model[i];
-                            if !val.isUndef() {
-                                if i > 0 { try!(write!(&mut out, " ")); }
-                                try!(write!(&mut out, "{}{}", if val.isTrue() { "" } else { "-" }, i + 1));
+                        for i in 0 .. model.len() {
+                            match model[i] {
+                                None        => {}
+                                Some(true)  => { try!(write!(&mut out, "{} ", i + 1)); }
+                                Some(false) => { try!(write!(&mut out, "-{} ", i + 1)); }
                             }
                         }
-                        try!(writeln!(&mut out, " 0"));
+                        try!(writeln!(&mut out, "0"));
                     }
 
-                    _ if ret.isFalse() => { try!(writeln!(&mut out, "UNSAT")); }
+                    solver::PartialResult::UnSAT => {
+                        try!(writeln!(&mut out, "UNSAT"));
+                    }
+
                     _                  => { try!(writeln!(&mut out, "INDET")); }
                 }
             }
@@ -282,7 +283,7 @@ fn simpSolveFile(mut solver : solver::simp::SimpSolver, strict : bool, in_path :
     } else {
         let ret = solver.solveLimited(&[], true, false);
         solver.printStats();
-        println!("{}", resToString(ret));
+        println!("{}", resToString(&ret));
     }
 
     Ok(())

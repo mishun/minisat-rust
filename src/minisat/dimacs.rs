@@ -4,7 +4,6 @@ use std::str;
 use std::borrow::Borrow;
 use super::index_map::HasIndex;
 use super::literal::{Var, Lit};
-use super::lbool::LBool;
 use super::solver::Solver;
 
 
@@ -46,7 +45,7 @@ pub fn parse<R : io::Read, S : Solver>(reader : &mut R, solver : &mut S, validat
                         let c = try!(parse_clause(&mut p));
                         for l in c.iter() {
                             while l.var().toIndex() >= solver.nVars() {
-                                solver.newVar(LBool::Undef(), true);
+                                solver.newVar(None, true);
                             }
                         }
                         solver.addClause(c.borrow());

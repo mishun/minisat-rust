@@ -5,7 +5,6 @@ use std::sync::atomic;
 use super::util;
 use super::index_map::IndexMap;
 use super::literal::{Var, Lit};
-use super::lbool::LBool;
 use super::clause::*;
 use super::propagation_trail::{DecisionLevel, PropagationTrail};
 use super::assignment::*;
@@ -20,9 +19,8 @@ pub mod simp;
 pub trait Solver {
     fn nVars(&self) -> usize;
     fn nClauses(&self) -> usize;
-    fn newVar(&mut self, upol : LBool, dvar : bool) -> Var;
+    fn newVar(&mut self, upol : Option<bool>, dvar : bool) -> Var;
     fn addClause(&mut self, clause : &[Lit]) -> bool;
-    fn getModel(&self) -> &Vec<LBool>;
     fn printStats(&self);
 }
 
@@ -32,6 +30,7 @@ pub struct Settings {
     pub heur       : DecisionHeuristicSettings,
     pub db         : ClauseDBSettings,
     pub ccmin_mode : CCMinMode,
+    pub restart    : RestartStrategy,
     pub core       : CoreSettings
 }
 
@@ -40,20 +39,46 @@ impl Default for Settings {
         Settings { heur       : Default::default()
                  , db         : Default::default()
                  , ccmin_mode : CCMinMode::Deep
+                 , restart    : Default::default()
                  , core       : Default::default()
                  }
     }
 }
 
 
+pub struct RestartStrategy {
+    pub luby_restart  : bool,
+    pub restart_first : f64,   // The initial restart limit.
+    pub restart_inc   : f64    // The factor with which the restart limit is multiplied in each restart.
+}
+
+impl RestartStrategy {
+    pub fn conflictsToGo(&self, restarts : u32) -> u64 {
+        let rest_base =
+            match self.luby_restart {
+                true  => { util::luby(self.restart_inc, restarts) }
+                false => { self.restart_inc.powi(restarts as i32) }
+            };
+
+        (rest_base * self.restart_first) as u64
+    }
+}
+
+impl Default for RestartStrategy {
+    fn default() -> RestartStrategy {
+        RestartStrategy { luby_restart      : true
+                        , restart_first     : 100.0
+                        , restart_inc       : 2.0
+                        }
+    }
+}
+
+
 pub struct CoreSettings {
-    pub luby_restart      : bool,
     pub garbage_frac      : f64,         // The fraction of wasted memory allowed before a garbage collection is triggered.
     pub min_learnts_lim   : i32,         // Minimum number to set the learnts limit to.
-    pub restart_first     : i32,         // The initial restart limit.                                                                (default 100)
-    pub restart_inc       : f64,         // The factor with which the restart limit is multiplied in each restart.                    (default 1.5)
-    pub learntsize_factor : f64,         // The intitial limit for learnt clauses is a factor of the original clauses.                (default 1 / 3)
-    pub learntsize_inc    : f64,         // The limit for learnt clauses is multiplied with this factor each restart.                 (default 1.1)
+    pub learntsize_factor : f64,         // The intitial limit for learnt clauses is a factor of the original clauses.
+    pub learntsize_inc    : f64,         // The limit for learnt clauses is multiplied with this factor each restart.
 
     pub learntsize_adjust_start_confl : i32,
     pub learntsize_adjust_inc : f64
@@ -61,11 +86,8 @@ pub struct CoreSettings {
 
 impl Default for CoreSettings {
     fn default() -> CoreSettings {
-        CoreSettings { luby_restart      : true
-                     , garbage_frac      : 0.20
+        CoreSettings { garbage_frac      : 0.20
                      , min_learnts_lim   : 0
-                     , restart_first     : 100
-                     , restart_inc       : 2.0
                      , learntsize_factor : 1.0 / 3.0
                      , learntsize_inc    : 1.1
 
@@ -124,11 +146,38 @@ impl Budget {
 }
 
 
+struct SimplifyGuard {
+    simpDB_assigns : Option<usize>, // Number of top-level assignments since last execution of 'simplify()'.
+    simpDB_props   : u64
+}
+
+impl SimplifyGuard {
+    pub fn new() -> SimplifyGuard {
+        SimplifyGuard { simpDB_assigns : None
+                      , simpDB_props   : 0
+                      }
+    }
+
+    pub fn skip(&self, assigns : usize, propagations : u64) -> bool {
+        Some(assigns) == self.simpDB_assigns || propagations < self.simpDB_props
+    }
+
+    pub fn setNext(&mut self, assigns : usize, propagations : u64, prop_limit : u64) {
+        self.simpDB_assigns = Some(assigns);
+        self.simpDB_props   = propagations + prop_limit;
+    }
+}
+
+
+enum SearchResult { UnSAT, SAT, Interrupted(f64), AssumpsConfl(IndexMap<Lit, ()>) }
+
+
+pub enum PartialResult { UnSAT, SAT(Vec<Option<bool>>), Interrupted(f64) }
+
+
 pub struct CoreSolver {
     settings           : CoreSettings,
-
-    model              : Vec<LBool>,             // If problem is satisfiable, this vector contains the model (if any).
-    conflict           : IndexMap<Lit, ()>,
+    restart            : RestartStrategy,
 
     stats              : Stats,   // Statistics: (read-only member variable)
 
@@ -141,9 +190,7 @@ pub struct CoreSolver {
     heur               : DecisionHeuristic,
 
     ok                 : bool,          // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
-    simpDB_assigns     : Option<usize>, // Number of top-level assignments since last execution of 'simplify()'.
-    simpDB_props       : i64,           // Remaining number of propagations that must be made before next execution of 'simplify()'.
-    progress_estimate  : f64,           // Set by 'search()'.
+    simp               : SimplifyGuard,
 
     released_vars      : Vec<Var>,
 
@@ -165,7 +212,7 @@ impl Solver for CoreSolver {
         self.db.num_clauses
     }
 
-    fn newVar(&mut self, upol : LBool, dvar : bool) -> Var {
+    fn newVar(&mut self, upol : Option<bool>, dvar : bool) -> Var {
         let v = self.assigns.newVar(VarData { reason : None, level : 0 });
         self.watches.initVar(v);
         self.heur.initVar(v, upol, dvar);
@@ -178,10 +225,6 @@ impl Solver for CoreSolver {
             AddClause::UnSAT => { false }
             _                => { true }
         }
-    }
-
-    fn getModel(&self) -> &Vec<LBool> {
-        &self.model
     }
 
     fn printStats(&self) {
@@ -217,9 +260,7 @@ impl CoreSolver {
     pub fn new(settings : Settings) -> CoreSolver {
         CoreSolver {
             settings : settings.core,
-
-            model : Vec::new(),
-            conflict : IndexMap::new(),
+            restart  : settings.restart,
 
             stats : Stats::new(),
 
@@ -231,10 +272,8 @@ impl CoreSolver {
             watches : Watches::new(),
             heur    : DecisionHeuristic::new(settings.heur),
 
+            simp : SimplifyGuard::new(),
             ok : true,
-            simpDB_assigns : None,
-            simpDB_props : 0,
-            progress_estimate : 0.0,
 
             released_vars : Vec::new(),
 
@@ -285,7 +324,7 @@ impl CoreSolver {
 
             _ => {
                 let cr = self.db.addClause(&ps);
-                self.db.attachClause(&mut self.watches, cr);
+                self.watches.watchClause(&self.db.ca[cr], cr);
                 AddClause::Added(cr)
             }
         }
@@ -293,22 +332,21 @@ impl CoreSolver {
 
     pub fn solve(&mut self, assumps : &[Lit]) -> bool {
         self.budget.off();
-        self.solveLimited(assumps).isTrue()
+        match self.solveLimited(assumps) {
+            PartialResult::UnSAT  => { false }
+            PartialResult::SAT(_) => { true }
+            _                     => { panic!("Impossible happened") }
+        }
     }
 
-    pub fn solveLimited(&mut self, assumps : &[Lit]) -> LBool {
+    pub fn solveLimited(&mut self, assumps : &[Lit]) -> PartialResult {
         self.assumptions = assumps.to_vec();
         self.solve_()
     }
 
-    //_________________________________________________________________________________________________
-    //
-    // simplify : [void]  ->  [bool]
-    //
     // Description:
     //   Simplify the clause database according to the current top-level assigment. Currently, the only
     //   thing done here is the removal of satisfied clauses, but more things can be put here.
-    //_______________________________________________________________________________________________@
     pub fn simplify(&mut self) -> bool {
         assert!(self.trail.isGroundLevel());
         if !self.ok { return false; }
@@ -318,7 +356,7 @@ impl CoreSolver {
             return false;
         }
 
-        if Some(self.trail.totalSize()) == self.simpDB_assigns || self.simpDB_props > 0 {
+        if self.simp.skip(self.trail.totalSize(), self.watches.propagations) {
             return true;
         }
 
@@ -352,8 +390,7 @@ impl CoreSolver {
 
         self.heur.rebuildOrderHeap(&self.assigns);
 
-        self.simpDB_assigns = Some(self.trail.totalSize());
-        self.simpDB_props   = (self.db.clauses_literals + self.db.learnts_literals) as i64; // (shouldn't depend on stats really, but it will do for now)
+        self.simp.setNext(self.trail.totalSize(), self.watches.propagations, self.db.clauses_literals + self.db.learnts_literals); // (shouldn't depend on stats really, but it will do for now)
 
         true
     }
@@ -372,58 +409,59 @@ impl CoreSolver {
             });
     }
 
-    fn solve_(&mut self) -> LBool {
-        self.model.clear();
-        self.conflict.clear();
-        if !self.ok { return LBool::False() }
-        self.stats.solves += 1;
+    fn solve_(&mut self) -> PartialResult {
+        if !self.ok { return PartialResult::UnSAT; }
 
+        self.stats.solves += 1;
         self.max_learnts = (self.nClauses() as f64 * self.settings.learntsize_factor).max(self.settings.min_learnts_lim as f64);
         self.learntsize_adjust_confl = self.settings.learntsize_adjust_start_confl as f64;
         self.learntsize_adjust_cnt   = self.settings.learntsize_adjust_start_confl;
-        let mut status = LBool::Undef();
 
         info!("============================[ Search Statistics ]==============================");
         info!("| Conflicts |          ORIGINAL         |          LEARNT          | Progress |");
         info!("|           |    Vars  Clauses Literals |    Limit  Clauses Lit/Cl |          |");
         info!("===============================================================================");
 
-        // Search:
-        {
-            let mut curr_restarts = 0;
-            while status.isUndef() {
-                let rest_base =
-                    match self.settings.luby_restart {
-                        true  => { util::luby(self.settings.restart_inc, curr_restarts) }
-                        false => { self.settings.restart_inc.powi(curr_restarts as i32) }
-                    };
-                let conflicts_to_go = rest_base * (self.settings.restart_first as f64);
-                status = self.search(conflicts_to_go as usize);
-                if !self.budget.within(self.stats.conflicts, self.watches.propagations) { break; }
-                curr_restarts += 1;
-            }
-        }
+        let result = self.searchLoop();
+        self.cancelUntil(0);
 
         info!("===============================================================================");
-
-        if status.isTrue() {
-            let vars = self.nVars();
-            self.model.resize(vars, LBool::Undef());
-            for i in 0 .. vars {
-                self.model[i] = self.assigns.ofVar(Var::new(i));
-            }
-        } else if status.isFalse() && self.conflict.is_empty() {
-            self.ok = false;
-        }
-
-        self.cancelUntil(0);
-        status
+        result
     }
 
-    //_________________________________________________________________________________________________
-    //
-    // search : (nof_conflicts : int) (params : const SearchParams&)  ->  [lbool]
-    // 
+    fn searchLoop(&mut self) -> PartialResult {
+        let mut curr_restarts = 0;
+        loop {
+            let conflicts_to_go = self.restart.conflictsToGo(curr_restarts);
+            curr_restarts += 1;
+
+            match self.search(conflicts_to_go) {
+                SearchResult::SAT             => {
+                    let mut model = Vec::new();
+                    for i in 0 .. self.assigns.nVars() {
+                        model.push(self.assigns.ofVar(Var::new(i)));
+                    }
+                    return PartialResult::SAT(model);
+                }
+
+                SearchResult::UnSAT           => {
+                    self.ok = false;
+                    return PartialResult::UnSAT;
+                }
+
+                SearchResult::AssumpsConfl(_) => { // TODO: implement
+                    return PartialResult::UnSAT;
+                }
+
+                SearchResult::Interrupted(c)  => {
+                    if !self.budget.within(self.stats.conflicts, self.watches.propagations) {
+                        return PartialResult::Interrupted(c);
+                    }
+                }
+            }
+        }
+    }
+
     // Description:
     //   Search for a model the specified number of conflicts. 
     //   NOTE! Use negative value for 'nof_conflicts' indicate infinity.
@@ -432,8 +470,7 @@ impl CoreSolver {
     //   'l_True' if a partial assigment that is consistent with respect to the clauseset is found. If
     //   all variables are decision variables, this means that the clause set is satisfiable. 'l_False'
     //   if the clause set is unsatisfiable. 'l_Undef' if the bound on number of conflicts is reached.
-    //_______________________________________________________________________________________________@
-    fn search(&mut self, nof_conflicts : usize) -> LBool {
+    fn search(&mut self, nof_conflicts : u64) -> SearchResult {
         assert!(self.ok);
         self.stats.starts += 1;
 
@@ -443,7 +480,9 @@ impl CoreSolver {
                 Some(confl) => {
                     self.stats.conflicts += 1;
                     conflictC += 1;
-                    if self.trail.isGroundLevel() { return LBool::False() }
+                    if self.trail.isGroundLevel() {
+                        return SearchResult::UnSAT;
+                    }
 
                     let (backtrack_level, learnt_clause) = self.analyze.analyze(&mut self.db, &mut self.heur, &self.assigns, &self.trail, confl);
                     self.cancelUntil(backtrack_level);
@@ -451,7 +490,7 @@ impl CoreSolver {
                         1 => { self.uncheckedEnqueue(learnt_clause[0], None) }
                         _ => {
                             let cr = self.db.learnClause(&learnt_clause);
-                            self.db.attachClause(&mut self.watches, cr);
+                            self.watches.watchClause(&self.db.ca[cr], cr);
                             self.uncheckedEnqueue(learnt_clause[0], Some(cr));
                         }
                     }
@@ -480,14 +519,14 @@ impl CoreSolver {
                 None        => {
                     if conflictC >= nof_conflicts || !self.budget.within(self.stats.conflicts, self.watches.propagations) {
                         // Reached bound on number of conflicts:
-                        self.progress_estimate = progressEstimate(self.assigns.nVars(), &self.trail);
+                        let progress_estimate = progressEstimate(self.assigns.nVars(), &self.trail);
                         self.cancelUntil(0);
-                        return LBool::Undef();
+                        return SearchResult::Interrupted(progress_estimate);
                     }
 
                     // Simplify the set of problem clauses:
                     if self.trail.isGroundLevel() && !self.simplify() {
-                        return LBool::False();
+                        return SearchResult::UnSAT;
                     }
 
                     if self.db.needReduce(self.trail.totalSize() + (self.max_learnts as usize)) {
@@ -508,8 +547,8 @@ impl CoreSolver {
                                 self.trail.newDecisionLevel();
                             }
                             v if v.isFalse() => {
-                                self.conflict = self.analyze.analyzeFinal(&self.db, &self.assigns, &self.trail, !p);
-                                return LBool::False();
+                                let conflict = self.analyze.analyzeFinal(&self.db, &self.assigns, &self.trail, !p);
+                                return SearchResult::AssumpsConfl(conflict);
                             }
                             _                => {
                                 next = Some(p);
@@ -525,10 +564,7 @@ impl CoreSolver {
                             self.stats.decisions += 1;
                             match self.heur.pickBranchLit(&self.assigns) {
                                 Some(n) => { next = Some(n) }
-                                None    => {
-                                    // Model found:
-                                    return LBool::True();
-                                }
+                                None    => { return SearchResult::SAT; } // Model found:
                             };
                         }
                     };
@@ -542,9 +578,7 @@ impl CoreSolver {
     }
 
     fn propagate(&mut self) -> Option<ClauseRef> {
-        let (confl, num_props) = self.watches.propagate(&mut self.trail, &mut self.assigns, &mut self.db.ca);
-        self.simpDB_props -= num_props as i64;
-        confl
+        self.watches.propagate(&mut self.trail, &mut self.assigns, &mut self.db.ca)
     }
 
     fn uncheckedEnqueue(&mut self, p : Lit, from : Option<ClauseRef>) {

@@ -3,7 +3,6 @@ use std::collections::vec_deque::VecDeque;
 use std::mem;
 use std::borrow::Borrow;
 use minisat::index_map::{HasIndex, IndexMap};
-use minisat::lbool::LBool;
 use minisat::literal::{Var, Lit};
 use minisat::clause::{Clause, ClauseRef, ClauseAllocator, SubsumesRes, subsumes};
 use minisat::assignment::*;
@@ -286,7 +285,7 @@ impl Solver for SimpSolver {
         self.core.nClauses()
     }
 
-    fn newVar(&mut self, upol : LBool, dvar : bool) -> Var {
+    fn newVar(&mut self, upol : Option<bool>, dvar : bool) -> Var {
         let v = self.core.newVar(upol, dvar);
 
         self.frozen.insert(&v, 0);
@@ -337,10 +336,6 @@ impl Solver for SimpSolver {
                 true
             }
         }
-    }
-
-    fn getModel(&self) -> &Vec<LBool> {
-        self.core.getModel()
     }
 
     fn printStats(&self) {
@@ -400,14 +395,14 @@ impl SimpSolver {
         return result;
     }
 
-    pub fn solveLimited(&mut self, assumps : &[Lit], do_simp : bool, turn_off_simp : bool) -> LBool {
+    pub fn solveLimited(&mut self, assumps : &[Lit], do_simp : bool, turn_off_simp : bool) -> super::PartialResult {
         self.core.assumptions = assumps.to_vec();
         return self.solve_(do_simp, turn_off_simp);
     }
 
-    fn solve_(&mut self, mut do_simp : bool, turn_off_simp : bool) -> LBool {
+    fn solve_(&mut self, mut do_simp : bool, turn_off_simp : bool) -> super::PartialResult {
         let mut extra_frozen : Vec<Var> = Vec::new();
-        let mut result = LBool::True();
+        let mut elim_result = true;
 
         do_simp &= self.use_simplification;
         if do_simp {
@@ -425,18 +420,25 @@ impl SimpSolver {
                 }
             }
 
-            result = LBool::new(self.eliminate(turn_off_simp));
+            elim_result = self.eliminate(turn_off_simp);
         }
 
-        if result.isTrue() {
-            result = self.core.solve_();
-        } else {
-            info!("===============================================================================");
-        }
+        let result =
+            if elim_result {
+                match self.core.solve_() {
+                    super::PartialResult::SAT(mut model) => {
+                        if self.set.extend_model {
+                            extendModel(&self.elimclauses, &mut model);
+                        }
+                        super::PartialResult::SAT(model)
+                    }
 
-        if result.isTrue() && self.set.extend_model {
-            self.extendModel();
-        }
+                    res => { res }
+                }
+            } else {
+                info!("===============================================================================");
+                super::PartialResult::UnSAT
+            };
 
         if do_simp {
             // Unfreeze the assumptions that were frozen:
@@ -449,35 +451,6 @@ impl SimpSolver {
         }
 
         result
-    }
-
-    fn extendModel(&mut self) {
-        if self.elimclauses.is_empty() { return; }
-
-        let mut i = self.elimclauses.len() - 1;
-        while i > 0 {
-            let mut j = self.elimclauses[i] as usize;
-            i -= 1;
-            let mut skip = false;
-
-            while j > 1 {
-                let x = Lit::fromIndex(self.elimclauses[i] as usize);
-                if !(self.core.model[x.var().toIndex()] ^ x.sign()).isFalse() {
-                    skip = true;
-                    break;
-                }
-
-                j -= 1;
-                i -= 1;
-            }
-
-            if !skip {
-                let x = Lit::fromIndex(self.elimclauses[i] as usize);
-                self.core.model[x.var().toIndex()] = LBool::new(!x.sign());
-            }
-
-            i -= j;
-        }
     }
 
     pub fn eliminate(&mut self, turn_off_elim : bool) -> bool {
@@ -638,7 +611,8 @@ impl SimpSolver {
             }
         }
 
-        self.core.db.removeClause(&mut self.core.watches, &mut self.core.assigns, cr);
+        self.core.watches.unwatchClause(&self.core.db.ca[cr], cr, false);
+        self.core.db.removeClause(&mut self.core.assigns, cr);
     }
 
     fn strengthenClause(&mut self, cr : ClauseRef, l : Lit) -> bool {
@@ -659,14 +633,9 @@ impl SimpSolver {
             };
             self.core.enqueue(unit, None) && self.core.propagate().is_none()
         } else {
-            // TODO: this attach/detach just updates watches and stats
-            self.core.db.detachClause(&mut self.core.watches, cr, true);
-            {
-                let ref mut c = self.core.db.ca[cr];
-                c.strengthen(l);
-                assert!(c.len() == len - 1);
-            }
-            self.core.db.attachClause(&mut self.core.watches, cr);
+            self.core.watches.unwatchClause(&self.core.db.ca[cr], cr, true);
+            self.core.db.editClause(cr, |c| { c.strengthen(l); assert!(c.len() == len - 1); });
+            self.core.watches.watchClause(&self.core.db.ca[cr], cr);
 
             self.occurs.removeOcc(&l.var(), cr);
             self.elim.bumpLitOcc(&l, -1);
@@ -968,4 +937,33 @@ fn mkElimClause(elimclauses : &mut Vec<u32>, v : Var, c : &Clause) {
 
     // Store the length of the clause last:
     elimclauses.push(c.len() as u32);
+}
+
+fn extendModel(elimclauses : &Vec<u32>, model : &mut Vec<Option<bool>>) {
+    if elimclauses.is_empty() { return; }
+
+    let mut i = elimclauses.len() - 1;
+    while i > 0 {
+        let mut j = elimclauses[i] as usize;
+        i -= 1;
+        let mut skip = false;
+
+        while j > 1 {
+            let x = Lit::fromIndex(elimclauses[i] as usize);
+            match model[x.var().toIndex()] {
+                Some(s) if s == x.sign() => {}
+                _                        => { skip = true; break; }
+            }
+
+            j -= 1;
+            i -= 1;
+        }
+
+        if !skip {
+            let x = Lit::fromIndex(elimclauses[i] as usize);
+            model[x.var().toIndex()] = Some(!x.sign());
+        }
+
+        i -= j;
+    }
 }

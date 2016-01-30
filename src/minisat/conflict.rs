@@ -56,6 +56,7 @@ impl AnalyzeContext {
     //       rest of literals. There may be others from the same level though.
     //
     pub fn analyze(&mut self, db : &mut ClauseDB, heur : &mut DecisionHeuristic, assigns : &Assignment, trail : &PropagationTrail<Lit>, confl_param : ClauseRef) -> (DecisionLevel, Vec<Lit>) {
+        assert!(trail.decisionLevel() > 0);
         // Generate conflict clause:
         let mut out_learnt = Vec::new();
 
@@ -237,15 +238,10 @@ impl AnalyzeContext {
         true
     }
 
-    //_________________________________________________________________________________________________
-    //
-    // analyzeFinal : (p : Lit)  ->  [void]
-    //
     // Description:
     //   Specialized analysis procedure to express the final conflict in terms of assumptions.
     //   Calculates the (possibly empty) set of assumptions that led to the assignment of 'p', and
     //   stores the result in 'out_conflict'.
-    //_______________________________________________________________________________________________@
     pub fn analyzeFinal(&mut self, db : &ClauseDB, assigns : &Assignment, trail : &PropagationTrail<Lit>, p : Lit) -> IndexMap<Lit, ()> {
         let mut out_conflict = IndexMap::new();
         out_conflict.insert(&p, ());
