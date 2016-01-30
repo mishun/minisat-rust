@@ -7,17 +7,26 @@ extern crate env_logger;
 #[macro_use] extern crate clap;
 
 use std::default::Default;
+use std::fs;
 use std::io;
 use std::io::Write;
-use std::fs::File;
 use minisat::decision_heuristic::PhaseSaving;
 use minisat::conflict::CCMinMode;
 use minisat::solver;
-use minisat::solver::Solver;
+use minisat::solver::{Solver, PartialResult};
 use minisat::dimacs;
 
 mod minisat;
 
+
+struct MainOptions {
+    strict      : bool,
+    pre         : bool,
+    solve       : bool,
+    in_path     : String,
+    out_path    : Option<String>,
+    dimacs_path : Option<String>
+}
 
 fn main() {
     let ls012 = ["0", "1", "2"];
@@ -26,14 +35,14 @@ fn main() {
         .version(&crate_version!()[..])
         .about("Minisat reimplementation in Rust")
 
-        .arg(clap::Arg::with_name("core").long("core"))
-
         .arg(clap::Arg::with_name("verb").long("verb").takes_value(true).possible_values(&ls012).help("Verbosity level (0=silent, 1=some, 2=more)"))
+        .arg(clap::Arg::with_name("core").long("core").help("Use core solver"))
         .arg(clap::Arg::with_name("strict").long("strict").help("Validate DIMACS header during parsing"))
         .arg(clap::Arg::with_name("pre").long("pre").help("Completely turn on/off any preprocessing"))
         .arg(clap::Arg::with_name("no-pre").long("no-pre").conflicts_with("pre"))
         .arg(clap::Arg::with_name("solve").long("solve").help("Completely turn on/off solving after preprocessing"))
         .arg(clap::Arg::with_name("no-solve").long("no-solve").conflicts_with("solve"))
+        .arg(clap::Arg::with_name("dimacs").long("dimacs").takes_value(true).requires("no-solve").help("If given, stop after preprocessing and write the result to this file"))
         .arg(clap::Arg::with_name("input").required(true))
         .arg(clap::Arg::with_name("output").required(false))
 
@@ -172,34 +181,34 @@ fn main() {
         s
     };
 
-    let strict = matches.is_present("strict");
-    let in_path = matches.value_of("input").unwrap().to_string();
-    let out_path = matches.value_of("output").map(|x| x.to_string());
+    let options =
+        MainOptions {
+            strict      : matches.is_present("strict"),
+            pre         : !matches.is_present("no-pre"),
+            solve       : !matches.is_present("no-solve"),
+            in_path     : matches.value_of("input").unwrap().to_string(),
+            out_path    : matches.value_of("output").map(|x| x.to_string()),
+            dimacs_path : matches.value_of("dimacs").map(|x| x.to_string())
+        };
 
     if matches.is_present("core") {
-        solveFile(solver::CoreSolver::new(core_options), strict, in_path, out_path).expect("Error");
+        let solver = solver::CoreSolver::new(core_options);
+        solveFileCore(solver, options).expect("Error");
     } else {
-        simpSolveFile(solver::simp::SimpSolver::new(core_options, simp_options), strict, in_path, out_path).expect("Error");
+        let solver = solver::simp::SimpSolver::new(core_options, simp_options);
+        simpFileSimp(solver, options).expect("Error");
     }
 }
 
-fn resToString(ret : &solver::PartialResult) -> &'static str {
-    match *ret {
-        solver::PartialResult::SAT(_) => { "SATISFIABLE" }
-        solver::PartialResult::UnSAT  => { "UNSATISFIABLE" }
-        _                             => { "INDETERMINATE" }
-    }
-}
-
-fn solveFile(mut solver : solver::CoreSolver, strict : bool, in_path : String, out_path : Option<String>) -> io::Result<()> {
+fn solveFileCore(mut solver : solver::CoreSolver, options : MainOptions) -> io::Result<()> {
     let initial_time = time::precise_time_s();
 
     info!("============================[ Problem Statistics ]=============================");
     info!("|                                                                             |");
 
     {
-        let in_file = try!(File::open(in_path));
-        try!(dimacs::parse(&mut io::BufReader::new(in_file), &mut solver, strict));
+        let in_file = try!(fs::File::open(options.in_path));
+        try!(dimacs::parse(&mut io::BufReader::new(in_file), &mut solver, options.strict));
     }
 
     info!("|  Number of variables:  {:12}                                         |", solver.nVars());
@@ -209,54 +218,37 @@ fn solveFile(mut solver : solver::CoreSolver, strict : bool, in_path : String, o
     info!("|  Parse time:           {:12.2} s                                       |", parsed_time - initial_time);
     info!("|                                                                             |");
 
-    if !solver.simplify() {
-        info!("===============================================================================");
-        info!("Solved by unit propagation");
-        solver.printStats();
-        println!("UNSATISFIABLE");
-    } else {
-        let ret = solver.solveLimited(&[]);
-        solver.printStats();
-        println!("{}", resToString(&ret));
-        match out_path {
-            None       => {}
-            Some(path) => {
-                let mut out = try!(File::create(path));
-                match ret {
-                    solver::PartialResult::SAT(model) => {
-                        try!(writeln!(&mut out, "SAT"));
-                        for i in 0 .. model.len() {
-                            match model[i] {
-                                None        => {}
-                                Some(true)  => { try!(write!(&mut out, "{} ", i + 1)); }
-                                Some(false) => { try!(write!(&mut out, "-{} ", i + 1)); }
-                            }
-                        }
-                        try!(writeln!(&mut out, "0"));
-                    }
+    let result =
+        if !solver.simplify() {
+            info!("===============================================================================");
+            info!("Solved by unit propagation");
+            solver.printStats();
+            PartialResult::UnSAT
+        } else {
+            let result = solver.solveLimited(&[]);
+            solver.printStats();
+            result
+        };
 
-                    solver::PartialResult::UnSAT => {
-                        try!(writeln!(&mut out, "UNSAT"));
-                    }
-
-                    _                  => { try!(writeln!(&mut out, "INDET")); }
-                }
-            }
-        }
+    printOutcome(&result);
+    if let Some(path) = options.out_path {
+        let mut out = try!(fs::File::create(path));
+        try!(writetResultTo(&mut out, result));
     }
 
     Ok(())
 }
 
-fn simpSolveFile(mut solver : solver::simp::SimpSolver, strict : bool, in_path : String, _ : Option<String>) -> io::Result<()> {
+fn simpFileSimp(mut solver : solver::simp::SimpSolver, options : MainOptions) -> io::Result<()> {
+    if !options.pre { solver.eliminate(true); }
     let initial_time = time::precise_time_s();
 
     info!("============================[ Problem Statistics ]=============================");
     info!("|                                                                             |");
 
     {
-        let in_file = try!(File::open(in_path));
-        try!(dimacs::parse(&mut io::BufReader::new(in_file), &mut solver, strict));
+        let in_file = try!(fs::File::open(options.in_path));
+        try!(dimacs::parse(&mut io::BufReader::new(in_file), &mut solver, options.strict));
     }
 
     info!("|  Number of variables:  {:12}                                         |", solver.nVars());
@@ -266,25 +258,76 @@ fn simpSolveFile(mut solver : solver::simp::SimpSolver, strict : bool, in_path :
     info!("|  Parse time:           {:12.2} s                                       |", parsed_time - initial_time);
 
     let elim_res = solver.eliminate(true);
-    let simplified_time = time::precise_time_s();
 
+    let simplified_time = time::precise_time_s();
     info!("|  Simplification time:  {:12.2} s                                       |", simplified_time - parsed_time);
     info!("|                                                                             |");
 
-    if !elim_res {
-        //if (res != NULL) fprintf(res, "UNSAT\n"), fclose(res);
+    let result =
+        if !elim_res {
+            info!("===============================================================================");
+            info!("Solved by simplification");
+            solver.printStats();
+            info!("");
+            PartialResult::UnSAT
+        } else {
+            let result =
+                if options.solve {
+                    solver.solveLimited(&[], true, false)
+                } else {
+                    info!("===============================================================================");
+                    PartialResult::Interrupted(0.0)
+                };
 
-        info!("===============================================================================");
-        info!("Solved by simplification");
-        solver.printStats();
-        info!("");
+            if let PartialResult::Interrupted(_) = result {
+                if let Some(path) = options.dimacs_path {
+                    let mut out = try!(fs::File::create(path));
+                    try!(dimacs::write(&mut out, &solver));
+                }
+            }
 
-        println!("UNSATISFIABLE");
-    } else {
-        let ret = solver.solveLimited(&[], true, false);
-        solver.printStats();
-        println!("{}", resToString(&ret));
+            solver.printStats();
+            result
+        };
+
+    printOutcome(&result);
+    if let Some(path) = options.out_path {
+        let mut out = try!(fs::File::create(path));
+        try!(writetResultTo(&mut out, result));
     }
 
+    Ok(())
+}
+
+fn printOutcome(ret : &PartialResult) {
+    println!("{}",
+        match *ret {
+            PartialResult::SAT(_)         => { "SATISFIABLE" }
+            PartialResult::UnSAT          => { "UNSATISFIABLE" }
+            PartialResult::Interrupted(_) => { "INDETERMINATE" }
+        });
+}
+
+fn writetResultTo<W : io::Write>(stream : &mut W, ret : PartialResult) -> io::Result<()> {
+    match ret {
+        PartialResult::UnSAT          => { try!(writeln!(stream, "UNSAT")); Ok(()) }
+        PartialResult::Interrupted(_) => { try!(writeln!(stream, "INDET")); Ok(()) }
+        PartialResult::SAT(model)     => {
+            try!(writeln!(stream, "SAT"));
+            writeModelTo(stream, &model)
+        }
+    }
+}
+
+fn writeModelTo<W : io::Write>(stream : &mut W, model : &Vec<Option<bool>>) -> io::Result<()> {
+    for i in 0 .. model.len() {
+        let var_id = i + 1;
+        match model[i] {
+            None        => {}
+            Some(true)  => { try!(write!(stream, "{} ", var_id)); }
+            Some(false) => { try!(write!(stream, "-{} ", var_id)); }
+        }
+    }
+    try!(writeln!(stream, "0"));
     Ok(())
 }

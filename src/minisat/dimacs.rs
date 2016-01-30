@@ -7,6 +7,12 @@ use super::literal::{Var, Lit};
 use super::solver::Solver;
 
 
+pub fn write<W : io::Write, S : Solver>(_ : &mut W, _ : &S) -> io::Result<()> {
+    // TODO: implement
+    unimplemented!()
+}
+
+
 pub fn parse<R : io::Read, S : Solver>(reader : &mut R, solver : &mut S, validate : bool) -> io::Result<()> {
     let mut buf = String::new();
     let _ = try!(reader.read_to_string(&mut buf));
