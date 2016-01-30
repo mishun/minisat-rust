@@ -229,26 +229,26 @@ impl Solver for CoreSolver {
 
     fn printStats(&self) {
         let cpu_time = time::precise_time_s() - self.stats.start_time;
-        //double mem_used = memUsedPeak();
-        info!("restarts              : {:12}", self.stats.starts);
-        info!("conflicts             : {:12}   ({:.0} / sec)",
+
+        info!("restarts              : {:<12}", self.stats.starts);
+        info!("conflicts             : {:<12}   ({:.0} / sec)",
             self.stats.conflicts,
             (self.stats.conflicts as f64) / cpu_time);
 
-        info!("decisions             : {:12}   ({:4.2} % random) ({:.0} / sec)",
+        info!("decisions             : {:<12}   ({:4.2} % random) ({:.0} / sec)",
             self.stats.decisions,
             (self.heur.rnd_decisions as f64) * 100.0 / (self.stats.decisions as f64),
             (self.stats.decisions as f64) / cpu_time);
 
-        info!("propagations          : {:12}   ({:.0} / sec)",
+        info!("propagations          : {:<12}   ({:.0} / sec)",
             self.watches.propagations,
             (self.watches.propagations as f64) / cpu_time);
 
-        info!("conflict literals     : {:12}   ({:4.2} % deleted)",
+        info!("conflict literals     : {:<12}   ({:4.2} % deleted)",
             self.analyze.tot_literals,
             ((self.analyze.max_literals - self.analyze.tot_literals) as f64) * 100.0 / (self.analyze.max_literals as f64));
 
-        //if (mem_used != 0) printf("Memory used           : %.2f MB\n", mem_used);
+        info!("Memory used           : {:.2} MB", 0.0);
         info!("CPU time              : {} s", cpu_time);
         info!("");
     }
