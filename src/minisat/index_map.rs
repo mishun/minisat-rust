@@ -1,23 +1,22 @@
 use std::marker::PhantomData;
-use vec_map::VecMap;
+use vec_map;
 use std::ops::{Index, IndexMut};
 
 
 pub trait HasIndex {
     fn toIndex(&self) -> usize;
+    fn fromIndex(usize) -> Self;
 }
 
 
 pub struct IndexMap<K : HasIndex, V> {
-    map : VecMap<V>,
-    tmp : PhantomData<K>
+    map : vec_map::VecMap<V>,
+    ph  : PhantomData<K>
 }
 
 impl<K : HasIndex, V> IndexMap<K, V> {
     pub fn new() -> IndexMap<K, V> {
-        IndexMap { map : VecMap::new()
-                 , tmp : PhantomData
-                 }
+        IndexMap { map : vec_map::VecMap::new(), ph : PhantomData }
     }
 
     pub fn clear(&mut self) {
@@ -37,6 +36,21 @@ impl<K : HasIndex, V> IndexMap<K, V> {
     #[inline]
     pub fn remove(&mut self, k : &K) -> Option<V> {
         self.map.remove(&k.toIndex())
+    }
+
+    #[inline]
+    pub fn get(&self, k : &K) -> Option<&V> {
+        self.map.get(&k.toIndex())
+    }
+
+    #[inline]
+    pub fn iter(&self) -> Iter<K, V> {
+        Iter { it : self.map.iter(), ph : PhantomData }
+    }
+
+    #[inline]
+    pub fn iter_mut(&mut self) -> IterMut<K, V> {
+        IterMut { it : self.map.iter_mut(), ph : PhantomData }
     }
 
     #[inline]
@@ -60,5 +74,35 @@ impl<'r, K : HasIndex, V> IndexMut<&'r K> for IndexMap<K, V> {
     #[inline]
     fn index_mut(&mut self, k : &'r K) -> &mut V {
         self.map.index_mut(&k.toIndex())
+    }
+}
+
+
+pub struct Iter<'a, K : HasIndex, V : 'a> {
+    it : vec_map::Iter<'a, V>,
+    ph : PhantomData<K>
+}
+
+impl<'a, K : HasIndex, V : 'a> Iterator for Iter<'a, K, V> {
+    type Item = (K, &'a V);
+
+    #[inline]
+    fn next(&mut self) -> Option<(K, &'a V)> {
+        self.it.next().map(|(idx, v)| (HasIndex::fromIndex(idx), v))
+    }
+}
+
+
+pub struct IterMut<'a, K : HasIndex, V : 'a> {
+    it : vec_map::IterMut<'a, V>,
+    ph : PhantomData<K>
+}
+
+impl<'a, K : HasIndex, V : 'a> Iterator for IterMut<'a, K, V> {
+    type Item = (K, &'a mut V);
+
+    #[inline]
+    fn next(&mut self) -> Option<(K, &'a mut V)> {
+        self.it.next().map(|(idx, v)| (HasIndex::fromIndex(idx), v))
     }
 }

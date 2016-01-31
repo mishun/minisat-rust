@@ -19,6 +19,11 @@ impl HasIndex for Var {
         let Var(ref idx) = *self;
         *idx
     }
+
+    #[inline]
+    fn fromIndex(idx : usize) -> Var {
+        Var(idx)
+    }
 }
 
 impl fmt::Display for Var {
@@ -36,10 +41,6 @@ impl Lit {
     #[inline]
     pub fn new(Var(v) : Var, sign : bool) -> Lit {
         Lit(v + v + (sign as usize))
-    }
-
-    pub fn fromIndex(x : usize) -> Lit {
-        Lit(x)
     }
 
     #[inline]
@@ -60,6 +61,11 @@ impl HasIndex for Lit {
     fn toIndex(&self) -> usize {
         let Lit(ref idx) = *self;
         *idx
+    }
+
+    #[inline]
+    fn fromIndex(idx : usize) -> Lit {
+        Lit(idx)
     }
 }
 
