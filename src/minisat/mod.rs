@@ -1,10 +1,7 @@
 
 pub mod decision_heuristic;
-mod assignment;
-mod clause;
+pub mod formula;
 pub mod dimacs;
-pub mod index_map;
-pub mod literal;
 mod propagation_trail;
 mod random;
 pub mod solver;

@@ -1,30 +1,13 @@
 use std::fmt;
 use std::ops;
-use super::index_map::HasIndex;
+
+pub mod clause;
+pub mod assignment;
+pub mod index_map;
 
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
 pub struct Var(usize);
-
-impl Var {
-    #[inline]
-    pub fn new(v : usize) -> Var {
-        Var(v)
-    }
-}
-
-impl HasIndex for Var {
-    #[inline]
-    fn toIndex(&self) -> usize {
-        let Var(ref idx) = *self;
-        *idx
-    }
-
-    #[inline]
-    fn fromIndex(idx : usize) -> Var {
-        Var(idx)
-    }
-}
 
 impl fmt::Display for Var {
     fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
@@ -56,19 +39,6 @@ impl Lit {
     }
 }
 
-impl HasIndex for Lit {
-    #[inline]
-    fn toIndex(&self) -> usize {
-        let Lit(ref idx) = *self;
-        *idx
-    }
-
-    #[inline]
-    fn fromIndex(idx : usize) -> Lit {
-        Lit(idx)
-    }
-}
-
 impl ops::Not for Lit {
     type Output = Lit;
 
@@ -94,3 +64,7 @@ impl fmt::Display for Lit {
         write!(f, "{}{}", if self.sign() { "¬" } else { "" }, self.var())
     }
 }
+
+
+// TODO: remove
+pub const TempLit : Lit = Lit(0);

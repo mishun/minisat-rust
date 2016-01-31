@@ -1,7 +1,7 @@
-use super::index_map::*;
-use super::literal::{Var, Lit};
+use super::{Var, Lit};
 use super::clause;
-use super::propagation_trail::*;
+use super::index_map::VarMap;
+use minisat::propagation_trail::*;
 
 
 #[derive(Clone, Copy)]
@@ -63,32 +63,33 @@ impl Assignment {
                 }
             };
 
-        Var::new(vid)
+        Var(vid)
     }
 
-    pub fn freeVar(&mut self, v : &Var) {
-        self.free_vars.push(v.toIndex());
+    pub fn freeVar(&mut self, Var(v) : Var) {
+        self.free_vars.push(v);
     }
 
     #[inline]
-    pub fn assignLit(&mut self, p : Lit, level : DecisionLevel, reason : Option<clause::ClauseRef>) {
-        let ref mut line = self.assignment[p.var().toIndex()];
+    pub fn assignLit(&mut self, Lit(p) : Lit, level : DecisionLevel, reason : Option<clause::ClauseRef>) {
+        let ref mut line = self.assignment[p >> 1];
+
         assert!(line.assign[0].isUndef());
-        line.assign[p.sign() as usize] = Value::True;
-        line.assign[(p.sign() as usize) ^ 1] = Value::False;
+        line.assign[p & 1] = Value::True;
+        line.assign[(p & 1) ^ 1] = Value::False;
         line.vd.level = level;
         line.vd.reason = reason;
     }
 
     #[inline]
-    pub fn cancel(&mut self, x : Var) {
-        let ref mut line = self.assignment[x.toIndex()];
+    pub fn cancel(&mut self, Var(v) : Var) {
+        let ref mut line = self.assignment[v];
         line.assign = [Value::Undef, Value::Undef];
     }
 
     #[inline]
-    pub fn undef(&self, x : Var) -> bool {
-        let ref line = self.assignment[x.toIndex()];
+    pub fn undef(&self, Var(v) : Var) -> bool {
+        let ref line = self.assignment[v];
         line.assign[0].isUndef()
     }
 
@@ -109,25 +110,25 @@ impl Assignment {
     }
 
     #[inline]
-    pub fn ofLit(&self, p : Lit) -> Value {
-        let ref line = self.assignment[p.var().toIndex()];
-        line.assign[p.sign() as usize]
+    pub fn ofLit(&self, Lit(p) : Lit) -> Value {
+        let ref line = self.assignment[p >> 1];
+        line.assign[p & 1]
     }
 
     #[inline]
-    pub fn vardata(&self, v : Var) -> &VarData {
-        let ref line = self.assignment[v.toIndex()];
+    pub fn vardata(&self, Var(v) : Var) -> &VarData {
+        let ref line = self.assignment[v];
         assert!(!line.assign[0].isUndef());
         &line.vd
     }
 
-    pub fn extractModel(&self) -> IndexMap<Var, bool> {
-        let mut model = IndexMap::new();
+    pub fn extractModel(&self) -> VarMap<bool> {
+        let mut model = VarMap::new();
         for i in 0 .. self.assignment.len() {
             match self.assignment[i].assign[0] {
                 Value::Undef  => {}
-                Value::False  => { model.insert(&Var::new(i), false); }
-                Value::True   => { model.insert(&Var::new(i), true); }
+                Value::False  => { model.insert(&Var(i), false); }
+                Value::True   => { model.insert(&Var(i), true); }
             }
         }
         model
@@ -135,14 +136,14 @@ impl Assignment {
 
     pub fn relocGC(&mut self, trail : &PropagationTrail<Lit>, from : &mut clause::ClauseAllocator, to : &mut clause::ClauseAllocator) {
         for l in trail.trail.iter() {
-            let v = l.var();
+            let Var(v) = l.var();
 
             // Note: it is not safe to call 'locked()' on a relocated clause. This is why we keep
             // 'dangling' reasons here. It is safe and does not hurt.
-            match self.assignment[v.toIndex()].vd.reason {
+            match self.assignment[v].vd.reason {
                 Some(cr) if from[cr].reloced() || self.isLocked(from, cr) => {
                     assert!(!from[cr].is_deleted());
-                    self.assignment[v.toIndex()].vd.reason = Some(from.relocTo(to, cr));
+                    self.assignment[v].vd.reason = Some(from.relocTo(to, cr));
                 }
 
                 _ => {}
@@ -162,8 +163,8 @@ impl Assignment {
     pub fn forgetReason(&mut self, ca : &clause::ClauseAllocator, cr : clause::ClauseRef) {
         // Don't leave pointers to free'd memory!
         if self.isLocked(ca, cr) {
-            let ref mut line = self.assignment[ca[cr][0].var().toIndex()];
-            line.vd.reason = None;
+            let Var(v) = ca[cr][0].var();
+            self.assignment[v].vd.reason = None;
         }
     }
 }

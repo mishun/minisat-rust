@@ -1,10 +1,10 @@
-use super::index_map::IndexMap;
-use super::literal::{Var, Lit};
-use super::clause::*;
-use super::propagation_trail::*;
-use super::assignment::*;
-use super::clause_db::*;
-use super::decision_heuristic::*;
+use minisat::formula::{Var, Lit};
+use minisat::formula::clause::*;
+use minisat::formula::assignment::*;
+use minisat::formula::index_map::{VarMap, LitMap};
+use minisat::propagation_trail::*;
+use minisat::clause_db::*;
+use minisat::decision_heuristic::*;
 
 
 #[derive(PartialEq, Eq)]
@@ -23,7 +23,7 @@ pub enum Seen {
 
 pub struct AnalyzeContext {
     ccmin_mode       : CCMinMode,    // Controls conflict clause minimization
-    pub seen         : IndexMap<Var, Seen>,
+    pub seen         : VarMap<Seen>,
     analyze_toclear  : Vec<Lit>,
     pub max_literals : u64,
     pub tot_literals : u64
@@ -32,7 +32,7 @@ pub struct AnalyzeContext {
 impl AnalyzeContext {
     pub fn new(ccmin_mode : CCMinMode) -> AnalyzeContext {
         AnalyzeContext { ccmin_mode      : ccmin_mode
-                       , seen            : IndexMap::new()
+                       , seen            : VarMap::new()
                        , analyze_toclear : Vec::new()
                        , max_literals    : 0
                        , tot_literals    : 0
@@ -242,8 +242,8 @@ impl AnalyzeContext {
     //   Specialized analysis procedure to express the final conflict in terms of assumptions.
     //   Calculates the (possibly empty) set of assumptions that led to the assignment of 'p', and
     //   stores the result in 'out_conflict'.
-    pub fn analyzeFinal(&mut self, db : &ClauseDB, assigns : &Assignment, trail : &PropagationTrail<Lit>, p : Lit) -> IndexMap<Lit, ()> {
-        let mut out_conflict = IndexMap::new();
+    pub fn analyzeFinal(&mut self, db : &ClauseDB, assigns : &Assignment, trail : &PropagationTrail<Lit>, p : Lit) -> LitMap<()> {
+        let mut out_conflict = LitMap::new();
         out_conflict.insert(&p, ());
 
         trail.inspectAssignmentsUntilLevel(0, |lit| {

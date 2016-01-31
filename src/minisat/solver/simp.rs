@@ -1,11 +1,11 @@
+use std::borrow::Borrow;
 use std::default::Default;
 use std::collections::vec_deque::VecDeque;
 use std::mem;
-use std::borrow::Borrow;
-use minisat::index_map::{HasIndex, IndexMap};
-use minisat::literal::{Var, Lit};
-use minisat::clause::{Clause, ClauseRef, ClauseAllocator, SubsumesRes, subsumes};
-use minisat::assignment::*;
+use minisat::formula::{Var, Lit, TempLit};
+use minisat::formula::clause::*;
+use minisat::formula::assignment::*;
+use minisat::formula::index_map::{VarMap, LitMap};
 use super::Solver;
 
 
@@ -26,16 +26,16 @@ impl Default for Settings {
 
 struct ElimQueue {
     heap    : Vec<Var>,
-    indices : IndexMap<Var, usize>,
-    n_occ   : IndexMap<Lit, i32>,
+    indices : VarMap<usize>,
+    n_occ   : LitMap<i32>
 }
 
 impl ElimQueue {
     pub fn new() -> ElimQueue {
         ElimQueue {
             heap    : Vec::new(),
-            indices : IndexMap::new(),
-            n_occ   : IndexMap::new()
+            indices : VarMap::new(),
+            n_occ   : LitMap::new()
         }
     }
 
@@ -73,7 +73,7 @@ impl ElimQueue {
         }
     }
 
-    fn updateElimHeap(&mut self, v : &Var, frozen : &IndexMap<Var, i8>, eliminated : &IndexMap<Var, i8>, assigns : &Assignment) {
+    fn updateElimHeap(&mut self, v : &Var, frozen : &VarMap<i8>, eliminated : &VarMap<i8>, assigns : &Assignment) {
         if self.inHeap(&v) || (frozen[v] == 0 && eliminated[v] == 0 && assigns.undef(*v)) {
             self.update(*v);
         }
@@ -173,12 +173,12 @@ struct OccLine {
 }
 
 struct OccLists {
-    occs : IndexMap<Var, OccLine>
+    occs : VarMap<OccLine>
 }
 
 impl OccLists {
     pub fn new() -> OccLists {
-        OccLists { occs : IndexMap::new() }
+        OccLists { occs : VarMap::new() }
     }
 
     pub fn initVar(&mut self, v : &Var) {
@@ -273,14 +273,14 @@ pub struct SimpSolver {
     // Solver state:
     use_simplification : bool,
     elimclauses        : ElimClauses,
-    touched            : IndexMap<Var, i8>,
+    touched            : VarMap<i8>,
 
     occurs             : OccLists,
     elim               : ElimQueue,
     subsumption_queue  : VecDeque<ClauseRef>,
-    frozen             : IndexMap<Var, i8>,
+    frozen             : VarMap<i8>,
     frozen_vars        : Vec<Var>,
-    eliminated         : IndexMap<Var, i8>,
+    eliminated         : VarMap<i8>,
     bwdsub_assigns     : usize,
     n_touched          : usize,
 
@@ -361,7 +361,7 @@ impl SimpSolver {
         let mut s = super::CoreSolver::new(core_s);
         s.db.ca.set_extra_clause_field(true); // NOTE: must happen before allocating the dummy clause below.
         s.db.settings.remove_satisfied = false;
-        let temp_clause = s.db.ca.alloc(&vec![Lit::fromIndex(0)], false);
+        let temp_clause = s.db.ca.alloc(&vec![TempLit], false);
         SimpSolver { core               : s
                    , set                : simp_s.simp
 
@@ -371,14 +371,14 @@ impl SimpSolver {
 
                    , use_simplification : true
                    , elimclauses        : ElimClauses::new(simp_s.extend_model)
-                   , touched            : IndexMap::new()
+                   , touched            : VarMap::new()
 
                    , occurs             : OccLists::new()
                    , elim               : ElimQueue::new()
                    , subsumption_queue  : VecDeque::new()
-                   , frozen             : IndexMap::new()
+                   , frozen             : VarMap::new()
                    , frozen_vars        : Vec::new()
-                   , eliminated         : IndexMap::new()
+                   , eliminated         : VarMap::new()
                    , bwdsub_assigns     : 0
                    , n_touched          : 0
 
@@ -954,7 +954,7 @@ impl ElimClauses {
         self.sizes.push(c.len());
     }
 
-    pub fn extendModel(&self, model : &mut IndexMap<Var, bool>) {
+    pub fn extendModel(&self, model : &mut VarMap<bool>) {
         if !self.extend_model { return; }
 
         let mut i = self.literals.len();

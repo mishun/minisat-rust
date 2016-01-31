@@ -3,9 +3,9 @@ use std::io;
 use std::str;
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use super::index_map::IndexMap;
-use super::literal::{Var, Lit};
-use super::solver::Solver;
+use minisat::formula::{Var, Lit};
+use minisat::formula::index_map::VarMap;
+use minisat::solver::Solver;
 
 
 pub fn write<W : io::Write, S : Solver>(_ : &mut W, _ : &S) -> io::Result<()> {
@@ -14,14 +14,14 @@ pub fn write<W : io::Write, S : Solver>(_ : &mut W, _ : &S) -> io::Result<()> {
 }
 
 
-pub fn parse<R : io::Read, S : Solver>(reader : &mut R, solver : &mut S, validate : bool) -> io::Result<IndexMap<Var, i32>> {
+pub fn parse<R : io::Read, S : Solver>(reader : &mut R, solver : &mut S, validate : bool) -> io::Result<VarMap<i32>> {
     let mut buf = String::new();
     try!(reader.read_to_string(&mut buf));
 
     let mut parser =
         DimacsParser {
             forward_subst  : HashMap::new(),
-            backward_subst : IndexMap::new(),
+            backward_subst : VarMap::new(),
             parser         : try!(Parser::new(buf.chars())),
             solver         : solver
         };
@@ -33,7 +33,7 @@ pub fn parse<R : io::Read, S : Solver>(reader : &mut R, solver : &mut S, validat
 
 struct DimacsParser<'p, 's, S : 's> {
     forward_subst  : HashMap<i32, Var>,
-    backward_subst : IndexMap<Var, i32>,
+    backward_subst : VarMap<i32>,
     parser         : Parser<'p>,
     solver         : &'s mut S
 }

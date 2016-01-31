@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
-use super::literal::Lit;
-use super::clause::*;
-use super::assignment::*;
-use super::watches::*;
+use minisat::formula::Lit;
+use minisat::formula::clause::*;
+use minisat::formula::assignment::*;
+use minisat::watches::*;
 
 
 pub struct ClauseDBSettings {

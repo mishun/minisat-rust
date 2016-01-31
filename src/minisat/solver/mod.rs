@@ -2,16 +2,17 @@ extern crate time;
 
 use std::default::Default;
 use std::sync::atomic;
-use super::util;
-use super::index_map::IndexMap;
-use super::literal::{Var, Lit};
-use super::clause::*;
-use super::propagation_trail::{DecisionLevel, PropagationTrail};
-use super::assignment::*;
-use super::watches::*;
-use super::decision_heuristic::*;
-use super::conflict::*;
-use super::clause_db::*;
+use minisat::formula::{Var, Lit};
+use minisat::formula::clause::*;
+use minisat::formula::assignment::*;
+use minisat::formula::index_map::{VarMap, LitMap};
+use minisat::clause_db::*;
+use minisat::conflict::*;
+use minisat::decision_heuristic::*;
+use minisat::propagation_trail::*;
+use minisat::watches::*;
+use minisat::util;
+
 
 pub mod simp;
 
@@ -169,10 +170,10 @@ impl SimplifyGuard {
 }
 
 
-enum SearchResult { UnSAT, SAT, Interrupted(f64), AssumpsConfl(IndexMap<Lit, ()>) }
+enum SearchResult { UnSAT, SAT, Interrupted(f64), AssumpsConfl(LitMap<()>) }
 
 
-pub enum PartialResult { UnSAT, SAT(IndexMap<Var, bool>), Interrupted(f64) }
+pub enum PartialResult { UnSAT, SAT(VarMap<bool>), Interrupted(f64) }
 
 
 pub struct CoreSolver {
@@ -380,7 +381,9 @@ impl CoreSolver {
             }
 
             // Released variables are now ready to be reused:
-            for v in self.released_vars.iter() { self.assigns.freeVar(v); }
+            for v in self.released_vars.iter() {
+                self.assigns.freeVar(*v);
+            }
             self.released_vars.clear();
         }
 

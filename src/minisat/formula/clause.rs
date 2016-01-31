@@ -1,7 +1,6 @@
 use std::fmt;
 use std::ops;
-use super::literal::Lit;
-use super::index_map::HasIndex;
+use super::Lit;
 
 
 pub type ClauseRef = usize;
@@ -104,7 +103,8 @@ impl Clause {
         assert!(self.header.has_extra);
         let mut abstraction : u32 = 0;
         for i in 0 .. self.header.size {
-            abstraction |= 1 << (self.data[i].var().toIndex() & 31);
+            let Lit(p) = self.data[i];
+            abstraction |= 1 << ((p >> 1) & 31);
         }
         self.data_abs = abstraction; //data[header.size].abs = abstraction;
     }

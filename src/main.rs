@@ -1,4 +1,5 @@
 #![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
 
 extern crate time;
 extern crate vec_map;
@@ -10,8 +11,7 @@ use std::default::Default;
 use std::fs;
 use std::io;
 use std::io::Write;
-use minisat::literal::Var;
-use minisat::index_map::IndexMap;
+use minisat::formula::index_map::VarMap;
 use minisat::decision_heuristic::PhaseSaving;
 use minisat::conflict::CCMinMode;
 use minisat::solver;
@@ -310,7 +310,7 @@ fn printOutcome(ret : &PartialResult) {
         });
 }
 
-fn writeResultTo<W : io::Write>(stream : &mut W, backward_subst : IndexMap<Var, i32>, ret : PartialResult) -> io::Result<()> {
+fn writeResultTo<W : io::Write>(stream : &mut W, backward_subst : VarMap<i32>, ret : PartialResult) -> io::Result<()> {
     match ret {
         PartialResult::UnSAT          => { try!(writeln!(stream, "UNSAT")); Ok(()) }
         PartialResult::Interrupted(_) => { try!(writeln!(stream, "INDET")); Ok(()) }
@@ -321,7 +321,7 @@ fn writeResultTo<W : io::Write>(stream : &mut W, backward_subst : IndexMap<Var, 
     }
 }
 
-fn writeModelTo<W : io::Write>(stream : &mut W, backward_subst : IndexMap<Var, i32>, model : IndexMap<Var, bool>) -> io::Result<()> {
+fn writeModelTo<W : io::Write>(stream : &mut W, backward_subst : VarMap<i32>, model : VarMap<bool>) -> io::Result<()> {
     for (var, val) in model.iter() {
         let var_id = backward_subst[&var];
         try!(write!(stream, "{} ", if *val { var_id } else { -var_id }));
