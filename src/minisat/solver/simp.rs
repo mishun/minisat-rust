@@ -259,7 +259,6 @@ pub struct SimpSolver {
 
     // Solver state:
     use_simplification : bool,
-    max_simp_var       : Var,        // Max variable at the point simplification was turned off.
     elimclauses        : Vec<u32>,
     touched            : IndexMap<Var, i8>,
 
@@ -358,7 +357,6 @@ impl SimpSolver {
                    , eliminated_vars    : 0
 
                    , use_simplification : true
-                   , max_simp_var       : Var::new(0)
                    , elimclauses        : Vec::new()
                    , touched            : IndexMap::new()
 
@@ -527,7 +525,6 @@ impl SimpSolver {
             self.use_simplification = false;
             self.core.db.settings.remove_satisfied = true;
             self.core.db.ca.set_extra_clause_field(false);
-            self.max_simp_var = Var::new(self.core.nVars());
 
             // Force full cleanup (this is safe and desirable since it only happens once):
             self.core.heur.rebuildOrderHeap(&self.core.assigns);
@@ -939,7 +936,7 @@ fn mkElimClause(elimclauses : &mut Vec<u32>, v : Var, c : &Clause) {
     elimclauses.push(c.len() as u32);
 }
 
-fn extendModel(elimclauses : &Vec<u32>, model : &mut Vec<Option<bool>>) {
+fn extendModel(elimclauses : &Vec<u32>, model : &mut IndexMap<Var, bool>) {
     if elimclauses.is_empty() { return; }
 
     let mut i = elimclauses.len() - 1;
@@ -950,9 +947,9 @@ fn extendModel(elimclauses : &Vec<u32>, model : &mut Vec<Option<bool>>) {
 
         while j > 1 {
             let x = Lit::fromIndex(elimclauses[i] as usize);
-            match model[x.var().toIndex()] {
-                Some(s) if s == x.sign() => {}
-                _                        => { skip = true; break; }
+            match model.get(&x.var()) {
+                Some(s) if *s == x.sign() => {}
+                _                         => { skip = true; break; }
             }
 
             j -= 1;
@@ -961,7 +958,7 @@ fn extendModel(elimclauses : &Vec<u32>, model : &mut Vec<Option<bool>>) {
 
         if !skip {
             let x = Lit::fromIndex(elimclauses[i] as usize);
-            model[x.var().toIndex()] = Some(!x.sign());
+            model.insert(&x.var(), !x.sign());
         }
 
         if i > j {

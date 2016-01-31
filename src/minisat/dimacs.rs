@@ -2,7 +2,8 @@
 use std::io;
 use std::str;
 use std::borrow::Borrow;
-use super::index_map::HasIndex;
+use std::collections::HashMap;
+use super::index_map::IndexMap;
 use super::literal::{Var, Lit};
 use super::solver::Solver;
 
@@ -13,67 +14,104 @@ pub fn write<W : io::Write, S : Solver>(_ : &mut W, _ : &S) -> io::Result<()> {
 }
 
 
-pub fn parse<R : io::Read, S : Solver>(reader : &mut R, solver : &mut S, validate : bool) -> io::Result<()> {
+pub fn parse<R : io::Read, S : Solver>(reader : &mut R, solver : &mut S, validate : bool) -> io::Result<IndexMap<Var, i32>> {
     let mut buf = String::new();
-    let _ = try!(reader.read_to_string(&mut buf));
-    let mut p = try!(Parser::new(buf.chars()));
+    try!(reader.read_to_string(&mut buf));
 
-    enum State { Waiting, Parsing(usize, usize) }
+    let mut parser =
+        DimacsParser {
+            forward_subst  : HashMap::new(),
+            backward_subst : IndexMap::new(),
+            parser         : try!(Parser::new(buf.chars())),
+            solver         : solver
+        };
 
-    let mut state = State::Waiting;
-    loop {
-        try!(p.skipWhitespace());
-        match state {
-            State::Waiting => {
-                match p.current() {
-                    Some('c') => { try!(p.skipLine()); }
-                    _         => {
-                        try!(p.consume("p cnf"));
-                        let vars = try!(p.nextUInt());
-                        let clauses = try!(p.nextUInt());
-                        state = State::Parsing(vars, clauses);
+    try!(parser.parse(validate));
+    Ok(parser.backward_subst)
+}
+
+
+struct DimacsParser<'p, 's, S : 's> {
+    forward_subst  : HashMap<i32, Var>,
+    backward_subst : IndexMap<Var, i32>,
+    parser         : Parser<'p>,
+    solver         : &'s mut S
+}
+
+impl<'p, 's, S : Solver> DimacsParser<'p, 's, S> {
+    fn parse(&mut self, validate : bool) -> io::Result<()> {
+        enum State { Waiting, Parsing(usize, usize) }
+
+        let mut state = State::Waiting;
+        loop {
+            try!(self.parser.skipWhitespace());
+            match state {
+                State::Waiting => {
+                    match self.parser.current() {
+                        Some('c') => { try!(self.parser.skipLine()); }
+
+                        _         => {
+                            try!(self.parser.consume("p cnf"));
+                            let vars = try!(self.parser.nextUInt());
+                            let clauses = try!(self.parser.nextUInt());
+                            state = State::Parsing(vars, clauses);
+                        }
                     }
                 }
-            }
 
-            State::Parsing(vars, clauses) => {
-                match p.current() {
-                    Some('c') => { try!(p.skipLine()); }
+                State::Parsing(vars, clauses) => {
+                    match self.parser.current() {
+                        Some('c') => { try!(self.parser.skipLine()); }
 
-                    None      => {
-                        if validate && (clauses != solver.nClauses() || vars < solver.nVars()) {
-                            return Err(io::Error::new(io::ErrorKind::Other, "PARSE ERROR! DIMACS header mismatch"));
-                        }
-                        return Ok(());
-                    }
-
-                    _         => {
-                        let c = try!(parse_clause(&mut p));
-                        for l in c.iter() {
-                            while l.var().toIndex() >= solver.nVars() {
-                                solver.newVar(None, true);
+                        None      => {
+                            if validate && (clauses != self.solver.nClauses() || vars < self.solver.nVars()) {
+                                return Err(io::Error::new(io::ErrorKind::Other, "PARSE ERROR! DIMACS header mismatch"));
                             }
+                            return Ok(());
                         }
-                        solver.addClause(c.borrow());
+
+                        _         => {
+                            let c = try!(self.parseClause());
+                            self.solver.addClause(c.borrow());
+                        }
                     }
                 }
             }
         }
     }
-}
 
-fn parse_clause<'a>(p : &mut Parser<'a>) -> io::Result<Vec<Lit>> {
-    let mut lits : Vec<Lit> = Vec::new();
-    loop {
-        let lit = try!(p.nextInt());
-        if lit == 0 {
-            return Ok(lits);
-        } else {
-            let var = (lit.abs() as usize) - 1;
-            lits.push(Lit::new(Var::new(var), lit < 0));
+    fn parseClause(&mut self) -> io::Result<Vec<Lit>> {
+        let mut lits = Vec::new();
+        loop {
+            let lit = try!(self.parser.nextInt());
+            if lit == 0 {
+                return Ok(lits);
+            } else {
+                lits.push(Lit::new(self.varById(lit.abs()), lit < 0));
+            }
         }
     }
+
+    fn varById(&mut self, var_id : i32) -> Var {
+        if !self.forward_subst.contains_key(&var_id) {
+            // TODO: finish it
+            //self.newVar(var_id);
+            while (var_id as usize) > self.solver.nVars() {
+                let idx = (self.solver.nVars() + 1) as i32;
+                self.newVar(idx);
+            }
+        }
+
+        self.forward_subst[&var_id]
+    }
+
+    fn newVar(&mut self, var_id : i32) {
+        let v = self.solver.newVar(None, true);
+        self.forward_subst.insert(var_id, v);
+        self.backward_subst.insert(&v, var_id);
+    }
 }
+
 
 struct Parser<'a> {
     reader : str::Chars<'a>,

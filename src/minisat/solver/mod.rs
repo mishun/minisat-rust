@@ -172,7 +172,7 @@ impl SimplifyGuard {
 enum SearchResult { UnSAT, SAT, Interrupted(f64), AssumpsConfl(IndexMap<Lit, ()>) }
 
 
-pub enum PartialResult { UnSAT, SAT(Vec<Option<bool>>), Interrupted(f64) }
+pub enum PartialResult { UnSAT, SAT(IndexMap<Var, bool>), Interrupted(f64) }
 
 
 pub struct CoreSolver {

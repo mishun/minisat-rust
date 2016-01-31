@@ -1,4 +1,4 @@
-use super::index_map::HasIndex;
+use super::index_map::*;
 use super::literal::{Var, Lit};
 use super::clause;
 use super::propagation_trail::*;
@@ -14,14 +14,6 @@ impl Value {
         match *self {
             Value::Undef => { true }
             _            => { false }
-        }
-    }
-
-    fn extractBool(&self) -> Option<bool> {
-        match *self {
-            Value::Undef  => { None }
-            Value::False  => { Some(false) }
-            Value::True   => { Some(true) }
         }
     }
 }
@@ -129,10 +121,14 @@ impl Assignment {
         &line.vd
     }
 
-    pub fn extractModel(&self) -> Vec<Option<bool>> {
-        let mut model = Vec::with_capacity(self.assignment.len());
-        for line in self.assignment.iter() {
-            model.push(line.assign[0].extractBool());
+    pub fn extractModel(&self) -> IndexMap<Var, bool> {
+        let mut model = IndexMap::new();
+        for i in 0 .. self.assignment.len() {
+            match self.assignment[i].assign[0] {
+                Value::Undef  => {}
+                Value::False  => { model.insert(&Var::new(i), false); }
+                Value::True   => { model.insert(&Var::new(i), true); }
+            }
         }
         model
     }

@@ -10,6 +10,8 @@ use std::default::Default;
 use std::fs;
 use std::io;
 use std::io::Write;
+use minisat::literal::Var;
+use minisat::index_map::IndexMap;
 use minisat::decision_heuristic::PhaseSaving;
 use minisat::conflict::CCMinMode;
 use minisat::solver;
@@ -196,7 +198,7 @@ fn main() {
         solveFileCore(solver, options).expect("Error");
     } else {
         let solver = solver::simp::SimpSolver::new(core_options, simp_options);
-        simpFileSimp(solver, options).expect("Error");
+        solveFileSimp(solver, options).expect("Error");
     }
 }
 
@@ -206,10 +208,10 @@ fn solveFileCore(mut solver : solver::CoreSolver, options : MainOptions) -> io::
     info!("============================[ Problem Statistics ]=============================");
     info!("|                                                                             |");
 
-    {
+    let backward_subst = {
         let in_file = try!(fs::File::open(options.in_path));
-        try!(dimacs::parse(&mut io::BufReader::new(in_file), &mut solver, options.strict));
-    }
+        try!(dimacs::parse(&mut io::BufReader::new(in_file), &mut solver, options.strict))
+    };
 
     info!("|  Number of variables:  {:12}                                         |", solver.nVars());
     info!("|  Number of clauses:    {:12}                                         |", solver.nClauses());
@@ -233,23 +235,23 @@ fn solveFileCore(mut solver : solver::CoreSolver, options : MainOptions) -> io::
     printOutcome(&result);
     if let Some(path) = options.out_path {
         let mut out = try!(fs::File::create(path));
-        try!(writetResultTo(&mut out, result));
+        try!(writeResultTo(&mut out, backward_subst, result));
     }
 
     Ok(())
 }
 
-fn simpFileSimp(mut solver : solver::simp::SimpSolver, options : MainOptions) -> io::Result<()> {
+fn solveFileSimp(mut solver : solver::simp::SimpSolver, options : MainOptions) -> io::Result<()> {
     if !options.pre { solver.eliminate(true); }
     let initial_time = time::precise_time_s();
 
     info!("============================[ Problem Statistics ]=============================");
     info!("|                                                                             |");
 
-    {
+    let backward_subst = {
         let in_file = try!(fs::File::open(options.in_path));
-        try!(dimacs::parse(&mut io::BufReader::new(in_file), &mut solver, options.strict));
-    }
+        try!(dimacs::parse(&mut io::BufReader::new(in_file), &mut solver, options.strict))
+    };
 
     info!("|  Number of variables:  {:12}                                         |", solver.nVars());
     info!("|  Number of clauses:    {:12}                                         |", solver.nClauses());
@@ -293,7 +295,7 @@ fn simpFileSimp(mut solver : solver::simp::SimpSolver, options : MainOptions) ->
     printOutcome(&result);
     if let Some(path) = options.out_path {
         let mut out = try!(fs::File::create(path));
-        try!(writetResultTo(&mut out, result));
+        try!(writeResultTo(&mut out, backward_subst, result));
     }
 
     Ok(())
@@ -308,25 +310,21 @@ fn printOutcome(ret : &PartialResult) {
         });
 }
 
-fn writetResultTo<W : io::Write>(stream : &mut W, ret : PartialResult) -> io::Result<()> {
+fn writeResultTo<W : io::Write>(stream : &mut W, backward_subst : IndexMap<Var, i32>, ret : PartialResult) -> io::Result<()> {
     match ret {
         PartialResult::UnSAT          => { try!(writeln!(stream, "UNSAT")); Ok(()) }
         PartialResult::Interrupted(_) => { try!(writeln!(stream, "INDET")); Ok(()) }
         PartialResult::SAT(model)     => {
             try!(writeln!(stream, "SAT"));
-            writeModelTo(stream, &model)
+            writeModelTo(stream, backward_subst, model)
         }
     }
 }
 
-fn writeModelTo<W : io::Write>(stream : &mut W, model : &Vec<Option<bool>>) -> io::Result<()> {
-    for i in 0 .. model.len() {
-        let var_id = i + 1;
-        match model[i] {
-            None        => {}
-            Some(true)  => { try!(write!(stream, "{} ", var_id)); }
-            Some(false) => { try!(write!(stream, "-{} ", var_id)); }
-        }
+fn writeModelTo<W : io::Write>(stream : &mut W, backward_subst : IndexMap<Var, i32>, model : IndexMap<Var, bool>) -> io::Result<()> {
+    for (var, val) in model.iter() {
+        let var_id = backward_subst[&var];
+        try!(write!(stream, "{} ", if *val { var_id } else { -var_id }));
     }
     try!(writeln!(stream, "0"));
     Ok(())
