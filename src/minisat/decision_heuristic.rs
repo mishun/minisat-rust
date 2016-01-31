@@ -114,10 +114,9 @@ impl DecisionHeuristic {
     }
 
     pub fn rebuildOrderHeap(&mut self, assigns : &Assignment) {
-        let mut tmp = Vec::new();
-        for vi in 0 .. assigns.nVars() {
-            let v = Var::new(vi);
-            if self.var[&v].decision && assigns.undef(v) {
+        let mut tmp = Vec::with_capacity(self.activity_queue.len());
+        for (v, vl) in self.var.iter() {
+            if vl.decision && assigns.undef(v) {
                 tmp.push(v);
             }
         }

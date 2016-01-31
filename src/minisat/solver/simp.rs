@@ -857,9 +857,8 @@ impl SimpSolver {
             }
         }
 
-        for i in 0 .. self.core.nVars() {
-            let v = Var::new(i);
-            if self.touched[&v] != 0 {
+        for (v, touched) in self.touched.iter_mut() {
+            if *touched != 0 {
                 for cr in self.occurs.lookup(&v, &self.core.db.ca) {
                     let c = self.core.db.ca.edit(*cr);
                     if c.mark() == 0 {
@@ -867,7 +866,7 @@ impl SimpSolver {
                         c.setMark(2);
                     }
                 }
-                self.touched[&v] = 0;
+                *touched = 0;
             }
         }
 
