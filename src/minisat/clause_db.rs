@@ -101,7 +101,7 @@ impl ClauseDB {
             self.cla_inc *= 1e-20;
             for cri in self.learnts.iter() {
                 let c = self.ca.edit(*cri);
-                let scaled = c.activity() * 1e-10;
+                let scaled = c.activity() * 1e-20;
                 c.setActivity(scaled);
             }
         }
