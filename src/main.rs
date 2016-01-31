@@ -153,31 +153,31 @@ fn main() {
     };
 
     let simp_options = {
-        let mut s : solver::simp::SimpSettings = Default::default();
+        let mut s : solver::simp::Settings = Default::default();
 
-        if matches.is_present("asymm") { s.use_asymm = true; }
-        if matches.is_present("no-asymm") { s.use_asymm = false; }
+        if matches.is_present("asymm") { s.simp.use_asymm = true; }
+        if matches.is_present("no-asymm") { s.simp.use_asymm = false; }
 
-        if matches.is_present("rcheck") { s.use_rcheck = true; }
-        if matches.is_present("no-rcheck") { s.use_rcheck = false; }
+        if matches.is_present("rcheck") { s.simp.use_rcheck = true; }
+        if matches.is_present("no-rcheck") { s.simp.use_rcheck = false; }
 
-        if matches.is_present("elim") { s.use_elim = true; }
-        if matches.is_present("no-elim") { s.use_elim = false; }
+        if matches.is_present("elim") { s.simp.use_elim = true; }
+        if matches.is_present("no-elim") { s.simp.use_elim = false; }
 
         for x in matches.value_of("grow").and_then(|s| s.parse().ok()).iter() {
-            s.grow = *x;
+            s.simp.grow = *x;
         }
 
         for x in matches.value_of("cl-lim").and_then(|s| s.parse().ok()).iter() {
-            if -1 <= *x { s.clause_lim = *x; }
+            if -1 <= *x { s.simp.clause_lim = *x; }
         }
 
         for x in matches.value_of("sub-lim").and_then(|s| s.parse().ok()).iter() {
-            if -1 <= *x { s.subsumption_lim = *x; }
+            if -1 <= *x { s.simp.subsumption_lim = *x; }
         }
 
         for x in matches.value_of("simp-gc-frac").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < *x && *x <= 1.0 { s.simp_garbage_frac = *x; }
+            if 0.0 < *x && *x <= 1.0 { s.simp.simp_garbage_frac = *x; }
         }
 
         s
