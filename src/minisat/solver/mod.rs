@@ -32,6 +32,7 @@ pub struct Settings {
     pub db         : ClauseDBSettings,
     pub ccmin_mode : CCMinMode,
     pub restart    : RestartStrategy,
+    pub learnt     : LearningStrategySettings,
     pub core       : CoreSettings
 }
 
@@ -41,6 +42,7 @@ impl Default for Settings {
                  , db         : Default::default()
                  , ccmin_mode : CCMinMode::Deep
                  , restart    : Default::default()
+                 , learnt     : Default::default()
                  , core       : Default::default()
                  }
     }
@@ -75,42 +77,61 @@ impl Default for RestartStrategy {
 }
 
 
-pub struct CoreSettings {
-    pub garbage_frac      : f64,         // The fraction of wasted memory allowed before a garbage collection is triggered.
-    pub min_learnts_lim   : i32,         // Minimum number to set the learnts limit to.
-    pub learntsize_factor : f64,         // The intitial limit for learnt clauses is a factor of the original clauses.
-    pub learntsize_inc    : f64,         // The limit for learnt clauses is multiplied with this factor each restart.
-
-    pub learntsize_adjust_start_confl : i32,
-    pub learntsize_adjust_inc : f64
+pub struct LearningStrategySettings {
+    pub min_learnts_lim         : i32,  // Minimum number to set the learnts limit to.
+    pub size_factor             : f64,  // The intitial limit for learnt clauses is a factor of the original clauses.
+    pub size_inc                : f64,  // The limit for learnt clauses is multiplied with this factor each restart.
+    pub size_adjust_start_confl : i32,
+    pub size_adjust_inc         : f64
 }
 
-impl Default for CoreSettings {
-    fn default() -> CoreSettings {
-        CoreSettings { garbage_frac      : 0.20
-                     , min_learnts_lim   : 0
-                     , learntsize_factor : 1.0 / 3.0
-                     , learntsize_inc    : 1.1
-
-                     , learntsize_adjust_start_confl : 100
-                     , learntsize_adjust_inc : 1.5
-                     }
+impl Default for LearningStrategySettings {
+    fn default() -> LearningStrategySettings {
+        LearningStrategySettings { min_learnts_lim         : 0
+                                 , size_factor             : 1.0 / 3.0
+                                 , size_inc                : 1.1
+                                 , size_adjust_start_confl : 100
+                                 , size_adjust_inc         : 1.5
+                                 }
     }
 }
 
-
-#[derive(Default)]
-struct Stats {
-    solves       : u64,
-    starts       : u64,
-    decisions    : u64,
-    conflicts    : u64,
-    start_time   : f64
+pub struct LearningStrategy {
+    settings          : LearningStrategySettings,
+    max_learnts       : f64,
+    size_adjust_confl : f64,
+    size_adjust_cnt   : i32
 }
 
-impl Stats {
-    pub fn new() -> Stats {
-        Stats { start_time : time::precise_time_s(), ..Default::default() }
+impl LearningStrategy {
+    pub fn new(settings : LearningStrategySettings) -> LearningStrategy {
+        LearningStrategy { settings          : settings
+                         , max_learnts       : 0.0
+                         , size_adjust_confl : 0.0
+                         , size_adjust_cnt   : 0
+                         }
+    }
+
+    pub fn reset(&mut self, clauses : usize) {
+        self.max_learnts = ((clauses as f64) * self.settings.size_factor).max(self.settings.min_learnts_lim as f64);
+        self.size_adjust_confl = self.settings.size_adjust_start_confl as f64;
+        self.size_adjust_cnt   = self.settings.size_adjust_start_confl;
+    }
+
+    pub fn bump(&mut self) -> bool {
+        self.size_adjust_cnt -= 1;
+        if self.size_adjust_cnt == 0 {
+            self.size_adjust_confl *= self.settings.size_adjust_inc;
+            self.size_adjust_cnt = self.size_adjust_confl as i32;
+            self.max_learnts *= self.settings.size_inc;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn border(&self) -> usize {
+        self.max_learnts as usize
     }
 }
 
@@ -176,32 +197,50 @@ enum SearchResult { UnSAT, SAT, Interrupted(f64), AssumpsConfl(LitMap<()>) }
 pub enum PartialResult { UnSAT, SAT(VarMap<bool>), Interrupted(f64) }
 
 
+pub struct CoreSettings {
+    pub garbage_frac : f64, // The fraction of wasted memory allowed before a garbage collection is triggered.
+}
+
+impl Default for CoreSettings {
+    fn default() -> CoreSettings {
+        CoreSettings { garbage_frac : 0.20
+                     }
+    }
+}
+
+
+#[derive(Default)]
+struct Stats {
+    solves       : u64,
+    starts       : u64,
+    decisions    : u64,
+    conflicts    : u64,
+    start_time   : f64
+}
+
+impl Stats {
+    pub fn new() -> Stats {
+        Stats { start_time : time::precise_time_s(), ..Default::default() }
+    }
+}
+
+
 pub struct CoreSolver {
-    settings           : CoreSettings,
-    restart            : RestartStrategy,
-
-    stats              : Stats,   // Statistics: (read-only member variable)
-
-    // Solver state:
-    db                 : ClauseDB,
-    trail              : PropagationTrail<Lit>,       // Assignment stack; stores all assigments made in the order they were made.
-    assumptions        : Vec<Lit>,                    // Current set of assumptions provided to solve by the user.
-    assigns            : Assignment,                  // The current assignments.
-    watches            : Watches,                     // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
-    heur               : DecisionHeuristic,
-
-    ok                 : bool,          // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
-    simp               : SimplifyGuard,
-
-    released_vars      : Vec<Var>,
-
-    analyze : AnalyzeContext,
-
-    max_learnts             : f64,
-    learntsize_adjust_confl : f64,
-    learntsize_adjust_cnt   : i32,
-
-    budget : Budget
+    settings      : CoreSettings,
+    restart       : RestartStrategy,
+    stats         : Stats,                  // Statistics: (read-only member variable)
+    db            : ClauseDB,
+    trail         : PropagationTrail<Lit>,  // Assignment stack; stores all assigments made in the order they were made.
+    assumptions   : Vec<Lit>,               // Current set of assumptions provided to solve by the user.
+    assigns       : Assignment,             // The current assignments.
+    watches       : Watches,                // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
+    heur          : DecisionHeuristic,
+    ok            : bool,                   // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
+    simp          : SimplifyGuard,
+    released_vars : Vec<Var>,
+    analyze       : AnalyzeContext,
+    learnt        : LearningStrategy,
+    budget        : Budget
 }
 
 impl Solver for CoreSolver {
@@ -259,33 +298,22 @@ enum AddClause { UnSAT, Consumed, Added(ClauseRef) }
 
 impl CoreSolver {
     pub fn new(settings : Settings) -> CoreSolver {
-        CoreSolver {
-            settings : settings.core,
-            restart  : settings.restart,
-
-            stats : Stats::new(),
-
-            db    : ClauseDB::new(settings.db),
-            trail : PropagationTrail::new(),
-            assumptions : Vec::new(),
-
-            assigns : Assignment::new(),
-            watches : Watches::new(),
-            heur    : DecisionHeuristic::new(settings.heur),
-
-            simp : SimplifyGuard::new(),
-            ok : true,
-
-            released_vars : Vec::new(),
-
-            analyze : AnalyzeContext::new(settings.ccmin_mode),
-
-            max_learnts : 0.0,
-            learntsize_adjust_confl : 0.0,
-            learntsize_adjust_cnt : 0,
-
-            budget : Budget::new()
-        }
+        CoreSolver { settings      : settings.core
+                   , restart       : settings.restart
+                   , stats         : Stats::new()
+                   , db            : ClauseDB::new(settings.db)
+                   , trail         : PropagationTrail::new()
+                   , assumptions   : Vec::new()
+                   , assigns       : Assignment::new()
+                   , watches       : Watches::new()
+                   , heur          : DecisionHeuristic::new(settings.heur)
+                   , simp          : SimplifyGuard::new()
+                   , ok            : true
+                   , released_vars : Vec::new()
+                   , analyze       : AnalyzeContext::new(settings.ccmin_mode)
+                   , learnt        : LearningStrategy::new(settings.learnt)
+                   , budget        : Budget::new()
+                   }
     }
 
     fn addClause_(&mut self, clause : &[Lit]) -> AddClause {
@@ -416,9 +444,7 @@ impl CoreSolver {
         if !self.ok { return PartialResult::UnSAT; }
 
         self.stats.solves += 1;
-        self.max_learnts = (self.nClauses() as f64 * self.settings.learntsize_factor).max(self.settings.min_learnts_lim as f64);
-        self.learntsize_adjust_confl = self.settings.learntsize_adjust_start_confl as f64;
-        self.learntsize_adjust_cnt   = self.settings.learntsize_adjust_start_confl;
+        self.learnt.reset(self.db.num_clauses);
 
         info!("============================[ Search Statistics ]==============================");
         info!("| Conflicts |          ORIGINAL         |          LEARNT          | Progress |");
@@ -497,18 +523,13 @@ impl CoreSolver {
                     self.heur.decayActivity();
                     self.db.decayActivity();
 
-                    self.learntsize_adjust_cnt -= 1;
-                    if self.learntsize_adjust_cnt == 0 {
-                        self.learntsize_adjust_confl *= self.settings.learntsize_adjust_inc;
-                        self.learntsize_adjust_cnt = self.learntsize_adjust_confl as i32;
-                        self.max_learnts *= self.settings.learntsize_inc;
-
+                    if self.learnt.bump() {
                         info!("| {:9} | {:7} {:8} {:8} | {:8} {:8} {:6.0} | {:6.3} % |",
                                self.stats.conflicts,
                                self.heur.dec_vars - self.trail.levelSize(0),
                                self.nClauses(),
                                self.db.clauses_literals,
-                               self.max_learnts as u64,
+                               self.learnt.border(),
                                self.db.num_learnts,
                                (self.db.learnts_literals as f64) / (self.db.num_learnts as f64),
                                progressEstimate(self.assigns.nVars(), &self.trail) * 100.0);
@@ -528,7 +549,7 @@ impl CoreSolver {
                         return SearchResult::UnSAT;
                     }
 
-                    if self.db.needReduce(self.trail.totalSize() + (self.max_learnts as usize)) {
+                    if self.db.needReduce(self.trail.totalSize() + self.learnt.border()) {
                         // Reduce the set of learnt clauses:
                         self.db.reduce(&mut self.assigns, &mut self.watches);
                         if self.db.ca.checkGarbage(self.settings.garbage_frac) {

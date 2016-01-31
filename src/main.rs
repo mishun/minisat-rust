@@ -146,7 +146,7 @@ fn main() {
         }
 
         for x in matches.value_of("min-learnts").and_then(|s| s.parse().ok()).iter() {
-            if 0 <= *x { s.core.min_learnts_lim = *x; }
+            if 0 <= *x { s.learnt.min_learnts_lim = *x; }
         }
 
         s
