@@ -913,54 +913,61 @@ impl SimpSolver {
 
 struct ElimClauses {
     extend_model : bool,
-    elimclauses  : Vec<u32>
+    literals     : Vec<Lit>,
+    sizes        : Vec<usize>
 }
 
 impl ElimClauses {
     pub fn new(extend_model : bool) -> ElimClauses {
         ElimClauses { extend_model : extend_model
-                    , elimclauses  : Vec::new()
+                    , literals     : Vec::new()
+                    , sizes        : Vec::new()
                     }
     }
 
     pub fn mkElimUnit(&mut self, x : Lit) {
-        self.elimclauses.push(x.toIndex() as u32);
-        self.elimclauses.push(1);
+        self.literals.push(x);
+        self.sizes.push(1);
     }
 
     pub fn mkElimClause(&mut self, v : Var, c : &Clause) {
-        let first = self.elimclauses.len();
-        let mut v_pos = 0;
+        let first = self.literals.len();
 
         // Copy clause to elimclauses-vector. Remember position where the
         // variable 'v' occurs:
+        let mut v_pos = 0;
+        let mut v_found = false;
         for i in 0 .. c.len() {
-            self.elimclauses.push(c[i].toIndex() as u32);
+            self.literals.push(c[i]);
             if c[i].var() == v {
                 v_pos = i + first;
+                v_found = true;
             }
         }
-        assert!(v_pos > 0);
+        assert!(v_found);
 
         // Swap the first literal with the 'v' literal, so that the literal
         // containing 'v' will occur first in the clause:
-        self.elimclauses.swap(first, v_pos);
+        self.literals.swap(first, v_pos);
 
         // Store the length of the clause last:
-        self.elimclauses.push(c.len() as u32);
+        self.sizes.push(c.len());
     }
 
     pub fn extendModel(&self, model : &mut IndexMap<Var, bool>) {
-        if !self.extend_model || self.elimclauses.is_empty() { return; }
+        if !self.extend_model { return; }
 
-        let mut i = self.elimclauses.len() - 1;
-        while i > 0 {
-            let mut j = self.elimclauses[i] as usize;
+        let mut i = self.literals.len();
+        let mut cl = self.sizes.len();
+        while cl > 0 && i > 0 {
+            cl -= 1;
+            let mut j = self.sizes[cl];
+            assert!(j > 0);
+
             i -= 1;
             let mut skip = false;
-
             while j > 1 {
-                let x = Lit::fromIndex(self.elimclauses[i] as usize);
+                let x = self.literals[i];
                 match model.get(&x.var()) {
                     Some(s) if *s == x.sign() => {}
                     _                         => { skip = true; break; }
@@ -971,22 +978,22 @@ impl ElimClauses {
             }
 
             if !skip {
-                let x = Lit::fromIndex(self.elimclauses[i] as usize);
+                let x = self.literals[i];
                 model.insert(&x.var(), !x.sign());
             }
 
-            if i > j {
-                i -= j;
+            if i > j - 1 {
+                i -= j - 1;
             } else {
-                i = 0;
+                i = 0
             }
         }
     }
 
     pub fn logSize(&self) {
-        if self.elimclauses.len() > 0 {
-            info!("|  Eliminated clauses:     {:10.2} Mb                                      |",
-                ((self.elimclauses.len() * mem::size_of::<u32>()) as f64) / (1024.0 * 1024.0));
+        let sz = self.literals.len() + self.sizes.len();
+        if sz > 0 {
+            info!("|  Eliminated clauses:     {:10.2} Mb                                      |", ((sz * mem::size_of::<u32>()) as f64) / (1024.0 * 1024.0));
         }
     }
 }
