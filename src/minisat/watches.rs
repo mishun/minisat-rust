@@ -175,12 +175,12 @@ impl Watches {
     }
 
     pub fn relocGC(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {
-        self.watches.modify_in_place(|line| {
+        for (_, line) in self.watches.iter_mut() {
             line.dirty = false;
             line.watchers.retain(|w| { !from[w.cref].is_deleted() });
             for w in line.watchers.iter_mut() {
                 w.cref = from.relocTo(to, w.cref);
             }
-        });
+        }
     }
 }

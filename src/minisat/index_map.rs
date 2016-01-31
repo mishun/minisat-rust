@@ -1,6 +1,6 @@
-use std::marker::PhantomData;
+use std::marker;
+use std::ops;
 use vec_map;
-use std::ops::{Index, IndexMut};
 
 
 pub trait HasIndex {
@@ -11,12 +11,12 @@ pub trait HasIndex {
 
 pub struct IndexMap<K : HasIndex, V> {
     map : vec_map::VecMap<V>,
-    ph  : PhantomData<K>
+    ph  : marker::PhantomData<K>
 }
 
 impl<K : HasIndex, V> IndexMap<K, V> {
     pub fn new() -> IndexMap<K, V> {
-        IndexMap { map : vec_map::VecMap::new(), ph : PhantomData }
+        IndexMap { map : vec_map::VecMap::new(), ph : marker::PhantomData }
     }
 
     pub fn clear(&mut self) {
@@ -45,23 +45,16 @@ impl<K : HasIndex, V> IndexMap<K, V> {
 
     #[inline]
     pub fn iter(&self) -> Iter<K, V> {
-        Iter { it : self.map.iter(), ph : PhantomData }
+        Iter { it : self.map.iter(), ph : marker::PhantomData }
     }
 
     #[inline]
     pub fn iter_mut(&mut self) -> IterMut<K, V> {
-        IterMut { it : self.map.iter_mut(), ph : PhantomData }
-    }
-
-    #[inline]
-    pub fn modify_in_place<F : FnMut(&mut V) -> ()>(&mut self, mut f : F) {
-        for (_, v) in self.map.iter_mut() {
-            f(v);
-        }
+        IterMut { it : self.map.iter_mut(), ph : marker::PhantomData }
     }
 }
 
-impl<'r, K : HasIndex, V> Index<&'r K> for IndexMap<K, V> {
+impl<'r, K : HasIndex, V> ops::Index<&'r K> for IndexMap<K, V> {
     type Output = V;
 
     #[inline]
@@ -70,7 +63,7 @@ impl<'r, K : HasIndex, V> Index<&'r K> for IndexMap<K, V> {
     }
 }
 
-impl<'r, K : HasIndex, V> IndexMut<&'r K> for IndexMap<K, V> {
+impl<'r, K : HasIndex, V> ops::IndexMut<&'r K> for IndexMap<K, V> {
     #[inline]
     fn index_mut(&mut self, k : &'r K) -> &mut V {
         self.map.index_mut(&k.toIndex())
@@ -80,7 +73,7 @@ impl<'r, K : HasIndex, V> IndexMut<&'r K> for IndexMap<K, V> {
 
 pub struct Iter<'a, K : HasIndex, V : 'a> {
     it : vec_map::Iter<'a, V>,
-    ph : PhantomData<K>
+    ph : marker::PhantomData<K>
 }
 
 impl<'a, K : HasIndex, V : 'a> Iterator for Iter<'a, K, V> {
@@ -95,7 +88,7 @@ impl<'a, K : HasIndex, V : 'a> Iterator for Iter<'a, K, V> {
 
 pub struct IterMut<'a, K : HasIndex, V : 'a> {
     it : vec_map::IterMut<'a, V>,
-    ph : PhantomData<K>
+    ph : marker::PhantomData<K>
 }
 
 impl<'a, K : HasIndex, V : 'a> Iterator for IterMut<'a, K, V> {

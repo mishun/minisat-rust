@@ -222,7 +222,7 @@ impl OccLists {
     }
 
     pub fn relocGC(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {
-        self.occs.modify_in_place(|ol| {
+        for (_, ol) in self.occs.iter_mut() {
             if ol.dirty {
                 ol.occs.retain(|cr| { !from[*cr].is_deleted() });
                 ol.dirty = false;
@@ -231,7 +231,7 @@ impl OccLists {
             for occ in ol.occs.iter_mut() {
                 *occ = from.relocTo(to, *occ);
             }
-        });
+        }
     }
 }
 
