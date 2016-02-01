@@ -266,9 +266,9 @@ pub struct SimpSolver {
     set                : SimpSettings,
 
     // Statistics:
-    merges             : i32,
-    asymm_lits         : i32,
-    eliminated_vars    : i32,
+    merges             : u64,
+    asymm_lits         : u64,
+    eliminated_vars    : u64,
 
     // Solver state:
     use_simplification : bool,
@@ -319,7 +319,7 @@ impl Solver for SimpSolver {
         }
         //#endif
 
-        if self.set.use_rcheck && self.implied(ps) {
+        if self.set.use_rcheck && implied(&mut self.core, ps) {
             return true;
         }
 
@@ -356,7 +356,6 @@ impl Solver for SimpSolver {
 }
 
 impl SimpSolver {
-
     pub fn new(core_s : super::Settings, simp_s : Settings) -> SimpSolver {
         let mut s = super::CoreSolver::new(core_s);
         s.db.ca.set_extra_clause_field(true); // NOTE: must happen before allocating the dummy clause below.
@@ -386,57 +385,34 @@ impl SimpSolver {
                    }
     }
 
-    fn implied(&mut self, c : &[Lit]) -> bool {
-        assert!(self.core.trail.isGroundLevel());
-
-        self.core.trail.newDecisionLevel();
-        for i in 0 .. c.len() {
-            let l = c[i];
-            if self.core.assigns.sat(l) {
-                self.core.cancelUntil(0);
-                return true;
-            } else if !self.core.assigns.unsat(l) {
-                assert!(self.core.assigns.undef(l.var()));
-                self.core.uncheckedEnqueue(!l, None);
-            }
-        }
-
-        let result = self.core.propagate().is_some();
-        self.core.cancelUntil(0);
-        return result;
-    }
-
-    pub fn solveLimited(&mut self, assumps : &[Lit], do_simp : bool, turn_off_simp : bool) -> super::PartialResult {
-        self.core.assumptions = assumps.to_vec();
-        return self.solve_(do_simp, turn_off_simp);
-    }
-
-    fn solve_(&mut self, mut do_simp : bool, turn_off_simp : bool) -> super::PartialResult {
+    pub fn solveLimited(&mut self, assumptions : &[Lit], do_simp_param : bool, turn_off_simp : bool) -> super::PartialResult {
+        let do_simp = do_simp_param && self.use_simplification;
         let mut extra_frozen : Vec<Var> = Vec::new();
-        let mut elim_result = true;
 
-        do_simp &= self.use_simplification;
-        if do_simp {
-            // Assumptions must be temporarily frozen to run variable elimination:
-            for lit in self.core.assumptions.iter() {
-                let v = lit.var();
+        let elim_result =
+            if do_simp {
+                // Assumptions must be temporarily frozen to run variable elimination:
+                for lit in assumptions.iter() {
+                    let v = lit.var();
 
-                // If an assumption has been eliminated, remember it.
-                assert!(self.eliminated[&v] == 0);
+                    // If an assumption has been eliminated, remember it.
+                    assert!(self.eliminated[&v] == 0);
 
-                if self.frozen[&v] == 0 {
-                    // Freeze and store.
-                    self.frozen[&v] = 1;
-                    extra_frozen.push(v);
+                    if self.frozen[&v] == 0 {
+                        // Freeze and store.
+                        self.frozen[&v] = 1;
+                        extra_frozen.push(v);
+                    }
                 }
-            }
 
-            elim_result = self.eliminate(turn_off_simp);
-        }
+                self.eliminate(turn_off_simp)
+            } else {
+                true
+            };
 
         let result =
             if elim_result {
-                let mut result = self.core.solve_();
+                let mut result = self.core.solveLimited(assumptions);
                 if let super::PartialResult::SAT(ref mut model) = result {
                     self.elimclauses.extendModel(model);
                 }
@@ -645,44 +621,6 @@ impl SimpSolver {
         }
     }
 
-    fn merge(&mut self, _ps : ClauseRef, _qs : ClauseRef, v : Var) -> Option<Vec<Lit>> {
-        self.merges += 1;
-
-        let ps_smallest = self.core.db.ca[_ps].len() < self.core.db.ca[_qs].len();
-        let ref ps = self.core.db.ca[ if ps_smallest { _qs } else { _ps } ];
-        let ref qs = self.core.db.ca[ if ps_smallest { _ps } else { _qs } ];
-
-        let mut res = Vec::new();
-        for i in 0 .. qs.len() {
-            if qs[i].var() != v {
-                let mut ok = true;
-
-                for j in 0 .. ps.len() {
-                    if ps[j].var() == qs[i].var() {
-                        if ps[j] == !qs[i] {
-                            return None;
-                        } else {
-                            ok = false;
-                            break;
-                        }
-                    }
-                }
-
-                if ok {
-                    res.push(qs[i]);
-                }
-            }
-        }
-
-        for i in 0 .. ps.len() {
-            if ps[i].var() != v {
-                res.push(ps[i]);
-            }
-        }
-
-        Some(res)
-    }
-
     fn eliminateVar(&mut self, v : Var) -> bool {
         assert!(self.frozen[&v] == 0);
         assert!(self.eliminated[&v] == 0);
@@ -708,13 +646,11 @@ impl SimpSolver {
         let mut cnt = 0;
         for pr in pos.iter() {
             for nr in neg.iter() {
-                match self.merge(*pr, *nr, v) {
-                    None            => {}
-                    Some(resolvent) => {
-                        cnt += 1;
-                        if cnt > cls.len() + self.set.grow || (self.set.clause_lim != -1 && (resolvent.len() as i32) > self.set.clause_lim) {
-                            return true;
-                        }
+                self.merges += 1;
+                if let Some(resolvent) = merge(v, &self.core.db.ca[*pr], &self.core.db.ca[*nr]) {
+                    cnt += 1;
+                    if cnt > cls.len() + self.set.grow || (self.set.clause_lim != -1 && (resolvent.len() as i32) > self.set.clause_lim) {
+                        return true;
                     }
                 }
             }
@@ -742,15 +678,12 @@ impl SimpSolver {
         }
 
         // Produce clauses in cross product:
-        //vec<Lit>& resolvent = add_tmp;
         for pr in pos.iter() {
             for nr in neg.iter() {
-                match self.merge(*pr, *nr, v) {
-                    None            => {}
-                    Some(resolvent) => {
-                        if !self.addClause(resolvent.borrow()) {
-                            return false;
-                        }
+                self.merges += 1;
+                if let Some(resolvent) = merge(v, &self.core.db.ca[*pr], &self.core.db.ca[*nr]) {
+                    if !self.addClause(resolvent.borrow()) {
+                        return false;
                     }
                 }
             }
@@ -908,6 +841,62 @@ impl SimpSolver {
         // Temporary clause:
         self.bwdsub_tmpunit = self.core.db.ca.relocTo(to, self.bwdsub_tmpunit);
     }
+}
+
+
+fn implied(core : &mut super::CoreSolver, c : &[Lit]) -> bool {
+    assert!(core.trail.isGroundLevel());
+
+    core.trail.newDecisionLevel();
+    for lit in c.iter() {
+        match core.assigns.ofLit(*lit) {
+            Value::True  => { core.cancelUntil(0); return true; }
+            Value::Undef => { core.uncheckedEnqueue(!*lit, None); }
+            Value::False => {}
+        }
+    }
+
+    let result = core.propagate().is_some();
+    core.cancelUntil(0);
+    return result;
+}
+
+
+// Returns None if clause is always satisfied
+fn merge(v : Var, _ps : &Clause, _qs : &Clause) -> Option<Vec<Lit>> {
+    let ps_smallest = _ps.len() < _qs.len();
+    let ref ps = if ps_smallest { _qs } else { _ps };
+    let ref qs = if ps_smallest { _ps } else { _qs };
+
+    let mut res = Vec::new();
+    for i in 0 .. qs.len() {
+        if qs[i].var() != v {
+            let mut ok = true;
+
+            for j in 0 .. ps.len() {
+                if ps[j].var() == qs[i].var() {
+                    if ps[j] == !qs[i] {
+                        return None;
+                    } else {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+
+            if ok {
+                res.push(qs[i]);
+            }
+        }
+    }
+
+    for i in 0 .. ps.len() {
+        if ps[i].var() != v {
+            res.push(ps[i]);
+        }
+    }
+
+    Some(res)
 }
 
 

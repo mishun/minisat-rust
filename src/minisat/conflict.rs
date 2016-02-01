@@ -56,7 +56,7 @@ impl AnalyzeContext {
     //       rest of literals. There may be others from the same level though.
     //
     pub fn analyze(&mut self, db : &mut ClauseDB, heur : &mut DecisionHeuristic, assigns : &Assignment, trail : &PropagationTrail<Lit>, confl_param : ClauseRef) -> (DecisionLevel, Vec<Lit>) {
-        assert!(trail.decisionLevel() > 0);
+        assert!(!trail.isGroundLevel());
         // Generate conflict clause:
         let mut out_learnt = Vec::new();
 
@@ -64,14 +64,12 @@ impl AnalyzeContext {
             let mut pathC = 0i32;
             let mut p = None;
             let mut index = trail.totalSize();
-            let mut confl = Some(confl_param);
+            let mut confl = confl_param;
 
             loop {
-                assert!(confl.is_some()); // (otherwise should be UIP)
-                db.bumpActivity(confl.unwrap());
+                db.bumpActivity(confl);
 
-                let ref c = db.ca[confl.unwrap()];
-
+                let ref c = db.ca[confl];
                 for j in match p { None => 0, Some(_) => 1 } .. c.len() {
                     let q = c[j];
                     let v = q.var();
@@ -89,17 +87,25 @@ impl AnalyzeContext {
                 }
 
                 // Select next clause to look at:
-                loop {
-                    index -= 1;
-                    if self.seen[&trail[index].var()] != Seen::Undef { break; }
-                }
-                let pl = trail[index];
-                confl = assigns.vardata(pl.var()).reason;
+                let pl = {
+                    loop {
+                        index -= 1;
+                        if self.seen[&trail[index].var()] != Seen::Undef { break; }
+                    }
+                    trail[index]
+                };
+
                 self.seen[&pl.var()] = Seen::Undef;
                 p = Some(pl);
 
                 pathC -= 1;
                 if pathC <= 0 { break; }
+
+                confl = {
+                    let reason = assigns.vardata(pl.var()).reason;
+                    assert!(reason.is_some()); // (otherwise should be UIP)
+                    reason.unwrap()
+                };
             }
 
             out_learnt.insert(0, !p.unwrap());
@@ -108,49 +114,13 @@ impl AnalyzeContext {
 
         // Simplify conflict clause:
         self.analyze_toclear = out_learnt.clone();
-        {
-            self.max_literals += out_learnt.len() as u64;
-
-            match self.ccmin_mode {
-                CCMinMode::Deep  => {
-                    let mut j = 1;
-                    for i in 1 .. out_learnt.len() {
-                        let l = out_learnt[i];
-                        if assigns.vardata(l.var()).reason.is_none() || !self.litRedundant(db, assigns, l) {
-                            out_learnt[j] = out_learnt[i];
-                            j += 1;
-                        }
-                    }
-                    out_learnt.truncate(j);
-                }
-
-                CCMinMode::Basic => {
-                    let mut j = 1;
-                    for i in 1 .. out_learnt.len() {
-                        let x = out_learnt[i].var();
-                        match assigns.vardata(x).reason {
-                            None     => { out_learnt[j] = out_learnt[i]; j += 1; }
-                            Some(cr) => {
-                                let ref c = db.ca[cr];
-                                for k in 1 .. c.len() {
-                                    let y = c[k].var();
-                                    if self.seen[&y] == Seen::Undef && assigns.vardata(y).level > 0 {
-                                        out_learnt[j] = out_learnt[i];
-                                        j += 1;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    out_learnt.truncate(j);
-                }
-
-                CCMinMode::None  => {}
-            }
-
-            self.tot_literals += out_learnt.len() as u64;
+        self.max_literals += out_learnt.len() as u64;
+        match self.ccmin_mode {
+            CCMinMode::Deep  => { out_learnt.retain(|l| { assigns.vardata(l.var()).reason.is_none() || !self.litRedundant(db, assigns, *l) }); }
+            CCMinMode::Basic => { out_learnt.retain(|l| { self.preserveLitBasic(db, assigns, l.var()) }); }
+            CCMinMode::None  => {}
         }
+        self.tot_literals += out_learnt.len() as u64;
 
         // Find correct backtrack level:
         let out_btlevel =
@@ -178,6 +148,22 @@ impl AnalyzeContext {
         }
 
         (out_btlevel, out_learnt)
+    }
+
+    fn preserveLitBasic(&self, db : &ClauseDB, assigns : &Assignment, x : Var) -> bool {
+        match assigns.vardata(x).reason {
+            None     => { true }
+            Some(cr) => {
+                let ref c = db.ca[cr];
+                for k in 1 .. c.len() {
+                    let y = c[k].var();
+                    if self.seen[&y] == Seen::Undef && assigns.vardata(y).level > 0 {
+                        return true;
+                    }
+                }
+                false
+            }
+        }
     }
 
     // Check if 'p' can be removed from a conflict clause.
