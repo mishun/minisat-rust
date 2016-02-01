@@ -1,7 +1,20 @@
+use std::cmp;
 use super::{Var, Lit};
 use super::clause;
 use super::index_map::VarMap;
-use minisat::propagation_trail::*;
+
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+pub struct DecisionLevel(usize);
+
+pub const GroundLevel : DecisionLevel = DecisionLevel(0);
+
+impl DecisionLevel {
+    pub fn offset(&self) -> usize {
+        let DecisionLevel(level) = *self;
+        level
+    }
+}
 
 
 #[derive(Clone, Copy)]
@@ -33,20 +46,41 @@ struct VarLine {
 
 pub struct Assignment {
     assignment : Vec<VarLine>,
-    free_vars  : Vec<usize>
+    free_vars  : Vec<usize>,
+    trail      : Vec<Lit>,
+    lim        : Vec<usize>,
+    qhead      : usize
 }
 
 impl Assignment {
     pub fn new() -> Assignment {
         Assignment { assignment : Vec::new()
                    , free_vars  : Vec::new()
+                   , trail      : Vec::new()
+                   , lim        : Vec::new()
+                   , qhead      : 0
                    }
     }
 
+
     #[inline]
-    pub fn nVars(&self) -> usize {
+    pub fn numberOfVars(&self) -> usize {
         self.assignment.len()
     }
+
+    #[inline]
+    pub fn numberOfAssigns(&self) -> usize {
+        self.trail.len()
+    }
+
+    #[inline]
+    pub fn numberOfGroundAssigns(&self) -> usize {
+        match self.lim.first() {
+            Some(lim) => { *lim }
+            None      => { self.trail.len() }
+        }
+    }
+
 
     pub fn newVar(&mut self) -> Var {
         let line = VarLine { assign : [LitVal::Undef, LitVal::Undef]
@@ -72,31 +106,101 @@ impl Assignment {
         self.free_vars.push(v);
     }
 
-    #[inline]
-    pub fn assignLit(&mut self, Lit(p) : Lit, level : DecisionLevel, reason : Option<clause::ClauseRef>) {
-        let ref mut line = self.assignment[p >> 1];
 
+    #[inline]
+    pub fn decisionLevel(&self) -> DecisionLevel {
+        DecisionLevel(self.lim.len())
+    }
+
+    #[inline]
+    pub fn isGroundLevel(&self) -> bool {
+        self.lim.is_empty()
+    }
+
+    #[inline]
+    pub fn newDecisionLevel(&mut self) {
+        self.lim.push(self.trail.len());
+    }
+
+
+    #[inline]
+    pub fn assignLit(&mut self, Lit(p) : Lit, reason : Option<clause::ClauseRef>) {
+        let ref mut line = self.assignment[p >> 1];
         assert!(line.assign[0].isUndef());
         line.assign[p & 1]       = LitVal::True;
         line.assign[(p & 1) ^ 1] = LitVal::False;
-        line.vd.level = level;
+        line.vd.level  = DecisionLevel(self.lim.len());
         line.vd.reason = reason;
+        self.trail.push(Lit(p));
     }
 
     #[inline]
-    pub fn cancel(&mut self, Var(v) : Var) {
-        let ref mut line = self.assignment[v];
-        line.assign = [LitVal::Undef, LitVal::Undef];
+    pub fn rewindUntilLevel<F : FnMut(DecisionLevel, Lit) -> ()>(&mut self, DecisionLevel(target_level) : DecisionLevel, mut f : F) {
+        while self.lim.len() > target_level {
+            let level = self.trail.len();
+            let bottom = self.lim.pop().unwrap();
+            while self.trail.len() > bottom {
+                let lit = self.trail.pop().unwrap();
+
+                f(DecisionLevel(level), lit);
+
+                let Var(v) = lit.var();
+                let ref mut line = self.assignment[v];
+                line.assign = [LitVal::Undef, LitVal::Undef];
+                line.vd.reason = None;
+            }
+        }
+
+        self.qhead = cmp::min(self.qhead, self.trail.len());
     }
 
     #[inline]
-    pub fn undef(&self, Var(v) : Var) -> bool {
+    pub fn inspectUntilLevel<F : FnMut(Lit) -> ()>(&self, DecisionLevel(target_level) : DecisionLevel, mut f : F) {
+        if self.lim.len() > target_level {
+            for i in (self.lim[target_level] .. self.trail.len()).rev() {
+                f(self.trail[i]);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn retainAssignments<F : Fn(&Lit) -> bool>(&mut self, f : F) {
+        assert!(self.isGroundLevel());
+        self.trail.retain(f); // TODO: what to do with assigned values?
+        self.qhead = self.trail.len();
+    }
+
+
+    #[inline]
+    pub fn dequeueAll(&mut self) {
+        self.qhead = self.trail.len()
+    }
+
+    #[inline]
+    pub fn dequeue(&mut self) -> Option<Lit> {
+        if self.qhead < self.trail.len() {
+            let p = self.trail[self.qhead];
+            self.qhead += 1;
+            Some(p)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn assignAt(&self, index : usize) -> Lit {
+        self.trail[index]
+    }
+
+
+    #[inline]
+    pub fn isUndef(&self, Var(v) : Var) -> bool {
         let ref line = self.assignment[v];
         line.assign[0].isUndef()
     }
 
     #[inline]
-    pub fn sat(&self, p : Lit) -> bool {
+    pub fn isSat(&self, p : Lit) -> bool {
         match self.ofLit(p) {
             LitVal::True => { true }
             _            => { false }
@@ -104,7 +208,7 @@ impl Assignment {
     }
 
     #[inline]
-    pub fn unsat(&self, p : Lit) -> bool {
+    pub fn isUnsat(&self, p : Lit) -> bool {
         match self.ofLit(p) {
             LitVal::False => { true }
             _             => { false }
@@ -124,6 +228,7 @@ impl Assignment {
         &line.vd
     }
 
+
     pub fn extractModel(&self) -> VarMap<bool> {
         let mut model = VarMap::new();
         for i in 0 .. self.assignment.len() {
@@ -136,8 +241,9 @@ impl Assignment {
         model
     }
 
-    pub fn relocGC(&mut self, trail : &PropagationTrail<Lit>, from : &mut clause::ClauseAllocator, to : &mut clause::ClauseAllocator) {
-        for l in trail.trail.iter() {
+
+    pub fn relocGC(&mut self, from : &mut clause::ClauseAllocator, to : &mut clause::ClauseAllocator) {
+        for l in self.trail.iter() {
             let Var(v) = l.var();
 
             // Note: it is not safe to call 'locked()' on a relocated clause. This is why we keep
@@ -155,7 +261,7 @@ impl Assignment {
 
     pub fn isLocked(&self, ca : &clause::ClauseAllocator, cr : clause::ClauseRef) -> bool {
         let lit = ca[cr][0];
-        if !self.sat(lit) { return false; }
+        if !self.isSat(lit) { return false; }
         match self.vardata(lit.var()).reason {
             Some(r) if cr == r => { true }
             _                  => { false }
@@ -168,5 +274,28 @@ impl Assignment {
             let Var(v) = ca[cr][0].var();
             self.assignment[v].vd.reason = None;
         }
+    }
+}
+
+
+pub fn progressEstimate(assigns : &Assignment) -> f64 {
+    let F = 1.0 / (assigns.numberOfVars() as f64);
+    let mut progress = 0.0;
+
+    let cl = assigns.lim.len();
+    for level in 0 .. cl + 1 {
+        let l = if level == 0 { 0 } else { assigns.lim[level - 1] };
+        let r = if level == cl { assigns.trail.len() } else { assigns.lim[level] };
+        progress += F.powi(level as i32) * ((r - l) as f64);
+    }
+    progress * F
+}
+
+
+pub fn tryAssignLit(assigns : &mut Assignment, p : Lit, from : Option<clause::ClauseRef>) -> bool {
+    match assigns.ofLit(p) {
+        LitVal::True  => { true }
+        LitVal::False => { false }
+        LitVal::Undef => { assigns.assignLit(p, from); true }
     }
 }

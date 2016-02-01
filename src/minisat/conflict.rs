@@ -2,7 +2,6 @@ use minisat::formula::{Var, Lit};
 use minisat::formula::clause::*;
 use minisat::formula::assignment::*;
 use minisat::formula::index_map::{VarMap, LitMap};
-use minisat::propagation_trail::*;
 use minisat::clause_db::*;
 use minisat::decision_heuristic::*;
 
@@ -62,8 +61,8 @@ impl AnalyzeContext {
     //     * If out_learnt.size() > 1 then 'out_learnt[1]' has the greatest decision level of the
     //       rest of literals. There may be others from the same level though.
     //
-    pub fn analyze(&mut self, db : &mut ClauseDB, heur : &mut DecisionHeuristic, assigns : &Assignment, trail : &PropagationTrail<Lit>, confl_param : ClauseRef) -> Conflict {
-        if trail.isGroundLevel() {
+    pub fn analyze(&mut self, db : &mut ClauseDB, heur : &mut DecisionHeuristic, assigns : &Assignment, mut confl : ClauseRef) -> Conflict {
+        if assigns.isGroundLevel() {
             return Conflict::Ground;
         }
 
@@ -73,8 +72,7 @@ impl AnalyzeContext {
         {
             let mut pathC = 0i32;
             let mut p = None;
-            let mut index = trail.totalSize();
-            let mut confl = confl_param;
+            let mut index = assigns.numberOfAssigns();
 
             loop {
                 db.bumpActivity(confl);
@@ -88,7 +86,7 @@ impl AnalyzeContext {
                         heur.bumpActivity(v);
 
                         self.seen[&v] = Seen::Source;
-                        if assigns.vardata(v).level >= trail.decisionLevel() {
+                        if assigns.vardata(v).level >= assigns.decisionLevel() {
                             pathC += 1;
                         } else {
                             out_learnt.push(q);
@@ -100,9 +98,9 @@ impl AnalyzeContext {
                 let pl = {
                     loop {
                         index -= 1;
-                        if self.seen[&trail[index].var()] != Seen::Undef { break; }
+                        if self.seen[&assigns.assignAt(index).var()] != Seen::Undef { break; }
                     }
-                    trail[index]
+                    assigns.assignAt(index)
                 };
 
                 self.seen[&pl.var()] = Seen::Undef;
@@ -235,11 +233,11 @@ impl AnalyzeContext {
     //   Specialized analysis procedure to express the final conflict in terms of assumptions.
     //   Calculates the (possibly empty) set of assumptions that led to the assignment of 'p', and
     //   stores the result in 'out_conflict'.
-    pub fn analyzeFinal(&mut self, db : &ClauseDB, assigns : &Assignment, trail : &PropagationTrail<Lit>, p : Lit) -> LitMap<()> {
+    pub fn analyzeFinal(&mut self, db : &ClauseDB, assigns : &Assignment, p : Lit) -> LitMap<()> {
         let mut out_conflict = LitMap::new();
         out_conflict.insert(&p, ());
 
-        trail.inspectAssignmentsUntilLevel(GroundLevel, |lit| {
+        assigns.inspectUntilLevel(GroundLevel, |lit| {
             let x = lit.var();
             if self.seen[&x] != Seen::Undef {
                 match assigns.vardata(x).reason {

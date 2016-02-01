@@ -116,7 +116,7 @@ impl DecisionHeuristic {
     pub fn rebuildOrderHeap(&mut self, assigns : &Assignment) {
         let mut tmp = Vec::with_capacity(self.activity_queue.len());
         for (v, vl) in self.var.iter() {
-            if vl.decision && assigns.undef(v) {
+            if vl.decision && assigns.isUndef(v) {
                 tmp.push(v);
             }
         }
@@ -127,7 +127,7 @@ impl DecisionHeuristic {
         // Random decision:
         if self.rand.chance(self.settings.random_var_freq) && !self.activity_queue.is_empty() {
             let v = self.activity_queue[self.rand.irand(self.activity_queue.len())];
-            if assigns.undef(v) && self.var[&v].decision {
+            if assigns.isUndef(v) && self.var[&v].decision {
                 self.rnd_decisions += 1;
                 return Some(v);
             }
@@ -135,7 +135,7 @@ impl DecisionHeuristic {
 
         // Activity based decision:
         while let Some(v) = self.activity_queue.pop() {
-            if assigns.undef(v) && self.var[&v].decision {
+            if assigns.isUndef(v) && self.var[&v].decision {
                 return Some(v);
             }
         }

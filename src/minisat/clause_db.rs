@@ -170,8 +170,8 @@ impl ClauseDB {
             false
         } else {
             let c = self.ca.edit(cr);
-            assert!(assigns.undef(c[0].var()) && assigns.undef(c[1].var()));
-            c.retainSuffix(2, |lit| !assigns.unsat(*lit));
+            assert!(assigns.isUndef(c[0].var()) && assigns.isUndef(c[1].var()));
+            c.retainSuffix(2, |lit| !assigns.isUnsat(*lit));
             true
         }
     }

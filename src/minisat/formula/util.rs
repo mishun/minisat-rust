@@ -6,7 +6,7 @@ use super::clause::*;
 // Returns true if a clause is satisfied with assignment
 pub fn satisfiedWith(c : &Clause, s : &Assignment) -> bool {
     for i in 0 .. c.len() {
-        if s.sat(c[i]) {
+        if s.isSat(c[i]) {
             return true;
         }
     }

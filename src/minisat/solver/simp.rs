@@ -7,7 +7,6 @@ use minisat::formula::assignment::*;
 use minisat::formula::clause::*;
 use minisat::formula::index_map::{VarMap, LitMap};
 use minisat::formula::util::*;
-use minisat::propagation_trail::*;
 use super::Solver;
 
 
@@ -82,7 +81,7 @@ impl ElimQueue {
     }
 
     fn updateElimHeap(&mut self, v : &Var, var_status : &VarMap<VarStatus>, assigns : &Assignment) {
-        if self.inHeap(&v) || (var_status[v].frozen == 0 && var_status[v].eliminated == 0 && assigns.undef(*v)) {
+        if self.inHeap(&v) || (var_status[v].frozen == 0 && var_status[v].eliminated == 0 && assigns.isUndef(*v)) {
             self.update(*v);
         }
     }
@@ -292,7 +291,7 @@ pub struct SimpSolver {
     bwdsub_tmpunit     : ClauseRef,
 }
 
-impl Solver for SimpSolver {
+impl super::Solver for SimpSolver {
     fn nVars(&self) -> usize {
         self.core.nVars()
     }
@@ -438,18 +437,18 @@ impl SimpSolver {
         }
 
         // Main simplification loop:
-        'cleanup: while self.n_touched > 0 || self.bwdsub_assigns < self.core.trail.totalSize() || self.elim.len() > 0 {
+        'cleanup: while self.n_touched > 0 || self.bwdsub_assigns < self.core.assigns.numberOfAssigns() || self.elim.len() > 0 {
             self.gatherTouchedClauses();
 
-            trace!("BWD-SUB: queue = {}, trail = {}", self.subsumption_queue.len(), self.core.trail.totalSize() - self.bwdsub_assigns);
-            if (self.subsumption_queue.len() > 0 || self.bwdsub_assigns < self.core.trail.totalSize()) && !self.backwardSubsumptionCheck(true) {
+            trace!("BWD-SUB: queue = {}, trail = {}", self.subsumption_queue.len(), self.core.assigns.numberOfAssigns() - self.bwdsub_assigns);
+            if (self.subsumption_queue.len() > 0 || self.bwdsub_assigns < self.core.assigns.numberOfAssigns()) && !self.backwardSubsumptionCheck(true) {
                 self.core.ok = false;
                 break 'cleanup;
             }
 
             // Empty elim_heap and return immediately on user-interrupt:
             if self.core.budget.interrupted() {
-                assert!(self.bwdsub_assigns == self.core.trail.totalSize());
+                assert!(self.bwdsub_assigns == self.core.assigns.numberOfAssigns());
                 assert!(self.subsumption_queue.len() == 0);
                 assert!(self.n_touched == 0);
                 self.elim.clearHeap();
@@ -460,7 +459,7 @@ impl SimpSolver {
             let mut cnt = 0;
             while let Some(elim) = self.elim.pop() {
                 if self.core.budget.interrupted() { break; }
-                if self.var_status[&elim].eliminated == 0 && self.core.assigns.undef(elim) {
+                if self.var_status[&elim].eliminated == 0 && self.core.assigns.isUndef(elim) {
                     if cnt % 100 == 0 {
                         trace!("elimination left: {:10}", self.elim.len());
                     }
@@ -478,7 +477,7 @@ impl SimpSolver {
 
                     // At this point, the variable may have been set by assymetric branching, so check it
                     // again. Also, don't eliminate frozen variables:
-                    if self.set.use_elim && self.core.assigns.undef(elim) && self.var_status[&elim].frozen == 0 && !self.eliminateVar(elim) {
+                    if self.set.use_elim && self.core.assigns.isUndef(elim) && self.var_status[&elim].frozen == 0 && !self.eliminateVar(elim) {
                         self.core.ok = false;
                         break 'cleanup;
                     }
@@ -524,7 +523,7 @@ impl SimpSolver {
 
         let cls = {
             let cls = self.occurs.lookup(&v, &self.core.db.ca);
-            if !self.core.assigns.undef(v) || cls.len() == 0 {
+            if !self.core.assigns.isUndef(v) || cls.len() == 0 {
                 return true;
             }
             cls.clone()
@@ -540,7 +539,7 @@ impl SimpSolver {
     }
 
     fn asymm(&mut self, v : Var, cr : ClauseRef) -> bool {
-        assert!(self.core.trail.isGroundLevel());
+        assert!(self.core.assigns.isGroundLevel());
 
         let c = {
             let ref c = self.core.db.ca[cr];
@@ -551,18 +550,18 @@ impl SimpSolver {
             c.to_vec()
         };
 
-        self.core.trail.newDecisionLevel();
+        self.core.assigns.newDecisionLevel();
 
         let mut l = None;
         for lit in c.iter() {
-            if v != lit.var() && !self.core.assigns.unsat(*lit) {
-                self.core.uncheckedEnqueue(!*lit, None);
+            if v != lit.var() && !self.core.assigns.isUnsat(*lit) {
+                self.core.assigns.assignLit(!*lit, None);
             } else {
                 l = Some(*lit);
             }
         }
 
-        match self.core.propagate() {
+        match self.core.watches.propagate(&mut self.core.db.ca, &mut self.core.assigns) {
             None    => { self.core.cancelUntil(GroundLevel); true }
             Some(_) => {
                 self.core.cancelUntil(GroundLevel);
@@ -588,7 +587,7 @@ impl SimpSolver {
     }
 
     fn strengthenClause(&mut self, cr : ClauseRef, l : Lit) -> bool {
-        assert!(self.core.trail.isGroundLevel());
+        assert!(self.core.assigns.isGroundLevel());
         assert!(self.use_simplification);
 
         // FIX: this is too inefficient but would be nice to have (properly implemented)
@@ -603,7 +602,7 @@ impl SimpSolver {
                 c.strengthen(l);
                 c[0]
             };
-            self.core.enqueue(unit, None) && self.core.propagate().is_none()
+            tryAssignLit(&mut self.core.assigns, unit, None) && self.core.watches.propagate(&mut self.core.db.ca, &mut self.core.assigns).is_none()
         } else {
             self.core.watches.unwatchClauseStrict(&self.core.db.ca[cr], cr);
             self.core.db.editClause(cr, |c| { c.strengthen(l); assert!(c.len() == len - 1); });
@@ -618,7 +617,7 @@ impl SimpSolver {
 
     fn eliminateVar(&mut self, v : Var) -> bool {
         assert!({ let ref st = self.var_status[&v]; st.frozen == 0 && st.eliminated == 0 });
-        assert!(self.core.assigns.undef(v));
+        assert!(self.core.assigns.isUndef(v));
 
         // Split the occurrences into positive and negative:
         let cls = self.occurs.lookup(&v, &self.core.db.ca).clone();
@@ -694,7 +693,7 @@ impl SimpSolver {
 
     // Backward subsumption + backward subsumption resolution
     fn backwardSubsumptionCheck(&mut self, verbose : bool) -> bool {
-        assert!(self.core.trail.isGroundLevel());
+        assert!(self.core.assigns.isGroundLevel());
 
         let mut cnt = 0i32;
         let mut subsumed = 0i32;
@@ -704,7 +703,7 @@ impl SimpSolver {
             // Empty subsumption queue and return immediately on user-interrupt:
             if self.core.budget.interrupted() {
                 self.subsumption_queue.clear();
-                self.bwdsub_assigns = self.core.trail.totalSize();
+                self.bwdsub_assigns = self.core.assigns.numberOfAssigns();
                 break;
             }
 
@@ -713,9 +712,9 @@ impl SimpSolver {
                     Some(cr) => { cr }
 
                     // Check top-level assignments by creating a dummy clause and placing it in the queue:
-                    None if self.bwdsub_assigns < self.core.trail.totalSize() => {
+                    None if self.bwdsub_assigns < self.core.assigns.numberOfAssigns() => {
                         let c = self.core.db.ca.edit(self.bwdsub_tmpunit);
-                        c[0] = self.core.trail[self.bwdsub_assigns];
+                        c[0] = self.core.assigns.assignAt(self.bwdsub_assigns);
                         c.calcAbstraction();
 
                         self.bwdsub_assigns += 1;
@@ -738,7 +737,7 @@ impl SimpSolver {
                 }
                 cnt += 1;
 
-                assert!(c.len() > 1 || self.core.assigns.sat(c[0])); // Unit-clauses should have been propagated before this point.
+                assert!(c.len() > 1 || self.core.assigns.isSat(c[0])); // Unit-clauses should have been propagated before this point.
 
                 // Find best variable to scan:
                 let mut best = c[0].var();
@@ -839,18 +838,18 @@ impl SimpSolver {
 
 
 fn implied(core : &mut super::CoreSolver, c : &[Lit]) -> bool {
-    assert!(core.trail.isGroundLevel());
+    assert!(core.assigns.isGroundLevel());
 
-    core.trail.newDecisionLevel();
+    core.assigns.newDecisionLevel();
     for lit in c.iter() {
         match core.assigns.ofLit(*lit) {
             LitVal::True  => { core.cancelUntil(GroundLevel); return true; }
-            LitVal::Undef => { core.uncheckedEnqueue(!*lit, None); }
+            LitVal::Undef => { core.assigns.assignLit(!*lit, None); }
             LitVal::False => {}
         }
     }
 
-    let result = core.propagate().is_some();
+    let result = core.watches.propagate(&mut core.db.ca, &mut core.assigns).is_some();
     core.cancelUntil(GroundLevel);
     return result;
 }
