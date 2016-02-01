@@ -35,7 +35,7 @@ impl Clause {
     }
 
     #[inline]
-    pub fn is_deleted(&self) -> bool {
+    fn is_deleted(&self) -> bool {
         self.header.mark == 1
     }
 
@@ -67,6 +67,11 @@ impl Clause {
     }
 
     #[inline]
+    pub fn swap(&mut self, i : usize, j : usize) {
+        self.data.swap(i, j);
+    }
+
+    #[inline]
     pub fn retainSuffix<F : Fn(&Lit) -> bool>(&mut self, base : usize, f : F) {
         let mut i = base;
         while i < self.header.size {
@@ -92,7 +97,7 @@ impl Clause {
         }
     }
 
-    pub fn to_vec(&self) -> Vec<Lit> {
+    fn to_vec(&self) -> Vec<Lit> {
         let mut v = Vec::with_capacity(self.len());
         for i in 0 .. self.len() {
             v.push(self[i])
@@ -242,19 +247,19 @@ impl ClauseAllocator {
         (self.wasted as f64) > (self.size as f64) * gf
     }
 
+    pub fn isDeleted(&self, ClauseRef(index) : ClauseRef) -> bool {
+        self.clauses[index].is_deleted()
+    }
+
+    #[inline]
+    pub fn view<'a>(&'a self, ClauseRef(index) : ClauseRef) -> &'a Clause {
+        assert!(index < self.clauses.len());
+        &self.clauses[index]
+    }
+
     #[inline]
     pub fn edit<'a>(&'a mut self, ClauseRef(index) : ClauseRef) -> &'a mut Clause {
         assert!(index < self.clauses.len());
         &mut self.clauses[index]
-    }
-}
-
-impl ops::Index<ClauseRef> for ClauseAllocator {
-    type Output = Clause;
-
-    #[inline]
-    fn index<'a>(&'a self, ClauseRef(index) : ClauseRef) -> &'a Clause {
-        assert!(index < self.clauses.len());
-        &self.clauses[index]
     }
 }

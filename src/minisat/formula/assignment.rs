@@ -249,8 +249,8 @@ impl Assignment {
             // Note: it is not safe to call 'locked()' on a relocated clause. This is why we keep
             // 'dangling' reasons here. It is safe and does not hurt.
             match self.assignment[v].vd.reason {
-                Some(cr) if from[cr].reloced() || self.isLocked(from, cr) => {
-                    assert!(!from[cr].is_deleted());
+                Some(cr) if from.view(cr).reloced() || self.isLocked(from, cr) => {
+                    assert!(!from.isDeleted(cr));
                     self.assignment[v].vd.reason = Some(from.relocTo(to, cr));
                 }
 
@@ -260,7 +260,7 @@ impl Assignment {
     }
 
     pub fn isLocked(&self, ca : &clause::ClauseAllocator, cr : clause::ClauseRef) -> bool {
-        let lit = ca[cr][0];
+        let lit = ca.view(cr)[0];
         if !self.isSat(lit) { return false; }
         match self.vardata(lit.var()).reason {
             Some(r) if cr == r => { true }
@@ -271,7 +271,7 @@ impl Assignment {
     pub fn forgetReason(&mut self, ca : &clause::ClauseAllocator, cr : clause::ClauseRef) {
         // Don't leave pointers to free'd memory!
         if self.isLocked(ca, cr) {
-            let Var(v) = ca[cr][0].var();
+            let Var(v) = ca.view(cr)[0].var();
             self.assignment[v].vd.reason = None;
         }
     }

@@ -86,7 +86,7 @@ impl Watches {
             {
                 let ref mut line = self.watches[&p];
                 if line.dirty {
-                    line.watchers.retain(|w| { !ca[w.cref].is_deleted() });
+                    line.watchers.retain(|w| { !ca.isDeleted(w.cref) });
                     line.dirty = false;
                 }
             }
@@ -108,8 +108,7 @@ impl Watches {
 
                     let c = ca.edit(pwi.cref);
                     if c[0] == false_lit {
-                        c[0] = c[1];
-                        c[1] = false_lit;
+                        c.swap(0, 1);
                     }
                     assert!(c[1] == false_lit);
 
@@ -124,10 +123,9 @@ impl Watches {
                     // Look for new watch:
                     let mut new_watch = None;
                     for k in 2 .. c.len() {
-                        if !assigns.isUnsat(c[k]) {
-                            let lit = c[k];
-                            c[1] = lit;
-                            c[k] = false_lit;
+                        let lit = c[k];
+                        if !assigns.isUnsat(lit) {
+                            c.swap(1, k);
                             new_watch = Some(lit);
                             break;
                         }
@@ -175,7 +173,7 @@ impl Watches {
     pub fn relocGC(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {
         for (_, line) in self.watches.iter_mut() {
             line.dirty = false;
-            line.watchers.retain(|w| { !from[w.cref].is_deleted() });
+            line.watchers.retain(|w| { !from.isDeleted(w.cref) });
             for w in line.watchers.iter_mut() {
                 w.cref = from.relocTo(to, w.cref);
             }

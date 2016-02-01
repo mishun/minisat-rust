@@ -207,7 +207,7 @@ impl OccLists {
     pub fn lookup(&mut self, v : &Var, ca : &ClauseAllocator) -> &Vec<ClauseRef> {
         let ol = &mut self.occs[v];
         if ol.dirty {
-            ol.occs.retain(|cr| { !ca[*cr].is_deleted() });
+            ol.occs.retain(|cr| { !ca.isDeleted(*cr) });
             ol.dirty = false;
         }
         &ol.occs
@@ -231,7 +231,7 @@ impl OccLists {
     pub fn relocGC(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {
         for (_, ol) in self.occs.iter_mut() {
             if ol.dirty {
-                ol.occs.retain(|cr| { !from[*cr].is_deleted() });
+                ol.occs.retain(|cr| { !from.isDeleted(*cr) });
                 ol.dirty = false;
             }
 
@@ -337,7 +337,7 @@ impl super::Solver for SimpSolver {
                     // forward subsumption.
                     self.subsumption_queue.push_back(cr);
 
-                    let ref c = self.core.db.ca[cr];
+                    let c = self.core.db.ca.view(cr);
                     for i in 0 .. c.len() {
                         self.occurs.pushOcc(&c[i].var(), cr);
                         self.touched[&c[i].var()] = 1;
@@ -541,39 +541,43 @@ impl SimpSolver {
     fn asymm(&mut self, v : Var, cr : ClauseRef) -> bool {
         assert!(self.core.assigns.isGroundLevel());
 
-        let c = {
-            let ref c = self.core.db.ca[cr];
+        let l = {
+            let c = self.core.db.ca.view(cr);
             if c.mark() != 0 || satisfiedWith(c, &self.core.assigns) {
                 return true;
             }
 
-            c.to_vec()
+            self.core.assigns.newDecisionLevel();
+
+            let mut l = None;
+            for i in 0 .. c.len() {
+                if c[i].var() != v && !self.core.assigns.isUnsat(c[i]) {
+                    self.core.assigns.assignLit(!c[i], None)
+                } else {
+                    l = Some(c[i]);
+                }
+            }
+
+            l.unwrap()
         };
 
-        self.core.assigns.newDecisionLevel();
-
-        let mut l = None;
-        for lit in c.iter() {
-            if v != lit.var() && !self.core.assigns.isUnsat(*lit) {
-                self.core.assigns.assignLit(!*lit, None);
-            } else {
-                l = Some(*lit);
-            }
-        }
-
         match self.core.watches.propagate(&mut self.core.db.ca, &mut self.core.assigns) {
-            None    => { self.core.cancelUntil(GroundLevel); true }
+            None    => { self.core.cancelUntil(GroundLevel); }
             Some(_) => {
                 self.core.cancelUntil(GroundLevel);
                 self.asymm_lits += 1;
-                self.strengthenClause(cr, l.unwrap())
+                if !self.strengthenClause(cr, l) {
+                    return false;
+                }
             }
         }
+
+        true
     }
 
     fn removeClause(&mut self, cr : ClauseRef) {
         if self.use_simplification {
-            let ref c = self.core.db.ca[cr];
+            let c = self.core.db.ca.view(cr);
 
             for i in 0 .. c.len() {
                 self.elim.bumpLitOcc(&c[i], -1);
@@ -582,7 +586,7 @@ impl SimpSolver {
             }
         }
 
-        self.core.watches.unwatchClauseLazy(&self.core.db.ca[cr]);
+        self.core.watches.unwatchClauseLazy(self.core.db.ca.view(cr));
         self.core.db.removeClause(&mut self.core.assigns, cr);
     }
 
@@ -594,7 +598,7 @@ impl SimpSolver {
         // if (!find(subsumption_queue, &c))
         self.subsumption_queue.push_back(cr);
 
-        let len = self.core.db.ca[cr].len();
+        let len = self.core.db.ca.view(cr).len();
         if len == 2 {
             self.removeClause(cr);
             let unit = {
@@ -604,9 +608,9 @@ impl SimpSolver {
             };
             tryAssignLit(&mut self.core.assigns, unit, None) && self.core.watches.propagate(&mut self.core.db.ca, &mut self.core.assigns).is_none()
         } else {
-            self.core.watches.unwatchClauseStrict(&self.core.db.ca[cr], cr);
+            self.core.watches.unwatchClauseStrict(self.core.db.ca.view(cr), cr);
             self.core.db.editClause(cr, |c| { c.strengthen(l); assert!(c.len() == len - 1); });
-            self.core.watches.watchClause(&self.core.db.ca[cr], cr);
+            self.core.watches.watchClause(self.core.db.ca.view(cr), cr);
 
             self.occurs.removeOcc(&l.var(), cr);
             self.elim.bumpLitOcc(&l, -1);
@@ -624,7 +628,7 @@ impl SimpSolver {
         let mut pos = Vec::new();
         let mut neg = Vec::new();
         for cr in cls.iter() {
-            let c = &self.core.db.ca[*cr];
+            let c = self.core.db.ca.view(*cr);
             for i in 0 .. c.len() {
                 let l = c[i];
                 if l.var() == v {
@@ -640,7 +644,7 @@ impl SimpSolver {
         for pr in pos.iter() {
             for nr in neg.iter() {
                 self.merges += 1;
-                if let Some(resolvent) = merge(v, &self.core.db.ca[*pr], &self.core.db.ca[*nr]) {
+                if let Some(resolvent) = merge(v, self.core.db.ca.view(*pr), self.core.db.ca.view(*nr)) {
                     cnt += 1;
                     if cnt > cls.len() + self.set.grow || (self.set.clause_lim != -1 && (resolvent.len() as i32) > self.set.clause_lim) {
                         return true;
@@ -656,12 +660,12 @@ impl SimpSolver {
 
         if pos.len() > neg.len() {
             for cr in neg.iter() {
-                self.elimclauses.mkElimClause(v, &self.core.db.ca[*cr]);
+                self.elimclauses.mkElimClause(v, self.core.db.ca.view(*cr));
             }
             self.elimclauses.mkElimUnit(Lit::new(v, false));
         } else {
             for cr in pos.iter() {
-                self.elimclauses.mkElimClause(v, &self.core.db.ca[*cr]);
+                self.elimclauses.mkElimClause(v, self.core.db.ca.view(*cr));
             }
             self.elimclauses.mkElimUnit(Lit::new(v, true));
         }
@@ -674,7 +678,7 @@ impl SimpSolver {
         for pr in pos.iter() {
             for nr in neg.iter() {
                 self.merges += 1;
-                if let Some(resolvent) = merge(v, &self.core.db.ca[*pr], &self.core.db.ca[*nr]) {
+                if let Some(resolvent) = merge(v, self.core.db.ca.view(*pr), self.core.db.ca.view(*nr)) {
                     if !self.addClause(resolvent.borrow()) {
                         return false;
                     }
@@ -725,7 +729,7 @@ impl SimpSolver {
                 };
 
             let best = {
-                let ref c = self.core.db.ca[cr];
+                let c = self.core.db.ca.view(cr);
 
                 if c.mark() != 0 {
                     continue;
@@ -752,10 +756,10 @@ impl SimpSolver {
 
             // Search all candidates:
             for cj in self.occurs.lookup(&best, &self.core.db.ca).clone().iter() {
-                if self.core.db.ca[cr].mark() != 0 {
+                if self.core.db.ca.view(cr).mark() != 0 {
                     break;
-                } else if self.core.db.ca[*cj].mark() == 0 && *cj != cr && (self.set.subsumption_lim == -1 || (self.core.db.ca[*cj].len() as i32) < self.set.subsumption_lim) {
-                    match subsumes(&self.core.db.ca[cr], &self.core.db.ca[*cj]) {
+                } else if { let c = self.core.db.ca.view(*cj); c.mark() == 0 && *cj != cr && (self.set.subsumption_lim == -1 || (c.len() as i32) < self.set.subsumption_lim) } {
+                    match subsumes(&self.core.db.ca.view(cr), &self.core.db.ca.view(*cj)) {
                         Subsumes::Different  => {}
 
                         Subsumes::Exact      => {
@@ -825,7 +829,7 @@ impl SimpSolver {
         // Subsumption queue:
         {
             let ref mut from = self.core.db.ca;
-            self.subsumption_queue.retain(|cr| { !from[*cr].is_deleted() });
+            self.subsumption_queue.retain(|cr| { !from.isDeleted(*cr) });
             for cr in self.subsumption_queue.iter_mut() {
                 *cr = from.relocTo(to, *cr);
             }

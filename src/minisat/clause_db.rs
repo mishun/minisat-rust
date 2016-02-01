@@ -62,12 +62,12 @@ impl ClauseDB {
         let (_, cr) = self.ca.alloc(ps, true);
         self.learnts.push(cr);
         self.bumpActivity(cr);
-        (&self.ca[cr], cr)
+        (self.ca.view(cr), cr)
     }
 
     pub fn removeClause(&mut self, assigns : &mut Assignment, cr : ClauseRef) {
         {
-            let ref c = self.ca[cr];
+            let c = self.ca.view(cr);
             if c.is_learnt() {
                 self.num_learnts -= 1;
                 self.learnts_literals -= c.len() as u64;
@@ -125,8 +125,8 @@ impl ClauseDB {
         {
             let ca = &self.ca;
             self.learnts.sort_by(|rx, ry| {
-                let ref x = ca[*rx];
-                let ref y = ca[*ry];
+                let x = ca.view(*rx);
+                let y = ca.view(*ry);
                 if x.len() > 2 && (y.len() == 2 || x.activity() < y.activity()) {
                     Ordering::Less
                 } else {
@@ -142,15 +142,15 @@ impl ClauseDB {
             let mut j = 0;
             for i in 0 .. self.learnts.len() {
                 let cr = self.learnts[i];
-                if self.ca[cr].is_deleted() { continue; }
+                if self.ca.isDeleted(cr) { continue; }
 
                 let remove = {
-                    let ref c = self.ca[cr];
+                    let c = self.ca.view(cr);
                     c.len() > 2 && !assigns.isLocked(&self.ca, cr)
                                 && (i < self.learnts.len() / 2 || c.activity() < extra_lim)
                 };
                 if remove {
-                    watches.unwatchClauseLazy(&self.ca[cr]);
+                    watches.unwatchClauseLazy(self.ca.view(cr));
                     self.removeClause(assigns, cr);
                 } else {
                     self.learnts[j] = cr;
@@ -162,10 +162,10 @@ impl ClauseDB {
     }
 
     fn retainClause(&mut self, assigns : &mut Assignment, watches : &mut Watches, cr : ClauseRef) -> bool {
-        if self.ca[cr].is_deleted() {
+        if self.ca.isDeleted(cr) {
             false
-        } else if satisfiedWith(&self.ca[cr], assigns) {
-            watches.unwatchClauseLazy(&self.ca[cr]);
+        } else if satisfiedWith(self.ca.view(cr), assigns) {
+            watches.unwatchClauseLazy(self.ca.view(cr));
             self.removeClause(assigns, cr);
             false
         } else {
@@ -209,7 +209,7 @@ impl ClauseDB {
         {
             let mut j = 0;
             for i in 0 .. self.learnts.len() {
-                if !self.ca[self.learnts[i]].is_deleted() {
+                if !self.ca.isDeleted(self.learnts[i]) {
                     self.learnts[j] = self.ca.relocTo(&mut to, self.learnts[i]);
                     j += 1;
                 }
@@ -221,7 +221,7 @@ impl ClauseDB {
         {
             let mut j = 0;
             for i in 0 .. self.clauses.len() {
-                if !self.ca[self.clauses[i]].is_deleted() {
+                if !self.ca.isDeleted(self.clauses[i]) {
                     self.clauses[j] = self.ca.relocTo(&mut to, self.clauses[i]);
                     j += 1;
                 }
