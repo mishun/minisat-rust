@@ -84,7 +84,7 @@ impl AnalyzeContext {
                     let q = c[j];
                     let v = q.var();
 
-                    if self.seen[&v] == Seen::Undef && assigns.vardata(v).level > 0 {
+                    if self.seen[&v] == Seen::Undef && assigns.vardata(v).level > GroundLevel {
                         heur.bumpActivity(v);
 
                         self.seen[&v] = Seen::Source;
@@ -138,7 +138,7 @@ impl AnalyzeContext {
 
         // Find correct backtrack level:
         if out_learnt.len() == 1 {
-            Conflict::Unit(0, out_learnt[0])
+            Conflict::Unit(GroundLevel, out_learnt[0])
         } else {
             // Find the first literal assigned at the next-highest level:
             let mut max_i = 1;
@@ -164,7 +164,7 @@ impl AnalyzeContext {
                 let ref c = db.ca[cr];
                 for k in 1 .. c.len() {
                     let y = c[k].var();
-                    if self.seen[&y] == Seen::Undef && assigns.vardata(y).level > 0 {
+                    if self.seen[&y] == Seen::Undef && assigns.vardata(y).level > GroundLevel {
                         return true;
                     }
                 }
@@ -190,7 +190,7 @@ impl AnalyzeContext {
                 let l = c[i];
 
                 // Variable at level 0 or previously removable:
-                if assigns.vardata(l.var()).level == 0 || self.seen[&l.var()] == Seen::Source || self.seen[&l.var()] == Seen::Removable {
+                if assigns.vardata(l.var()).level == GroundLevel || self.seen[&l.var()] == Seen::Source || self.seen[&l.var()] == Seen::Removable {
                     continue;
                 }
 
@@ -239,12 +239,12 @@ impl AnalyzeContext {
         let mut out_conflict = LitMap::new();
         out_conflict.insert(&p, ());
 
-        trail.inspectAssignmentsUntilLevel(0, |lit| {
+        trail.inspectAssignmentsUntilLevel(GroundLevel, |lit| {
             let x = lit.var();
             if self.seen[&x] != Seen::Undef {
                 match assigns.vardata(x).reason {
                     None     => {
-                        assert!(assigns.vardata(x).level > 0);
+                        assert!(assigns.vardata(x).level > GroundLevel);
                         out_conflict.insert(&!lit, ());
                     }
 
@@ -252,7 +252,7 @@ impl AnalyzeContext {
                         let ref c = db.ca[cr];
                         for j in 1 .. c.len() {
                             let v = c[j].var();
-                            if assigns.vardata(v).level > 0 {
+                            if assigns.vardata(v).level > GroundLevel {
                                 self.seen[&v] = Seen::Source;
                             }
                         }

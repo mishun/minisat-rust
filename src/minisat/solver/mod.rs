@@ -452,7 +452,7 @@ impl CoreSolver {
         info!("===============================================================================");
 
         let result = self.searchLoop();
-        self.cancelUntil(0);
+        self.cancelUntil(GroundLevel);
 
         info!("===============================================================================");
         result
@@ -533,7 +533,7 @@ impl CoreSolver {
                     if self.learnt.bump() {
                         info!("| {:9} | {:7} {:8} {:8} | {:8} {:8} {:6.0} | {:6.3} % |",
                                self.stats.conflicts,
-                               self.heur.dec_vars - self.trail.levelSize(0),
+                               self.heur.dec_vars - self.trail.levelSize(GroundLevel),
                                self.nClauses(),
                                self.db.clauses_literals,
                                self.learnt.border(),
@@ -547,7 +547,7 @@ impl CoreSolver {
                     if conflictC >= nof_conflicts || !self.budget.within(self.stats.conflicts, self.watches.propagations) {
                         // Reached bound on number of conflicts:
                         let progress_estimate = progressEstimate(self.assigns.nVars(), &self.trail);
-                        self.cancelUntil(0);
+                        self.cancelUntil(GroundLevel);
                         return SearchResult::Interrupted(progress_estimate);
                     }
 
@@ -565,9 +565,9 @@ impl CoreSolver {
                     }
 
                     let mut next = None;
-                    while self.trail.decisionLevel() < self.assumptions.len() {
+                    while self.trail.decisionLevel().offset() < self.assumptions.len() {
                         // Perform user provided assumption:
-                        let p = self.assumptions[self.trail.decisionLevel()];
+                        let p = self.assumptions[self.trail.decisionLevel().offset()];
                         match self.assigns.ofLit(p) {
                             LitVal::True  => {
                                 // Dummy decision level:
@@ -639,14 +639,4 @@ impl CoreSolver {
         self.assigns.relocGC(&self.trail, &mut self.db.ca, &mut to);
         self.db.relocGC(to);
     }
-}
-
-
-fn progressEstimate(vars : usize, trail : &PropagationTrail<Lit>) -> f64 {
-    let F = 1.0 / (vars as f64);
-    let mut progress = 0.0;
-    for i in 0 .. trail.decisionLevel() + 1 {
-        progress += F.powi(i as i32) * (trail.levelSize(i) as f64);
-    }
-    progress * F
 }

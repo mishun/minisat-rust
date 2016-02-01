@@ -7,6 +7,7 @@ use minisat::formula::assignment::*;
 use minisat::formula::clause::*;
 use minisat::formula::index_map::{VarMap, LitMap};
 use minisat::formula::util::*;
+use minisat::propagation_trail::*;
 use super::Solver;
 
 
@@ -562,9 +563,9 @@ impl SimpSolver {
         }
 
         match self.core.propagate() {
-            None    => { self.core.cancelUntil(0); true }
+            None    => { self.core.cancelUntil(GroundLevel); true }
             Some(_) => {
-                self.core.cancelUntil(0);
+                self.core.cancelUntil(GroundLevel);
                 self.asymm_lits += 1;
                 self.strengthenClause(cr, l.unwrap())
             }
@@ -843,14 +844,14 @@ fn implied(core : &mut super::CoreSolver, c : &[Lit]) -> bool {
     core.trail.newDecisionLevel();
     for lit in c.iter() {
         match core.assigns.ofLit(*lit) {
-            LitVal::True  => { core.cancelUntil(0); return true; }
+            LitVal::True  => { core.cancelUntil(GroundLevel); return true; }
             LitVal::Undef => { core.uncheckedEnqueue(!*lit, None); }
             LitVal::False => {}
         }
     }
 
     let result = core.propagate().is_some();
-    core.cancelUntil(0);
+    core.cancelUntil(GroundLevel);
     return result;
 }
 

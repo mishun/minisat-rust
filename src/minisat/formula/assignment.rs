@@ -50,7 +50,7 @@ impl Assignment {
 
     pub fn newVar(&mut self) -> Var {
         let line = VarLine { assign : [LitVal::Undef, LitVal::Undef]
-                           , vd     : VarData { reason : None, level : 0 }
+                           , vd     : VarData { reason : None, level : GroundLevel }
                            };
         let vid =
             match self.free_vars.pop() {

@@ -1,6 +1,18 @@
 use std::ops;
 
-pub type DecisionLevel = usize;
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+pub struct DecisionLevel(usize);
+
+pub const GroundLevel : DecisionLevel = DecisionLevel(0);
+
+impl DecisionLevel {
+    pub fn offset(&self) -> usize {
+        let DecisionLevel(level) = *self;
+        level
+    }
+}
+
 
 pub struct PropagationTrail<V> {
     qhead     : usize,
@@ -19,7 +31,7 @@ impl<V> PropagationTrail<V> {
 
     #[inline]
     pub fn decisionLevel(&self) -> DecisionLevel {
-        self.lim.len()
+        DecisionLevel(self.lim.len())
     }
 
     #[inline]
@@ -50,13 +62,13 @@ impl<V> PropagationTrail<V> {
     }
 
     #[inline]
-    pub fn cancelUntil<F : FnMut(DecisionLevel, V) -> ()>(&mut self, target_level : DecisionLevel, mut f : F) {
+    pub fn cancelUntil<F : FnMut(DecisionLevel, V) -> ()>(&mut self, DecisionLevel(target_level) : DecisionLevel, mut f : F) {
         while self.lim.len() > target_level {
             let level = self.trail.len();
             let bottom = self.lim.pop().unwrap();
             while self.trail.len() > bottom {
                 let v = self.trail.pop().unwrap();
-                f(level, v);
+                f(DecisionLevel(level), v);
             }
         }
 
@@ -68,8 +80,8 @@ impl<V> PropagationTrail<V> {
         self.trail.len()
     }
 
-    pub fn levelSize(&self, level : DecisionLevel) -> usize {
-        let cl = self.decisionLevel();
+    pub fn levelSize(&self, DecisionLevel(level) : DecisionLevel) -> usize {
+        let cl = self.lim.len();
         if level > cl {
             0
         } else {
@@ -93,8 +105,8 @@ impl<V : Clone> PropagationTrail<V> {
     }
 
     #[inline]
-    pub fn inspectAssignmentsUntilLevel<F : FnMut(V) -> ()>(&self, target_level : DecisionLevel, mut f : F) {
-        if self.decisionLevel() > target_level {
+    pub fn inspectAssignmentsUntilLevel<F : FnMut(V) -> ()>(&self, DecisionLevel(target_level) : DecisionLevel, mut f : F) {
+        if self.lim.len() > target_level {
             for i in (self.lim[target_level] .. self.trail.len()).rev() {
                 f(self.trail[i].clone());
             }
@@ -109,4 +121,15 @@ impl<V> ops::Index<usize> for PropagationTrail<V> {
     fn index(&self, index : usize) -> &V {
         self.trail.index(index)
     }
+}
+
+
+pub fn progressEstimate<X>(vars : usize, trail : &PropagationTrail<X>) -> f64 {
+    let F = 1.0 / (vars as f64);
+    let mut progress = 0.0;
+    let DecisionLevel(up) = trail.decisionLevel();
+    for i in 0 .. up + 1 {
+        progress += F.powi(i as i32) * (trail.levelSize(DecisionLevel(i)) as f64);
+    }
+    progress * F
 }
