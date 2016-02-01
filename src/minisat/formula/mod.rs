@@ -1,9 +1,10 @@
 use std::fmt;
 use std::ops;
 
-pub mod clause;
 pub mod assignment;
+pub mod clause;
 pub mod index_map;
+pub mod util;
 
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]

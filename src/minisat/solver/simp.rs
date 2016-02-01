@@ -3,9 +3,10 @@ use std::default::Default;
 use std::collections::vec_deque::VecDeque;
 use std::mem;
 use minisat::formula::{Var, Lit, TempLit};
-use minisat::formula::clause::*;
 use minisat::formula::assignment::*;
+use minisat::formula::clause::*;
 use minisat::formula::index_map::{VarMap, LitMap};
+use minisat::formula::util::*;
 use super::Solver;
 
 
@@ -285,7 +286,6 @@ pub struct SimpSolver {
     occurs             : OccLists,
     elim               : ElimQueue,
     subsumption_queue  : VecDeque<ClauseRef>,
-    frozen_vars        : Vec<Var>,
     bwdsub_assigns     : usize,
     n_touched          : usize,
     bwdsub_tmpunit     : ClauseRef,
@@ -361,7 +361,7 @@ impl SimpSolver {
         let mut s = super::CoreSolver::new(core_s);
         s.db.ca.set_extra_clause_field(true); // NOTE: must happen before allocating the dummy clause below.
         s.db.settings.remove_satisfied = false;
-        let temp_clause = s.db.ca.alloc(&vec![TempLit], false);
+        let (_, temp_clause) = s.db.ca.alloc(Box::new([TempLit]), false); // TODO: be ready to unexpected consequences
         SimpSolver { core               : s
                    , set                : simp_s.simp
                    , merges             : 0
@@ -374,7 +374,6 @@ impl SimpSolver {
                    , occurs             : OccLists::new()
                    , elim               : ElimQueue::new()
                    , subsumption_queue  : VecDeque::new()
-                   , frozen_vars        : Vec::new()
                    , bwdsub_assigns     : 0
                    , n_touched          : 0
                    , bwdsub_tmpunit     : temp_clause
@@ -757,19 +756,19 @@ impl SimpSolver {
                     break;
                 } else if self.core.db.ca[*cj].mark() == 0 && *cj != cr && (self.set.subsumption_lim == -1 || (self.core.db.ca[*cj].len() as i32) < self.set.subsumption_lim) {
                     match subsumes(&self.core.db.ca[cr], &self.core.db.ca[*cj]) {
-                        SubsumesRes::Undef      => {
+                        Subsumes::Different  => {}
+
+                        Subsumes::Exact      => {
                             subsumed += 1;
                             self.removeClause(*cj);
                         }
 
-                        SubsumesRes::Literal(l) => {
+                        Subsumes::LitSign(l) => {
                             deleted_literals += 1;
                             if !self.strengthenClause(*cj, !l) {
                                 return false;
                             }
                         }
-
-                        SubsumesRes::Error      => {}
                     }
                 }
             }
@@ -844,9 +843,9 @@ fn implied(core : &mut super::CoreSolver, c : &[Lit]) -> bool {
     core.trail.newDecisionLevel();
     for lit in c.iter() {
         match core.assigns.ofLit(*lit) {
-            Value::True  => { core.cancelUntil(0); return true; }
-            Value::Undef => { core.uncheckedEnqueue(!*lit, None); }
-            Value::False => {}
+            LitVal::True  => { core.cancelUntil(0); return true; }
+            LitVal::Undef => { core.uncheckedEnqueue(!*lit, None); }
+            LitVal::False => {}
         }
     }
 

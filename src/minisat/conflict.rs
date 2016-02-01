@@ -21,6 +21,13 @@ pub enum Seen {
 }
 
 
+pub enum Conflict {
+    Ground,
+    Unit(DecisionLevel, Lit),
+    Learned(DecisionLevel, Lit, Box<[Lit]>)
+}
+
+
 pub struct AnalyzeContext {
     ccmin_mode       : CCMinMode,    // Controls conflict clause minimization
     pub seen         : VarMap<Seen>,
@@ -55,8 +62,11 @@ impl AnalyzeContext {
     //     * If out_learnt.size() > 1 then 'out_learnt[1]' has the greatest decision level of the
     //       rest of literals. There may be others from the same level though.
     //
-    pub fn analyze(&mut self, db : &mut ClauseDB, heur : &mut DecisionHeuristic, assigns : &Assignment, trail : &PropagationTrail<Lit>, confl_param : ClauseRef) -> (DecisionLevel, Vec<Lit>) {
-        assert!(!trail.isGroundLevel());
+    pub fn analyze(&mut self, db : &mut ClauseDB, heur : &mut DecisionHeuristic, assigns : &Assignment, trail : &PropagationTrail<Lit>, confl_param : ClauseRef) -> Conflict {
+        if trail.isGroundLevel() {
+            return Conflict::Ground;
+        }
+
         // Generate conflict clause:
         let mut out_learnt = Vec::new();
 
@@ -122,32 +132,29 @@ impl AnalyzeContext {
         }
         self.tot_literals += out_learnt.len() as u64;
 
-        // Find correct backtrack level:
-        let out_btlevel =
-            if out_learnt.len() == 1 {
-                0
-            } else {
-                // Find the first literal assigned at the next-highest level:
-                let mut max_i = 1;
-                let mut max_level = assigns.vardata(out_learnt[1].var()).level;
-                for i in 2 .. out_learnt.len() {
-                    let level = assigns.vardata(out_learnt[i].var()).level;
-                    if level > max_level {
-                        max_i = i;
-                        max_level = level;
-                    }
-                }
-
-                // Swap-in this literal at index 1:
-                out_learnt.swap(1, max_i);
-                max_level
-            };
-
         for l in self.analyze_toclear.iter() {
             self.seen[&l.var()] = Seen::Undef;    // ('seen[]' is now cleared)
         }
 
-        (out_btlevel, out_learnt)
+        // Find correct backtrack level:
+        if out_learnt.len() == 1 {
+            Conflict::Unit(0, out_learnt[0])
+        } else {
+            // Find the first literal assigned at the next-highest level:
+            let mut max_i = 1;
+            let mut max_level = assigns.vardata(out_learnt[1].var()).level;
+            for i in 2 .. out_learnt.len() {
+                let level = assigns.vardata(out_learnt[i].var()).level;
+                if level > max_level {
+                    max_i = i;
+                    max_level = level;
+                }
+            }
+
+            // Swap-in this literal at index 1:
+            out_learnt.swap(1, max_i);
+            Conflict::Learned(max_level, out_learnt[0], out_learnt.into_boxed_slice())
+        }
     }
 
     fn preserveLitBasic(&self, db : &ClauseDB, assigns : &Assignment, x : Var) -> bool {

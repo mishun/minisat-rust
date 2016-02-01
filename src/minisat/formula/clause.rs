@@ -3,7 +3,8 @@ use std::ops;
 use super::Lit;
 
 
-pub type ClauseRef = usize;
+#[derive(PartialEq, Eq, Copy, Clone)]
+pub struct ClauseRef(usize);
 
 
 struct ClauseHeader {
@@ -16,7 +17,7 @@ struct ClauseHeader {
 
 pub struct Clause {
     header   : ClauseHeader,
-    data     : Vec<Lit>,
+    data     : Box<[Lit]>,
     data_act : f32,
     data_abs : u32,
     data_rel : Option<ClauseRef>,
@@ -108,6 +109,11 @@ impl Clause {
         }
         self.data_abs = abstraction; //data[header.size].abs = abstraction;
     }
+
+    pub fn abstraction(&self) -> u32 {
+        assert!(self.header.has_extra);
+        self.data_abs
+    }
 }
 
 impl ops::Index<usize> for Clause {
@@ -143,53 +149,8 @@ impl fmt::Display for Clause {
 }
 
 
-#[derive(PartialEq, Eq)]
-pub enum SubsumesRes {
-    Error,
-    Undef,
-    Literal(Lit)
-}
-
-pub fn subsumes(this : &Clause, other : &Clause) -> SubsumesRes {
-    assert!(!this.header.learnt);
-    assert!(!other.header.learnt);
-    assert!(this.header.has_extra);
-    assert!(other.header.has_extra);
-
-    if other.header.size < this.header.size || (this.data_abs & !other.data_abs) != 0 {
-        return SubsumesRes::Error;
-    }
-
-    let mut ret = SubsumesRes::Undef;
-    for i in 0 .. this.header.size {
-        // search for c[i] or ~c[i]
-        let mut ok = false;
-        for j in 0 .. other.header.size {
-            if this.data[i] == other.data[j] {
-                ok = true;
-                break;
-            } else if ret == SubsumesRes::Undef && this.data[i] == !other.data[j] {
-                ret = SubsumesRes::Literal(this.data[i]);
-                ok = true;
-                break;
-            }
-        }
-
-        // did not find it
-        if !ok { return SubsumesRes::Error; }
-    }
-
-    return ret;
-}
-
-
-fn clauseSize(size : usize, has_extra : bool) -> usize {
-    4 * (1 + size + (has_extra as usize))
-}
-
-
 pub struct ClauseAllocator {
-    clauses            : Vec<Box<Clause>>,
+    clauses            : Vec<Clause>,
     size               : usize,
     wasted             : usize,
     extra_clause_field : bool
@@ -213,15 +174,26 @@ impl ClauseAllocator {
                         }
     }
 
-    pub fn alloc(&mut self, ps : &Vec<Lit>, learnt : bool) -> ClauseRef {
+    fn clauseSize(size : usize, has_extra : bool) -> usize {
+        4 * (1 + size + (has_extra as usize))
+    }
+
+    pub fn alloc(&mut self, ps : Box<[Lit]>, learnt : bool) -> (&Clause, ClauseRef) {
         let use_extra = learnt | self.extra_clause_field;
-        let mut c = Box::new(Clause {
-            header   : ClauseHeader { mark : 0, learnt : learnt, has_extra : use_extra, reloced : false, size : ps.len() },
-            data     : ps.clone(),
+        let len = ps.len();
+
+        let mut c = Clause {
+            header   : ClauseHeader { mark      : 0
+                                    , learnt    : learnt
+                                    , has_extra : use_extra
+                                    , reloced   : false
+                                    , size      : len
+                                    },
+            data     : ps,
             data_act : 0.0,
             data_abs : 0,
             data_rel : None,
-        });
+        };
 
         if c.header.has_extra {
             if c.header.learnt {
@@ -231,25 +203,27 @@ impl ClauseAllocator {
             };
         }
 
-        let len = self.clauses.len();
+        let index = self.clauses.len();
         self.clauses.push(c);
-        self.size += clauseSize(ps.len(), use_extra);
+        self.size += ClauseAllocator::clauseSize(len, use_extra);
 
-        len
+        (&self.clauses[index], ClauseRef(index))
     }
 
-    pub fn free(&mut self, cr : ClauseRef) {
+    pub fn free(&mut self, ClauseRef(cr) : ClauseRef) {
         let ref mut c = self.clauses[cr];
+        assert!(!c.is_deleted());
         c.header.mark = 1;
-        self.wasted += clauseSize(c.header.size, c.header.has_extra);
+        self.wasted += ClauseAllocator::clauseSize(c.header.size, c.header.has_extra);
     }
 
     pub fn relocTo(&mut self, to : &mut ClauseAllocator, src : ClauseRef) -> ClauseRef {
         let c = self.edit(src);
+        assert!(!c.is_deleted());
         if c.header.reloced {
             c.data_rel.unwrap()
         } else {
-            let dst = to.alloc(&c.to_vec(), c.header.learnt);
+            let (_, dst) = to.alloc(c.to_vec().into_boxed_slice(), c.header.learnt);
             c.header.reloced = true;
             c.data_rel = Some(dst);
             dst
@@ -269,9 +243,9 @@ impl ClauseAllocator {
     }
 
     #[inline]
-    pub fn edit<'a>(&'a mut self, cr : ClauseRef) -> &'a mut Clause {
-        assert!(cr < self.clauses.len());
-        &mut(*self.clauses[cr])
+    pub fn edit<'a>(&'a mut self, ClauseRef(index) : ClauseRef) -> &'a mut Clause {
+        assert!(index < self.clauses.len());
+        &mut self.clauses[index]
     }
 }
 
@@ -279,8 +253,8 @@ impl ops::Index<ClauseRef> for ClauseAllocator {
     type Output = Clause;
 
     #[inline]
-    fn index<'a>(&'a self, index : ClauseRef) -> &'a Clause {
+    fn index<'a>(&'a self, ClauseRef(index) : ClauseRef) -> &'a Clause {
         assert!(index < self.clauses.len());
-        &(*self.clauses[index])
+        &self.clauses[index]
     }
 }

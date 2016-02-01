@@ -161,10 +161,10 @@ impl Budget {
         self.asynch_interrupt.load(atomic::Ordering::Relaxed)
     }
 
-    pub fn off(&mut self) {
-        self.conflict_budget = -1;
-        self.propagation_budget = -1;
-    }
+//    pub fn off(&mut self) {
+//        self.conflict_budget = -1;
+//        self.propagation_budget = -1;
+//    }
 }
 
 
@@ -352,21 +352,21 @@ impl CoreSolver {
             }
 
             _ => {
-                let cr = self.db.addClause(&ps);
-                self.watches.watchClause(&self.db.ca[cr], cr);
+                let (c, cr) = self.db.addClause(ps.into_boxed_slice());
+                self.watches.watchClause(c, cr);
                 AddClause::Added(cr)
             }
         }
     }
 
-    pub fn solve(&mut self, assumps : &[Lit]) -> bool {
-        self.budget.off();
-        match self.solveLimited(assumps) {
-            PartialResult::UnSAT  => { false }
-            PartialResult::SAT(_) => { true }
-            _                     => { panic!("Impossible happened") }
-        }
-    }
+//    pub fn solve(&mut self, assumps : &[Lit]) -> bool {
+//        self.budget.off();
+//        match self.solveLimited(assumps) {
+//            PartialResult::UnSAT  => { false }
+//            PartialResult::SAT(_) => { true }
+//            _                     => { panic!("Impossible happened") }
+//        }
+//    }
 
     pub fn solveLimited(&mut self, assumps : &[Lit]) -> PartialResult {
         self.assumptions = assumps.to_vec();
@@ -505,20 +505,27 @@ impl CoreSolver {
                 Some(confl) => {
                     self.stats.conflicts += 1;
                     conflictC += 1;
-                    if self.trail.isGroundLevel() {
-                        return SearchResult::UnSAT;
-                    }
 
-                    let (backtrack_level, learnt_clause) = self.analyze.analyze(&mut self.db, &mut self.heur, &self.assigns, &self.trail, confl);
-                    self.cancelUntil(backtrack_level);
-                    match learnt_clause.len() {
-                        1 => { self.uncheckedEnqueue(learnt_clause[0], None) }
-                        _ => {
-                            let cr = self.db.learnClause(&learnt_clause);
-                            self.watches.watchClause(&self.db.ca[cr], cr);
-                            self.uncheckedEnqueue(learnt_clause[0], Some(cr));
+                    match self.analyze.analyze(&mut self.db, &mut self.heur, &self.assigns, &self.trail, confl) {
+                        Conflict::Ground => {
+                            return SearchResult::UnSAT;
+                        }
+
+                        Conflict::Unit(level, unit) => {
+                            self.cancelUntil(level);
+                            self.assigns.assignLit(unit, self.trail.decisionLevel(), None);
+                            self.trail.push(unit);
+                        }
+
+                        Conflict::Learned(level, lit, clause) => {
+                            self.cancelUntil(level);
+                            let (c, cr) = self.db.learnClause(clause);
+                            self.watches.watchClause(c, cr);
+                            self.assigns.assignLit(lit, self.trail.decisionLevel(), Some(cr));
+                            self.trail.push(lit);
                         }
                     }
+
 
                     self.heur.decayActivity();
                     self.db.decayActivity();
@@ -562,15 +569,15 @@ impl CoreSolver {
                         // Perform user provided assumption:
                         let p = self.assumptions[self.trail.decisionLevel()];
                         match self.assigns.ofLit(p) {
-                            Value::True  => {
+                            LitVal::True  => {
                                 // Dummy decision level:
                                 self.trail.newDecisionLevel();
                             }
-                            Value::False => {
+                            LitVal::False => {
                                 let conflict = self.analyze.analyzeFinal(&self.db, &self.assigns, &self.trail, !p);
                                 return SearchResult::AssumpsConfl(conflict);
                             }
-                            Value::Undef => {
+                            LitVal::Undef => {
                                 next = Some(p);
                                 break;
                             }
@@ -609,9 +616,13 @@ impl CoreSolver {
     // NOTE: enqueue does not set the ok flag! (only public methods do)
     fn enqueue(&mut self, p : Lit, from : Option<ClauseRef>) -> bool {
         match self.assigns.ofLit(p) {
-            Value::Undef => { self.uncheckedEnqueue(p, from); true }
-            Value::True  => { true }
-            Value::False => { false }
+            LitVal::True  => { true }
+            LitVal::False => { false }
+            LitVal::Undef => {
+                self.assigns.assignLit(p, self.trail.decisionLevel(), from);
+                self.trail.push(p);
+                true
+            }
         }
     }
 

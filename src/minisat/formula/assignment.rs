@@ -6,14 +6,14 @@ use minisat::propagation_trail::*;
 
 #[derive(Clone, Copy)]
 #[repr(u8)]
-pub enum Value { Undef, False, True }
+pub enum LitVal { Undef, False, True }
 
-impl Value {
+impl LitVal {
     #[inline]
     fn isUndef(&self) -> bool {
         match *self {
-            Value::Undef => { true }
-            _            => { false }
+            LitVal::Undef => { true }
+            _             => { false }
         }
     }
 }
@@ -26,7 +26,7 @@ struct VarData {
 
 
 struct VarLine {
-    assign : [Value; 2],
+    assign : [LitVal; 2],
     vd     : VarData
 }
 
@@ -49,7 +49,9 @@ impl Assignment {
     }
 
     pub fn newVar(&mut self) -> Var {
-        let line = VarLine { assign : [Value::Undef, Value::Undef], vd : VarData { reason : None, level : 0 } };
+        let line = VarLine { assign : [LitVal::Undef, LitVal::Undef]
+                           , vd     : VarData { reason : None, level : 0 }
+                           };
         let vid =
             match self.free_vars.pop() {
                 Some(v) => {
@@ -75,8 +77,8 @@ impl Assignment {
         let ref mut line = self.assignment[p >> 1];
 
         assert!(line.assign[0].isUndef());
-        line.assign[p & 1] = Value::True;
-        line.assign[(p & 1) ^ 1] = Value::False;
+        line.assign[p & 1]       = LitVal::True;
+        line.assign[(p & 1) ^ 1] = LitVal::False;
         line.vd.level = level;
         line.vd.reason = reason;
     }
@@ -84,7 +86,7 @@ impl Assignment {
     #[inline]
     pub fn cancel(&mut self, Var(v) : Var) {
         let ref mut line = self.assignment[v];
-        line.assign = [Value::Undef, Value::Undef];
+        line.assign = [LitVal::Undef, LitVal::Undef];
     }
 
     #[inline]
@@ -96,21 +98,21 @@ impl Assignment {
     #[inline]
     pub fn sat(&self, p : Lit) -> bool {
         match self.ofLit(p) {
-            Value::True => { true }
-            _           => { false }
+            LitVal::True => { true }
+            _            => { false }
         }
     }
 
     #[inline]
     pub fn unsat(&self, p : Lit) -> bool {
         match self.ofLit(p) {
-            Value::False => { true }
-            _            => { false }
+            LitVal::False => { true }
+            _             => { false }
         }
     }
 
     #[inline]
-    pub fn ofLit(&self, Lit(p) : Lit) -> Value {
+    pub fn ofLit(&self, Lit(p) : Lit) -> LitVal {
         let ref line = self.assignment[p >> 1];
         line.assign[p & 1]
     }
@@ -126,9 +128,9 @@ impl Assignment {
         let mut model = VarMap::new();
         for i in 0 .. self.assignment.len() {
             match self.assignment[i].assign[0] {
-                Value::Undef  => {}
-                Value::False  => { model.insert(&Var(i), false); }
-                Value::True   => { model.insert(&Var(i), true); }
+                LitVal::Undef => {}
+                LitVal::False => { model.insert(&Var(i), false); }
+                LitVal::True  => { model.insert(&Var(i), true); }
             }
         }
         model
@@ -167,15 +169,4 @@ impl Assignment {
             self.assignment[v].vd.reason = None;
         }
     }
-}
-
-
-// Returns TRUE if a clause is satisfied in the current state.
-pub fn satisfiedWith(c : &clause::Clause, s : &Assignment) -> bool {
-    for i in 0 .. c.len() {
-        if s.sat(c[i]) {
-            return true;
-        }
-    }
-    false
 }

@@ -1,7 +1,8 @@
 use std::cmp::Ordering;
 use minisat::formula::Lit;
-use minisat::formula::clause::*;
 use minisat::formula::assignment::*;
+use minisat::formula::clause::*;
+use minisat::formula::util::*;
 use minisat::watches::*;
 
 
@@ -45,21 +46,23 @@ impl ClauseDB {
                  }
     }
 
-    pub fn addClause(&mut self, ps : &Vec<Lit>) -> ClauseRef {
-        let cr = self.ca.alloc(ps, false);
-        self.clauses.push(cr);
+    pub fn addClause(&mut self, ps : Box<[Lit]>) -> (&Clause, ClauseRef) {
         self.num_clauses += 1;
         self.clauses_literals += ps.len() as u64;
-        cr
+
+        let (c, cr) = self.ca.alloc(ps, false);
+        self.clauses.push(cr);
+        (c, cr)
     }
 
-    pub fn learnClause(&mut self, learnt_clause : &Vec<Lit>) -> ClauseRef {
-        let cr = self.ca.alloc(learnt_clause, true);
+    pub fn learnClause(&mut self, ps : Box<[Lit]>) -> (&Clause, ClauseRef) {
+        self.num_learnts += 1;
+        self.learnts_literals += ps.len() as u64;
+
+        let (_, cr) = self.ca.alloc(ps, true);
         self.learnts.push(cr);
         self.bumpActivity(cr);
-        self.num_learnts += 1;
-        self.learnts_literals += learnt_clause.len() as u64;
-        cr
+        (&self.ca[cr], cr)
     }
 
     pub fn removeClause(&mut self, assigns : &mut Assignment, cr : ClauseRef) {
