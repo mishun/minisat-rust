@@ -24,6 +24,12 @@ impl Default for Settings {
 }
 
 
+struct VarStatus {
+    frozen     : i8,
+    eliminated : i8
+}
+
+
 struct ElimQueue {
     heap    : Vec<Var>,
     indices : VarMap<usize>,
@@ -73,8 +79,8 @@ impl ElimQueue {
         }
     }
 
-    fn updateElimHeap(&mut self, v : &Var, frozen : &VarMap<i8>, eliminated : &VarMap<i8>, assigns : &Assignment) {
-        if self.inHeap(&v) || (frozen[v] == 0 && eliminated[v] == 0 && assigns.undef(*v)) {
+    fn updateElimHeap(&mut self, v : &Var, var_status : &VarMap<VarStatus>, assigns : &Assignment) {
+        if self.inHeap(&v) || (var_status[v].frozen == 0 && var_status[v].eliminated == 0 && assigns.undef(*v)) {
             self.update(*v);
         }
     }
@@ -271,20 +277,17 @@ pub struct SimpSolver {
     eliminated_vars    : u64,
 
     // Solver state:
+    var_status         : VarMap<VarStatus>,
+
     use_simplification : bool,
     elimclauses        : ElimClauses,
     touched            : VarMap<i8>,
-
     occurs             : OccLists,
     elim               : ElimQueue,
     subsumption_queue  : VecDeque<ClauseRef>,
-    frozen             : VarMap<i8>,
     frozen_vars        : Vec<Var>,
-    eliminated         : VarMap<i8>,
     bwdsub_assigns     : usize,
     n_touched          : usize,
-
-    // Temporaries:
     bwdsub_tmpunit     : ClauseRef,
 }
 
@@ -300,9 +303,7 @@ impl Solver for SimpSolver {
     fn newVar(&mut self, upol : Option<bool>, dvar : bool) -> Var {
         let v = self.core.newVar(upol, dvar);
 
-        self.frozen.insert(&v, 0);
-        self.eliminated.insert(&v, 0);
-
+        self.var_status.insert(&v, VarStatus { frozen : 0, eliminated : 0 });
         if self.use_simplification {
             self.occurs.initVar(&v);
             self.touched.insert(&v, 0);
@@ -315,7 +316,7 @@ impl Solver for SimpSolver {
     fn addClause(&mut self, ps : &[Lit]) -> bool {
         //#ifndef NDEBUG
         for l in ps.iter() {
-            assert!(self.eliminated[&l.var()] == 0);
+            assert!(self.var_status[&l.var()].eliminated == 0);
         }
         //#endif
 
@@ -363,24 +364,19 @@ impl SimpSolver {
         let temp_clause = s.db.ca.alloc(&vec![TempLit], false);
         SimpSolver { core               : s
                    , set                : simp_s.simp
-
                    , merges             : 0
                    , asymm_lits         : 0
                    , eliminated_vars    : 0
-
+                   , var_status         : VarMap::new()
                    , use_simplification : true
                    , elimclauses        : ElimClauses::new(simp_s.extend_model)
                    , touched            : VarMap::new()
-
                    , occurs             : OccLists::new()
                    , elim               : ElimQueue::new()
                    , subsumption_queue  : VecDeque::new()
-                   , frozen             : VarMap::new()
                    , frozen_vars        : Vec::new()
-                   , eliminated         : VarMap::new()
                    , bwdsub_assigns     : 0
                    , n_touched          : 0
-
                    , bwdsub_tmpunit     : temp_clause
                    }
     }
@@ -393,15 +389,14 @@ impl SimpSolver {
             if do_simp {
                 // Assumptions must be temporarily frozen to run variable elimination:
                 for lit in assumptions.iter() {
-                    let v = lit.var();
+                    let ref mut st = self.var_status[&lit.var()];
 
                     // If an assumption has been eliminated, remember it.
-                    assert!(self.eliminated[&v] == 0);
-
-                    if self.frozen[&v] == 0 {
+                    assert!(st.eliminated == 0);
+                    if st.frozen == 0 {
                         // Freeze and store.
-                        self.frozen[&v] = 1;
-                        extra_frozen.push(v);
+                        st.frozen = 1;
+                        extra_frozen.push(lit.var());
                     }
                 }
 
@@ -425,9 +420,9 @@ impl SimpSolver {
         if do_simp {
             // Unfreeze the assumptions that were frozen:
             for v in extra_frozen.iter() {
-                self.frozen[v] = 0;
+                self.var_status[v].frozen = 0;
                 if self.use_simplification {
-                    self.elim.updateElimHeap(v, &self.frozen, &self.eliminated, &self.core.assigns);
+                    self.elim.updateElimHeap(v, &self.var_status, &self.core.assigns);
                 }
             }
         }
@@ -465,25 +460,25 @@ impl SimpSolver {
             let mut cnt = 0;
             while let Some(elim) = self.elim.pop() {
                 if self.core.budget.interrupted() { break; }
-                if self.eliminated[&elim] == 0 && self.core.assigns.undef(elim) {
+                if self.var_status[&elim].eliminated == 0 && self.core.assigns.undef(elim) {
                     if cnt % 100 == 0 {
                         trace!("elimination left: {:10}", self.elim.len());
                     }
 
                     if self.set.use_asymm {
                         // Temporarily freeze variable. Otherwise, it would immediately end up on the queue again:
-                        let was_frozen = self.frozen[&elim];
-                        self.frozen[&elim] = 1;
+                        let was_frozen = self.var_status[&elim].frozen;
+                        self.var_status[&elim].frozen = 1;
                         if !self.asymmVar(elim) {
                             self.core.ok = false;
                             break 'cleanup;
                         }
-                        self.frozen[&elim] = was_frozen;
+                        self.var_status[&elim].frozen = was_frozen;
                     }
 
                     // At this point, the variable may have been set by assymetric branching, so check it
                     // again. Also, don't eliminate frozen variables:
-                    if self.set.use_elim && self.core.assigns.undef(elim) && self.frozen[&elim] == 0 && !self.eliminateVar(elim) {
+                    if self.set.use_elim && self.core.assigns.undef(elim) && self.var_status[&elim].frozen == 0 && !self.eliminateVar(elim) {
                         self.core.ok = false;
                         break 'cleanup;
                     }
@@ -583,7 +578,7 @@ impl SimpSolver {
 
             for i in 0 .. c.len() {
                 self.elim.bumpLitOcc(&c[i], -1);
-                self.elim.updateElimHeap(&c[i].var(), &self.frozen, &self.eliminated, &self.core.assigns);
+                self.elim.updateElimHeap(&c[i].var(), &self.var_status, &self.core.assigns);
                 self.occurs.smudge(&c[i].var());
             }
         }
@@ -616,14 +611,13 @@ impl SimpSolver {
 
             self.occurs.removeOcc(&l.var(), cr);
             self.elim.bumpLitOcc(&l, -1);
-            self.elim.updateElimHeap(&l.var(), &self.frozen, &self.eliminated, &self.core.assigns);
+            self.elim.updateElimHeap(&l.var(), &self.var_status, &self.core.assigns);
             true
         }
     }
 
     fn eliminateVar(&mut self, v : Var) -> bool {
-        assert!(self.frozen[&v] == 0);
-        assert!(self.eliminated[&v] == 0);
+        assert!({ let ref st = self.var_status[&v]; st.frozen == 0 && st.eliminated == 0 });
         assert!(self.core.assigns.undef(v));
 
         // Split the occurrences into positive and negative:
@@ -657,7 +651,7 @@ impl SimpSolver {
         }
 
         // Delete and store old clauses:
-        self.eliminated[&v] = 1;
+        self.var_status[&v].eliminated = 1;
         self.core.heur.setDecisionVar(v, false);
         self.eliminated_vars += 1;
 
