@@ -197,12 +197,14 @@ pub enum PartialResult { UnSAT, SAT(VarMap<bool>), Interrupted(f64) }
 
 
 pub struct CoreSettings {
-    pub garbage_frac : f64, // The fraction of wasted memory allowed before a garbage collection is triggered.
+    pub garbage_frac : f64,  // The fraction of wasted memory allowed before a garbage collection is triggered.
+    pub use_rcheck   : bool, // Check if a clause is already implied. Prett costly, and subsumes subsumptions :)
 }
 
 impl Default for CoreSettings {
     fn default() -> CoreSettings {
         CoreSettings { garbage_frac : 0.20
+                     , use_rcheck   : false
                      }
     }
 }
@@ -315,22 +317,26 @@ impl CoreSolver {
         assert!(self.assigns.isGroundLevel());
         if !self.ok { return AddClause::UnSAT; }
 
-        let mut ps = clause.to_vec();
+        let ps = {
+            let mut ps = clause.to_vec();
 
-        // Check if clause is satisfied and remove false/duplicate literals:
-        ps.sort();
-        ps.dedup();
-        ps.retain(|lit| { !self.assigns.isUnsat(*lit) });
+            // Check if clause is satisfied and remove false/duplicate literals:
+            ps.sort();
+            ps.dedup();
+            ps.retain(|lit| { !self.assigns.isUnsat(*lit) });
 
-        {
-            let mut prev = None;
-            for lit in ps.iter() {
-                if self.assigns.isSat(*lit) || prev == Some(!*lit) {
-                    return AddClause::Consumed;
+            {
+                let mut prev = None;
+                for lit in ps.iter() {
+                    if self.assigns.isSat(*lit) || prev == Some(!*lit) {
+                        return AddClause::Consumed;
+                    }
+                    prev = Some(*lit);
                 }
-                prev = Some(*lit);
             }
-        }
+
+            ps.into_boxed_slice()
+        };
 
         match ps.len() {
             0 => {
@@ -347,9 +353,13 @@ impl CoreSolver {
             }
 
             _ => {
-                let (c, cr) = self.db.addClause(ps.into_boxed_slice());
-                self.watches.watchClause(c, cr);
-                AddClause::Added(cr)
+                if self.settings.use_rcheck && isImplied(self, &ps) {
+                    AddClause::Consumed
+                } else {
+                    let (c, cr) = self.db.addClause(ps);
+                    self.watches.watchClause(c, cr);
+                    AddClause::Added(cr)
+                }
             }
         }
     }
@@ -598,4 +608,22 @@ impl CoreSolver {
         self.assigns.relocGC(&mut self.db.ca, &mut to);
         self.db.relocGC(to);
     }
+}
+
+
+fn isImplied(core : &mut CoreSolver, c : &[Lit]) -> bool {
+    assert!(core.assigns.isGroundLevel());
+
+    core.assigns.newDecisionLevel();
+    for lit in c.iter() {
+        match core.assigns.ofLit(*lit) {
+            LitVal::True  => { core.cancelUntil(GroundLevel); return true; }
+            LitVal::Undef => { core.assigns.assignLit(!*lit, None); }
+            LitVal::False => {}
+        }
+    }
+
+    let result = core.watches.propagate(&mut core.db.ca, &mut core.assigns).is_some();
+    core.cancelUntil(GroundLevel);
+    return result;
 }

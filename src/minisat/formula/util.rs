@@ -1,4 +1,4 @@
-use super::Lit;
+use super::{Var, Lit};
 use super::assignment::*;
 use super::clause::*;
 
@@ -57,4 +57,42 @@ pub fn subsumes(this : &Clause, other : &Clause) -> Subsumes {
     }
 
     return ret;
+}
+
+
+// Returns None if clause is always satisfied
+pub fn merge(v : Var, _ps : &Clause, _qs : &Clause) -> Option<Vec<Lit>> {
+    let ps_smallest = _ps.len() < _qs.len();
+    let ref ps = if ps_smallest { _qs } else { _ps };
+    let ref qs = if ps_smallest { _ps } else { _qs };
+
+    let mut res = Vec::new();
+    for i in 0 .. qs.len() {
+        if qs[i].var() != v {
+            let mut ok = true;
+
+            for j in 0 .. ps.len() {
+                if ps[j].var() == qs[i].var() {
+                    if ps[j] == !qs[i] {
+                        return None;
+                    } else {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+
+            if ok {
+                res.push(qs[i]);
+            }
+        }
+    }
+
+    for i in 0 .. ps.len() {
+        if ps[i].var() != v {
+            res.push(ps[i]);
+        }
+    }
+
+    Some(res)
 }

@@ -7,7 +7,6 @@ extern crate vec_map;
 extern crate env_logger;
 #[macro_use] extern crate clap;
 
-use std::default::Default;
 use std::fs;
 use std::io;
 use std::io::Write;
@@ -62,17 +61,17 @@ fn main() {
         .arg(clap::Arg::with_name("rinc").long("rinc").takes_value(true).help("Restart interval increase factor"))
         .arg(clap::Arg::with_name("gc-frac").long("gc-frac").takes_value(true).help("The fraction of wasted memory allowed before a garbage collection is triggered"))
         .arg(clap::Arg::with_name("min-learnts").long("min-learnts").takes_value(true).help("Minimum learnt clause limit"))
-
-        .arg(clap::Arg::with_name("asymm").long("asymm").help("Shrink clauses by asymmetric branching"))
-        .arg(clap::Arg::with_name("no-asymm").long("no-asymm").conflicts_with("asymm"))
         .arg(clap::Arg::with_name("rcheck").long("rcheck").help("Check if a clause is already implied. (costly)"))
         .arg(clap::Arg::with_name("no-rcheck").long("no-rcheck").conflicts_with("rcheck"))
-        .arg(clap::Arg::with_name("elim").long("elim").help("Perform variable elimination"))
-        .arg(clap::Arg::with_name("no-elim").long("no-elim").conflicts_with("elim"))
-        .arg(clap::Arg::with_name("grow").long("grow").takes_value(true).help("Allow a variable elimination step to grow by a number of clauses"))
-        .arg(clap::Arg::with_name("cl-lim").long("cl-lim").takes_value(true).help("Variables are not eliminated if it produces a resolvent with a length above this limit. -1 means no limit"))
-        .arg(clap::Arg::with_name("sub-lim").long("sub-lim").takes_value(true).help("Do not check if subsumption against a clause larger than this. -1 means no limit."))
-        .arg(clap::Arg::with_name("simp-gc-frac").long("simp-gc-frac").takes_value(true).help("The fraction of wasted memory allowed before a garbage collection is triggered during simplification."))
+
+        .arg(clap::Arg::with_name("asymm").long("asymm").conflicts_with("core").help("Shrink clauses by asymmetric branching"))
+        .arg(clap::Arg::with_name("no-asymm").long("no-asymm").conflicts_with("asymm").conflicts_with("core"))
+        .arg(clap::Arg::with_name("elim").long("elim").conflicts_with("core").help("Perform variable elimination"))
+        .arg(clap::Arg::with_name("no-elim").long("no-elim").conflicts_with("elim").conflicts_with("core"))
+        .arg(clap::Arg::with_name("grow").long("grow").takes_value(true).conflicts_with("core").help("Allow a variable elimination step to grow by a number of clauses"))
+        .arg(clap::Arg::with_name("cl-lim").long("cl-lim").takes_value(true).conflicts_with("core").help("Variables are not eliminated if it produces a resolvent with a length above this limit. -1 means no limit"))
+        .arg(clap::Arg::with_name("sub-lim").long("sub-lim").takes_value(true).conflicts_with("core").help("Do not check if subsumption against a clause larger than this. -1 means no limit."))
+        .arg(clap::Arg::with_name("simp-gc-frac").long("simp-gc-frac").takes_value(true).conflicts_with("core").help("The fraction of wasted memory allowed before a garbage collection is triggered during simplification."))
 
         .get_matches();
 
@@ -91,7 +90,7 @@ fn main() {
     }
 
     let core_options = {
-        let mut s : solver::Settings = Default::default();
+        let mut s = solver::Settings::default();
 
         for x in matches.value_of("var-decay").and_then(|s| s.parse().ok()).iter() {
             if 0.0 < *x && *x < 1.0 { s.heur.var_decay = *x; }
@@ -149,36 +148,8 @@ fn main() {
             if 0 <= *x { s.learnt.min_learnts_lim = *x; }
         }
 
-        s
-    };
-
-    let simp_options = {
-        let mut s : solver::simp::Settings = Default::default();
-
-        if matches.is_present("asymm") { s.simp.use_asymm = true; }
-        if matches.is_present("no-asymm") { s.simp.use_asymm = false; }
-
-        if matches.is_present("rcheck") { s.simp.use_rcheck = true; }
-        if matches.is_present("no-rcheck") { s.simp.use_rcheck = false; }
-
-        if matches.is_present("elim") { s.simp.use_elim = true; }
-        if matches.is_present("no-elim") { s.simp.use_elim = false; }
-
-        for x in matches.value_of("grow").and_then(|s| s.parse().ok()).iter() {
-            s.simp.grow = *x;
-        }
-
-        for x in matches.value_of("cl-lim").and_then(|s| s.parse().ok()).iter() {
-            if -1 <= *x { s.simp.clause_lim = *x; }
-        }
-
-        for x in matches.value_of("sub-lim").and_then(|s| s.parse().ok()).iter() {
-            if -1 <= *x { s.simp.subsumption_lim = *x; }
-        }
-
-        for x in matches.value_of("simp-gc-frac").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < *x && *x <= 1.0 { s.simp.simp_garbage_frac = *x; }
-        }
+        if matches.is_present("rcheck") { s.core.use_rcheck = true; }
+        if matches.is_present("no-rcheck") { s.core.use_rcheck = false; }
 
         s
     };
@@ -197,7 +168,36 @@ fn main() {
         let solver = solver::CoreSolver::new(core_options);
         solveFileCore(solver, options).expect("Error");
     } else {
-        let solver = solver::simp::SimpSolver::new(core_options, simp_options);
+        let simp_options = {
+            let mut s = solver::simp::Settings::default();
+            s.core = core_options;
+
+            if matches.is_present("asymm") { s.simp.use_asymm = true; }
+            if matches.is_present("no-asymm") { s.simp.use_asymm = false; }
+
+            if matches.is_present("elim") { s.simp.use_elim = true; }
+            if matches.is_present("no-elim") { s.simp.use_elim = false; }
+
+            for x in matches.value_of("grow").and_then(|s| s.parse().ok()).iter() {
+                s.simp.grow = *x;
+            }
+
+            for x in matches.value_of("cl-lim").and_then(|s| s.parse().ok()).iter() {
+                if -1 <= *x { s.simp.clause_lim = *x; }
+            }
+
+            for x in matches.value_of("sub-lim").and_then(|s| s.parse().ok()).iter() {
+                if -1 <= *x { s.simp.subsumption_lim = *x; }
+            }
+
+            for x in matches.value_of("simp-gc-frac").and_then(|s| s.parse().ok()).iter() {
+                if 0.0 < *x && *x <= 1.0 { s.simp.simp_garbage_frac = *x; }
+            }
+
+            s
+        };
+
+        let solver = solver::simp::SimpSolver::new(simp_options);
         solveFileSimp(solver, options).expect("Error");
     }
 }
