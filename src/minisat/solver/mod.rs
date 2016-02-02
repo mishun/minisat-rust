@@ -270,16 +270,16 @@ impl Solver for CoreSolver {
         let cpu_time = time::precise_time_s() - self.stats.start_time;
 
         info!("restarts              : {:<12}", self.stats.starts);
-        info!("conflicts             : {:<12}   ({:.0} / sec)",
+        info!("conflicts             : {:<12}   ({:.0} /sec)",
             self.stats.conflicts,
             (self.stats.conflicts as f64) / cpu_time);
 
-        info!("decisions             : {:<12}   ({:4.2} % random) ({:.0} / sec)",
+        info!("decisions             : {:<12}   ({:4.2} % random) ({:.0} /sec)",
             self.stats.decisions,
             (self.heur.rnd_decisions as f64) * 100.0 / (self.stats.decisions as f64),
             (self.stats.decisions as f64) / cpu_time);
 
-        info!("propagations          : {:<12}   ({:.0} / sec)",
+        info!("propagations          : {:<12}   ({:.0} /sec)",
             self.watches.propagations,
             (self.watches.propagations as f64) / cpu_time);
 

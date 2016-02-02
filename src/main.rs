@@ -209,7 +209,7 @@ fn solveFileCore(mut solver : solver::CoreSolver, options : MainOptions) -> io::
     info!("|                                                                             |");
 
     let backward_subst = {
-        let in_file = try!(fs::File::open(options.in_path));
+        let in_file = try!(fs::File::open(options.in_path.clone()));
         try!(dimacs::parse(&mut io::BufReader::new(in_file), &mut solver, options.strict))
     };
 
@@ -235,7 +235,15 @@ fn solveFileCore(mut solver : solver::CoreSolver, options : MainOptions) -> io::
     printOutcome(&result);
     if let Some(path) = options.out_path {
         let mut out = try!(fs::File::create(path));
-        try!(writeResultTo(&mut out, backward_subst, result));
+        try!(writeResultTo(&mut out, &backward_subst, &result));
+    }
+
+    if let PartialResult::SAT(ref model) = result {
+        let in_file = try!(fs::File::open(options.in_path));
+        let ok = try!(dimacs::validateModel(&mut io::BufReader::new(in_file), &backward_subst, &model));
+        if !ok {
+            println!("SELF-CHECK FAILED!!!");
+        }
     }
 
     Ok(())
@@ -249,7 +257,7 @@ fn solveFileSimp(mut solver : solver::simp::SimpSolver, options : MainOptions) -
     info!("|                                                                             |");
 
     let backward_subst = {
-        let in_file = try!(fs::File::open(options.in_path));
+        let in_file = try!(fs::File::open(options.in_path.clone()));
         try!(dimacs::parse(&mut io::BufReader::new(in_file), &mut solver, options.strict))
     };
 
@@ -295,7 +303,15 @@ fn solveFileSimp(mut solver : solver::simp::SimpSolver, options : MainOptions) -
     printOutcome(&result);
     if let Some(path) = options.out_path {
         let mut out = try!(fs::File::create(path));
-        try!(writeResultTo(&mut out, backward_subst, result));
+        try!(writeResultTo(&mut out, &backward_subst, &result));
+    }
+
+    if let PartialResult::SAT(ref model) = result {
+        let in_file = try!(fs::File::open(options.in_path));
+        let ok = try!(dimacs::validateModel(&mut io::BufReader::new(in_file), &backward_subst, &model));
+        if !ok {
+            println!("SELF-CHECK FAILED!!!");
+        }
     }
 
     Ok(())
@@ -310,22 +326,14 @@ fn printOutcome(ret : &PartialResult) {
         });
 }
 
-fn writeResultTo<W : io::Write>(stream : &mut W, backward_subst : VarMap<i32>, ret : PartialResult) -> io::Result<()> {
-    match ret {
+fn writeResultTo<W : io::Write>(stream : &mut W, backward_subst : &VarMap<i32>, ret : &PartialResult) -> io::Result<()> {
+    match *ret {
         PartialResult::UnSAT          => { try!(writeln!(stream, "UNSAT")); Ok(()) }
         PartialResult::Interrupted(_) => { try!(writeln!(stream, "INDET")); Ok(()) }
-        PartialResult::SAT(model)     => {
+        PartialResult::SAT(ref model) => {
             try!(writeln!(stream, "SAT"));
-            writeModelTo(stream, backward_subst, model)
+            dimacs::writeModel(stream, backward_subst, &model)
         }
     }
 }
 
-fn writeModelTo<W : io::Write>(stream : &mut W, backward_subst : VarMap<i32>, model : VarMap<bool>) -> io::Result<()> {
-    for (var, val) in model.iter() {
-        let var_id = backward_subst[&var];
-        try!(write!(stream, "{} ", if *val { var_id } else { -var_id }));
-    }
-    try!(writeln!(stream, "0"));
-    Ok(())
-}
