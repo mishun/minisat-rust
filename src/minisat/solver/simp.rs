@@ -566,6 +566,7 @@ impl Simplificator {
 
             let mut l = None;
             for i in 0 .. c.len() {
+                // TODO: bug?
                 if c[i].var() != v && !core.assigns.isUnsat(c[i]) {
                     core.assigns.assignLit(!c[i], None)
                 } else {
@@ -708,9 +709,9 @@ impl Simplificator {
     fn backwardSubsumptionCheck(&mut self, core : &mut CoreSolver, verbose : bool) -> bool {
         assert!(core.assigns.isGroundLevel());
 
-        let mut cnt = 0i32;
-        let mut subsumed = 0i32;
-        let mut deleted_literals = 0i32;
+        let mut cnt = 0u64;
+        let mut subsumed = 0u64;
+        let mut deleted_literals = 0u64;
 
         loop {
             // Empty subsumption queue and return immediately on user-interrupt:
@@ -767,8 +768,10 @@ impl Simplificator {
             for cj in self.occurs.lookup(&best, &core.db.ca).clone().iter() {
                 if core.db.ca.view(cr).mark() != 0 {
                     break;
-                } else if { let c = core.db.ca.view(*cj); c.mark() == 0 && *cj != cr && (self.settings.subsumption_lim == -1 || (c.len() as i32) < self.settings.subsumption_lim) } {
-                    match subsumes(&core.db.ca.view(cr), &core.db.ca.view(*cj)) {
+                }
+
+                if *cj != cr && { let c = core.db.ca.view(*cj); c.mark() == 0 && (self.settings.subsumption_lim == -1 || (c.len() as i32) < self.settings.subsumption_lim) } {
+                    match subsumes(core.db.ca.view(cr), core.db.ca.view(*cj)) {
                         Subsumes::Different  => {}
 
                         Subsumes::Exact      => {

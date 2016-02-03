@@ -4,7 +4,7 @@ use minisat::formula::clause::*;
 use minisat::formula::assignment::*;
 
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct Watcher {
     pub cref    : ClauseRef,
     pub blocker : Lit
@@ -97,7 +97,7 @@ impl Watches {
                 let (cw, new_watch) = {
                     let ref mut p_watches = self.watches[&p].watchers;
                     if i >= p_watches.len() { break; }
-                    let pwi = p_watches[i].clone();
+                    let pwi = p_watches[i];
                     i += 1;
 
                     if assigns.isSat(pwi.blocker) {
@@ -142,7 +142,7 @@ impl Watches {
                     // Did not find watch -- clause is unit under assignment:
                     None      => {
                         let ref mut p_watches = self.watches[&p].watchers;
-                        p_watches[j] = cw.clone();
+                        p_watches[j] = cw;
                         j += 1;
 
                         if assigns.isUnsat(cw.blocker) {
@@ -150,7 +150,7 @@ impl Watches {
 
                             // Copy the remaining watches:
                             while i < p_watches.len() {
-                                p_watches[j] = p_watches[i].clone();
+                                p_watches[j] = p_watches[i];
                                 j += 1;
                                 i += 1;
                             }

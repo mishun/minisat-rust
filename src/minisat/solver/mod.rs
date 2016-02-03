@@ -57,9 +57,10 @@ pub struct RestartStrategy {
 impl RestartStrategy {
     pub fn conflictsToGo(&self, restarts : u32) -> u64 {
         let rest_base =
-            match self.luby_restart {
-                true  => { util::luby(self.restart_inc, restarts) }
-                false => { self.restart_inc.powi(restarts as i32) }
+            if self.luby_restart {
+                util::luby(self.restart_inc, restarts)
+            } else {
+                self.restart_inc.powi(restarts as i32)
             };
 
         (rest_base * self.restart_first) as u64
@@ -575,17 +576,14 @@ impl CoreSolver {
                         }
                     }
 
-                    match next {
-                        Some(_) => {}
-                        None    => {
-                            // New variable decision:
-                            self.stats.decisions += 1;
-                            match self.heur.pickBranchLit(&self.assigns) {
-                                Some(n) => { next = Some(n) }
-                                None    => { return SearchResult::SAT; } // Model found:
-                            };
-                        }
-                    };
+                    if let None = next {
+                        // New variable decision:
+                        self.stats.decisions += 1;
+                        match self.heur.pickBranchLit(&self.assigns) {
+                            Some(n) => { next = Some(n) }
+                            None    => { return SearchResult::SAT; } // Model found:
+                        };
+                    }
 
                     // Increase decision level and enqueue 'next'
                     self.assigns.newDecisionLevel();

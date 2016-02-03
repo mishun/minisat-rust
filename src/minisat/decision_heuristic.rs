@@ -206,13 +206,10 @@ impl ActivityQueue {
     }
 
     pub fn setActivity(&mut self, v : &Var, new : f64) {
-        match self.activity.insert(v, new) {
-            None      => {}
-            Some(old) => {
-                if self.indices.contains_key(v) {
-                    let i = self.indices[v];
-                    if new > old { self.sift_up(i) } else { self.sift_down(i) }
-                }
+        if let Some(old) = self.activity.insert(v, new) {
+            if self.indices.contains_key(v) {
+                let i = self.indices[v];
+                if new > old { self.sift_up(i) } else { self.sift_down(i) }
             }
         }
     }
