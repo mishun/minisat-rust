@@ -544,51 +544,22 @@ impl Simplificator {
             cls.clone()
         };
 
+        let mut bug = false;
         for cr in cls.iter() {
-            if !self.asymm(core, v, *cr) {
-                return false;
-            }
-        }
+            // TODO: this mimics original MiniSat bug. Fix it?
+            if bug { bug = false; continue; }
 
-        self.backwardSubsumptionCheck(core, false)
-    }
+            if let Some(l) = asymmetricBranching(core, v, *cr) {
+                if core.db.ca.view(*cr).len() > 2 { bug = true; }
 
-    fn asymm(&mut self, core : &mut CoreSolver, v : Var, cr : ClauseRef) -> bool {
-        assert!(core.assigns.isGroundLevel());
-
-        let l = {
-            let c = core.db.ca.view(cr);
-            if c.mark() != 0 || satisfiedWith(c, &core.assigns) {
-                return true;
-            }
-
-            core.assigns.newDecisionLevel();
-
-            let mut l = None;
-            for i in 0 .. c.len() {
-                // TODO: bug?
-                if c[i].var() != v && !core.assigns.isUnsat(c[i]) {
-                    core.assigns.assignLit(!c[i], None)
-                } else {
-                    l = Some(c[i]);
-                }
-            }
-
-            l.unwrap()
-        };
-
-        match core.watches.propagate(&mut core.db.ca, &mut core.assigns) {
-            None    => { core.cancelUntil(GroundLevel); }
-            Some(_) => {
-                core.cancelUntil(GroundLevel);
                 self.asymm_lits += 1;
-                if !self.strengthenClause(core, cr, l) {
+                if !self.strengthenClause(core, *cr, l) {
                     return false;
                 }
             }
         }
 
-        true
+        self.backwardSubsumptionCheck(core, false)
     }
 
     fn removeClause(&mut self, core : &mut CoreSolver, cr : ClauseRef) {
@@ -844,6 +815,39 @@ impl Simplificator {
 
         // Temporary clause:
         self.bwdsub_tmpunit = from.relocTo(to, self.bwdsub_tmpunit);
+    }
+}
+
+
+fn asymmetricBranching(core : &mut CoreSolver, v : Var, cr : ClauseRef) -> Option<Lit> {
+    assert!(core.assigns.isGroundLevel());
+
+    let l = {
+        let c = core.db.ca.view(cr);
+        if c.mark() != 0 || satisfiedWith(c, &core.assigns) {
+            return None;
+        }
+
+        core.assigns.newDecisionLevel();
+
+        let mut vl = None;
+        for i in 0 .. c.len() {
+            let lit = c[i];
+            if v == lit.var() {
+                vl = Some(lit);
+            } else if core.assigns.isUndef(lit.var()) {
+                core.assigns.assignLit(!lit, None);
+            }
+        }
+
+        vl.unwrap()
+    };
+
+    let res = core.watches.propagate(&mut core.db.ca, &mut core.assigns);
+    core.cancelUntil(GroundLevel);
+    match res {
+        None    => { None }
+        Some(_) => { Some(l) }
     }
 }
 
