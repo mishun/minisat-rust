@@ -10,7 +10,7 @@ pub mod util;
 #[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
 pub struct Var(usize);
 
-impl fmt::Display for Var {
+impl fmt::Debug for Var {
     fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
         let Var(ref v) = *self;
         write!(f, "x{}", v)
@@ -60,9 +60,10 @@ impl ops::BitXor<bool> for Lit {
     }
 }
 
-impl fmt::Display for Lit {
+impl fmt::Debug for Lit {
     fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}{}", if self.sign() { "¬" } else { "" }, self.var())
+        if self.sign() { try!(write!(f, "¬")); }
+        write!(f, "{:?}", self.var())
     }
 }
 
