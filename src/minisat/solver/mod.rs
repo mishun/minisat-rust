@@ -318,6 +318,11 @@ impl CoreSolver {
         assert!(self.assigns.isGroundLevel());
         if !self.ok { return AddClause::UnSAT; }
 
+        // TODO: it should be here to work identical to original MiniSat. Probably not the best place.
+        if self.settings.use_rcheck && isImplied(self, &clause) {
+            return AddClause::Consumed;
+        }
+
         let ps = {
             let mut ps = clause.to_vec();
 
@@ -354,13 +359,9 @@ impl CoreSolver {
             }
 
             _ => {
-                if self.settings.use_rcheck && isImplied(self, &ps) {
-                    AddClause::Consumed
-                } else {
-                    let (c, cr) = self.db.addClause(ps);
-                    self.watches.watchClause(c, cr);
-                    AddClause::Added(cr)
-                }
+                let (c, cr) = self.db.addClause(ps);
+                self.watches.watchClause(c, cr);
+                AddClause::Added(cr)
             }
         }
     }
