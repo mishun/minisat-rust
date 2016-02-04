@@ -5,8 +5,8 @@ use super::clause::*;
 
 // Returns true if a clause is satisfied with assignment
 pub fn satisfiedWith(c : &Clause, s : &Assignment) -> bool {
-    for i in 0 .. c.len() {
-        if s.isSat(c[i]) {
+    for lit in c.iter() {
+        if s.isSat(lit) {
             return true;
         }
     }
@@ -29,13 +29,10 @@ pub fn subsumes(this : &Clause, other : &Clause) -> Subsumes {
     }
 
     let mut ret = Subsumes::Exact;
-    for i in 0 .. this.len() {
-        let lit = this[i];
-
+    for lit in this.iter() {
         // search for lit or ¬lit
         let mut found = false;
-        for j in 0 .. other.len() {
-            let cur = other[j];
+        for cur in other.iter() {
             if lit == cur {
                 found = true;
                 break;
@@ -67,13 +64,13 @@ pub fn merge(v : Var, _ps : &Clause, _qs : &Clause) -> Option<Vec<Lit>> {
     let ref qs = if ps_smallest { _ps } else { _qs };
 
     let mut res = Vec::new();
-    for i in 0 .. qs.len() {
-        if qs[i].var() != v {
+    for qsi in qs.iter() {
+        if qsi.var() != v {
             let mut ok = true;
 
-            for j in 0 .. ps.len() {
-                if ps[j].var() == qs[i].var() {
-                    if ps[j] == !qs[i] {
+            for psj in ps.iter() {
+                if psj.var() == qsi.var() {
+                    if psj == !qsi {
                         return None;
                     } else {
                         ok = false;
@@ -83,14 +80,14 @@ pub fn merge(v : Var, _ps : &Clause, _qs : &Clause) -> Option<Vec<Lit>> {
             }
 
             if ok {
-                res.push(qs[i]);
+                res.push(qsi);
             }
         }
     }
 
-    for i in 0 .. ps.len() {
-        if ps[i].var() != v {
-            res.push(ps[i]);
+    for psi in ps.iter() {
+        if psi.var() != v {
+            res.push(psi);
         }
     }
 

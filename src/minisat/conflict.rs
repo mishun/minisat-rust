@@ -77,11 +77,8 @@ impl AnalyzeContext {
             loop {
                 db.bumpActivity(confl);
 
-                let c = db.ca.view(confl);
-                for j in match p { None => 0, Some(_) => 1 } .. c.len() {
-                    let q = c[j];
+                for q in db.ca.view(confl).iterFrom(match p { None => 0, Some(_) => 1 }) {
                     let v = q.var();
-
                     if self.seen[&v] == Seen::Undef && assigns.vardata(v).level > GroundLevel {
                         heur.bumpActivity(v);
 
@@ -159,9 +156,8 @@ impl AnalyzeContext {
         match assigns.vardata(x).reason {
             None     => { true }
             Some(cr) => {
-                let c = db.ca.view(cr);
-                for k in 1 .. c.len() {
-                    let y = c[k].var();
+                for lit in db.ca.view(cr).iterFrom(1) {
+                    let y = lit.var();
                     if self.seen[&y] == Seen::Undef && assigns.vardata(y).level > GroundLevel {
                         return true;
                     }
@@ -247,9 +243,8 @@ impl AnalyzeContext {
                     }
 
                     Some(cr) => {
-                        let c = db.ca.view(cr);
-                        for j in 1 .. c.len() {
-                            let v = c[j].var();
+                        for lit in db.ca.view(cr).iterFrom(1) {
+                            let v = lit.var();
                             if assigns.vardata(v).level > GroundLevel {
                                 self.seen[&v] = Seen::Source;
                             }

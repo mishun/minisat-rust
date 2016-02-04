@@ -53,23 +53,23 @@ impl Watches {
     }
 
     pub fn watchClause(&mut self, c : &Clause, cr : ClauseRef) {
-        assert!(c.len() > 1);
-        self.watches[&!c[0]].watchers.push(Watcher { cref : cr, blocker : c[1] });
-        self.watches[&!c[1]].watchers.push(Watcher { cref : cr, blocker : c[0] });
+        let (c0, c1) = c.headPair();
+        self.watches[&!c0].watchers.push(Watcher { cref : cr, blocker : c1 });
+        self.watches[&!c1].watchers.push(Watcher { cref : cr, blocker : c0 });
     }
 
     pub fn unwatchClauseStrict(&mut self, c : &Clause, cr : ClauseRef)
     {
-        assert!(c.len() > 1);
-        self.watches[&!c[0]].watchers.retain(|w| w.cref != cr);
-        self.watches[&!c[1]].watchers.retain(|w| w.cref != cr);
+        let (c0, c1) = c.headPair();
+        self.watches[&!c0].watchers.retain(|w| w.cref != cr);
+        self.watches[&!c1].watchers.retain(|w| w.cref != cr);
     }
 
     pub fn unwatchClauseLazy(&mut self, c : &Clause)
     {
-        assert!(c.len() > 1);
-        self.watches[&!c[0]].dirty = true;
-        self.watches[&!c[1]].dirty = true;
+        let (c0, c1) = c.headPair();
+        self.watches[&!c0].dirty = true;
+        self.watches[&!c1].dirty = true;
     }
 
     // Description:
@@ -107,13 +107,13 @@ impl Watches {
                     }
 
                     let c = ca.edit(pwi.cref);
-                    if c[0] == false_lit {
+                    if c.head() == false_lit {
                         c.swap(0, 1);
                     }
                     assert!(c[1] == false_lit);
 
                     // If 0th watch is true, then clause is already satisfied.
-                    let cw = Watcher { cref : pwi.cref, blocker : c[0] };
+                    let cw = Watcher { cref : pwi.cref, blocker : c.head() };
                     if cw.blocker != pwi.blocker && assigns.isSat(cw.blocker) {
                         p_watches[j] = cw;
                         j += 1;
@@ -121,17 +121,7 @@ impl Watches {
                     }
 
                     // Look for new watch:
-                    let mut new_watch = None;
-                    for k in 2 .. c.len() {
-                        let lit = c[k];
-                        if !assigns.isUnsat(lit) {
-                            c.swap(1, k);
-                            new_watch = Some(lit);
-                            break;
-                        }
-                    }
-
-                    (cw, new_watch)
+                    (cw, c.pullLiteral(1, |lit| { !assigns.isUnsat(lit) }))
                 };
 
                 match new_watch {

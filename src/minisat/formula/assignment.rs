@@ -260,7 +260,7 @@ impl Assignment {
     }
 
     pub fn isLocked(&self, ca : &clause::ClauseAllocator, cr : clause::ClauseRef) -> bool {
-        let lit = ca.view(cr)[0];
+        let lit = ca.view(cr).head();
         if !self.isSat(lit) { return false; }
         match self.vardata(lit.var()).reason {
             Some(r) if cr == r => { true }
@@ -271,7 +271,7 @@ impl Assignment {
     pub fn forgetReason(&mut self, ca : &clause::ClauseAllocator, cr : clause::ClauseRef) {
         // Don't leave pointers to free'd memory!
         if self.isLocked(ca, cr) {
-            let Var(v) = ca.view(cr)[0].var();
+            let Var(v) = ca.view(cr).head().var();
             self.assignment[v].vd.reason = None;
         }
     }

@@ -428,12 +428,11 @@ impl Simplificator {
                 // forward subsumption.
                 self.subsumption_queue.push_back(cr);
 
-                let c = core.db.ca.view(cr);
-                for i in 0 .. c.len() {
-                    self.occurs.pushOcc(&c[i].var(), cr);
-                    self.touched[&c[i].var()] = 1;
+                for lit in core.db.ca.view(cr).iter() {
+                    self.occurs.pushOcc(&lit.var(), cr);
+                    self.touched[&lit.var()] = 1;
                     self.n_touched += 1;
-                    self.elim.bumpLitOcc(&c[i], 1);
+                    self.elim.bumpLitOcc(&lit, 1);
                 }
 
                 true
@@ -563,13 +562,10 @@ impl Simplificator {
     }
 
     fn removeClause(&mut self, core : &mut CoreSolver, cr : ClauseRef) {
-        {
-            let c = core.db.ca.view(cr);
-            for i in 0 .. c.len() {
-                self.elim.bumpLitOcc(&c[i], -1);
-                self.elim.updateElimHeap(&c[i].var(), &self.var_status, &core.assigns);
-                self.occurs.smudge(&c[i].var());
-            }
+        for lit in core.db.ca.view(cr).iter() {
+            self.elim.bumpLitOcc(&lit, -1);
+            self.elim.updateElimHeap(&lit.var(), &self.var_status, &core.assigns);
+            self.occurs.smudge(&lit.var());
         }
 
         core.watches.unwatchClauseLazy(core.db.ca.view(cr));
@@ -586,7 +582,7 @@ impl Simplificator {
         let len = core.db.ca.view(cr).len();
         if len == 2 {
             self.removeClause(core, cr);
-            let unit = { let c = core.db.ca.edit(cr); c.strengthen(l); c[0] };
+            let unit = { let c = core.db.ca.edit(cr); c.strengthen(l); c.head() }; // TODO: it produces clauses of length 1. Not good.
             tryAssignLit(&mut core.assigns, unit, None) && core.watches.propagate(&mut core.db.ca, &mut core.assigns).is_none()
         } else {
             core.watches.unwatchClauseStrict(core.db.ca.view(cr), cr);
@@ -609,9 +605,7 @@ impl Simplificator {
         let mut pos = Vec::new();
         let mut neg = Vec::new();
         for cr in cls.iter() {
-            let c = core.db.ca.view(*cr);
-            for i in 0 .. c.len() {
-                let l = c[i];
+            for l in core.db.ca.view(*cr).iter() {
                 if l.var() == v {
                     if l.sign() { neg.push(*cr); } else { pos.push(*cr); }
                     break;
@@ -722,13 +716,13 @@ impl Simplificator {
                 }
                 cnt += 1;
 
-                assert!(c.len() > 1 || core.assigns.isSat(c[0])); // Unit-clauses should have been propagated before this point.
+                assert!(c.len() > 1 || core.assigns.isSat(c.head())); // Unit-clauses should have been propagated before this point.
 
                 // Find best variable to scan:
-                let mut best = c[0].var();
-                for i in 1 .. c.len() {
-                    if self.occurs.getDirty(&c[i].var()).len() < self.occurs.getDirty(&best).len() {
-                        best = c[i].var();
+                let mut best = c.head().var();
+                for lit in c.iterFrom(1) {
+                    if self.occurs.getDirty(&lit.var()).len() < self.occurs.getDirty(&best).len() {
+                        best = lit.var();
                     }
                 }
 
@@ -831,8 +825,7 @@ fn asymmetricBranching(core : &mut CoreSolver, v : Var, cr : ClauseRef) -> Optio
         core.assigns.newDecisionLevel();
 
         let mut vl = None;
-        for i in 0 .. c.len() {
-            let lit = c[i];
+        for lit in c.iter() {
             if v == lit.var() {
                 vl = Some(lit);
             } else if core.assigns.isUndef(lit.var()) {
@@ -876,13 +869,14 @@ impl ElimClauses {
 
         // Copy clause to elimclauses-vector. Remember position where the
         // variable 'v' occurs:
-        let mut v_pos = 0;
+        let mut v_pos = first;
         let mut v_found = false;
-        for i in 0 .. c.len() {
-            self.literals.push(c[i]);
-            if c[i].var() == v {
-                v_pos = i + first;
+        for lit in c.iter() {
+            self.literals.push(lit);
+            if lit.var() == v {
                 v_found = true;
+            } else if !v_found {
+                v_pos += 1;
             }
         }
         assert!(v_found);

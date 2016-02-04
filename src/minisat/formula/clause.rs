@@ -3,24 +3,20 @@ use std::ops;
 use super::Lit;
 
 
-#[derive(PartialEq, Eq, Copy, Clone)]
-pub struct ClauseRef(usize);
-
-
 struct ClauseHeader {
+    size      : usize,
     mark      : u32,
     learnt    : bool,
-    has_extra : bool,
     reloced   : bool,
-    size      : usize
+    has_extra : bool,
+    data_act  : f32,
+    data_abs  : u32,
+    data_rel  : Option<ClauseRef>
 }
 
 pub struct Clause {
-    header   : ClauseHeader,
-    data     : Box<[Lit]>,
-    data_act : f32,
-    data_abs : u32,
-    data_rel : Option<ClauseRef>,
+    header : ClauseHeader,
+    data   : Box<[Lit]>
 }
 
 impl Clause {
@@ -52,13 +48,13 @@ impl Clause {
     #[inline]
     pub fn activity(&self) -> f64 {
         assert!(self.header.has_extra);
-        self.data_act as f64
+        self.header.data_act as f64
     }
 
     #[inline]
     pub fn setActivity(&mut self, act : f64) {
         assert!(self.header.has_extra);
-        self.data_act = act as f32;
+        self.header.data_act = act as f32;
     }
 
     #[inline]
@@ -69,6 +65,40 @@ impl Clause {
     #[inline]
     pub fn swap(&mut self, i : usize, j : usize) {
         self.data.swap(i, j);
+    }
+
+    #[inline]
+    pub fn head(&self) -> Lit {
+        self.data[0]
+    }
+
+    #[inline]
+    pub fn headPair(&self) -> (Lit, Lit) {
+        assert!(self.header.size > 1);
+        (self.data[0], self.data[1])
+    }
+
+    #[inline]
+    pub fn pullLiteral<F : FnMut(Lit) -> bool>(&mut self, place : usize, mut f : F) -> Option<Lit> {
+        for k in (place + 1) .. self.header.size {
+            assert!(k < self.data.len());
+            let lit = self.data[k];
+            if f(lit) {
+                self.data.swap(place, k);
+                return Some(lit);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub fn iter(&self) -> ClauseIter {
+        ClauseIter { clause : self, index : 0 }
+    }
+
+    #[inline]
+    pub fn iterFrom(&self, start : usize) -> ClauseIter {
+        ClauseIter { clause : self, index : start }
     }
 
     #[inline]
@@ -97,14 +127,6 @@ impl Clause {
         }
     }
 
-    fn to_vec(&self) -> Vec<Lit> {
-        let mut v = Vec::with_capacity(self.len());
-        for i in 0 .. self.len() {
-            v.push(self[i])
-        }
-        v
-    }
-
     pub fn calcAbstraction(&mut self) {
         assert!(self.header.has_extra);
         let mut abstraction : u32 = 0;
@@ -112,12 +134,12 @@ impl Clause {
             let Lit(p) = self.data[i];
             abstraction |= 1 << ((p >> 1) & 31);
         }
-        self.data_abs = abstraction; //data[header.size].abs = abstraction;
+        self.header.data_abs = abstraction; //data[header.size].abs = abstraction;
     }
 
     pub fn abstraction(&self) -> u32 {
         assert!(self.header.has_extra);
-        self.data_abs
+        self.header.data_abs
     }
 }
 
@@ -145,13 +167,48 @@ impl fmt::Debug for Clause {
             try!(write!(f, "<deleted>"));
         }
         try!(write!(f, "("));
-        for i in 0 .. self.len() {
-            if i > 0 { try!(write!(f, " ∨ ")); }
-            try!(write!(f, "{:?}", self[i]));
+        let mut first = true;
+        for lit in self.iter() {
+            if first { first = false; } else { try!(write!(f, " ∨ ")); }
+            try!(write!(f, "{:?}", lit));
         }
         write!(f, ")")
     }
 }
+
+
+pub struct ClauseIter<'c> {
+    clause : &'c Clause,
+    index  : usize
+}
+
+impl<'c> Iterator for ClauseIter<'c> {
+    type Item = Lit;
+
+    #[inline]
+    fn next(&mut self) -> Option<Lit> {
+        if self.index < self.clause.header.size {
+            let lit = self.clause.data[self.index];
+            self.index += 1;
+            Some(lit)
+        } else {
+            None
+        }
+    }
+}
+
+
+fn clauseToVec(clause : &Clause) -> Vec<Lit> {
+    let mut v = Vec::with_capacity(clause.len());
+    for lit in clause.iter() {
+        v.push(lit);
+    }
+    v
+}
+
+
+#[derive(PartialEq, Eq, Copy, Clone)]
+pub struct ClauseRef(usize);
 
 
 pub struct ClauseAllocator {
@@ -188,21 +245,21 @@ impl ClauseAllocator {
         let len = ps.len();
 
         let mut c = Clause {
-            header   : ClauseHeader { mark      : 0
+            header   : ClauseHeader { size      : len
+                                    , mark      : 0
                                     , learnt    : learnt
-                                    , has_extra : use_extra
                                     , reloced   : false
-                                    , size      : len
+                                    , has_extra : use_extra
+                                    , data_act  : 0.0
+                                    , data_abs  : 0
+                                    , data_rel  : None
                                     },
-            data     : ps,
-            data_act : 0.0,
-            data_abs : 0,
-            data_rel : None,
+            data     : ps
         };
 
         if c.header.has_extra {
             if c.header.learnt {
-                c.data_act = 0.0;
+                c.header.data_act = 0.0;
             } else {
                 c.calcAbstraction();
             };
@@ -226,11 +283,11 @@ impl ClauseAllocator {
         let c = self.edit(src);
         assert!(!c.is_deleted());
         if c.header.reloced {
-            c.data_rel.unwrap()
+            c.header.data_rel.unwrap()
         } else {
-            let (_, dst) = to.alloc(c.to_vec().into_boxed_slice(), c.header.learnt);
+            let (_, dst) = to.alloc(clauseToVec(c).into_boxed_slice(), c.header.learnt);
             c.header.reloced = true;
-            c.data_rel = Some(dst);
+            c.header.data_rel = Some(dst);
             dst
         }
     }
