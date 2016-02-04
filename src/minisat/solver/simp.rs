@@ -377,11 +377,10 @@ struct Simplificator {
     var_status        : VarMap<VarStatus>,
     occurs            : OccLists,
     elim              : ElimQueue,
-    subsumption_queue : VecDeque<ClauseRef>,
     touched           : VarMap<i8>,
     n_touched         : usize,
-    bwdsub_tmpunit    : ClauseRef,
-    bwdsub_assigns    : usize
+    subsumption_queue : SubsumptionQueue,
+    bwdsub_tmpunit    : ClauseRef
 }
 
 impl Simplificator {
@@ -394,11 +393,10 @@ impl Simplificator {
                       , var_status         : VarMap::new()
                       , occurs             : OccLists::new()
                       , elim               : ElimQueue::new()
-                      , subsumption_queue  : VecDeque::new()
                       , touched            : VarMap::new()
                       , n_touched          : 0
+                      , subsumption_queue  : SubsumptionQueue::new()
                       , bwdsub_tmpunit     : temp_clause
-                      , bwdsub_assigns     : 0
                       }
     }
 
@@ -426,7 +424,7 @@ impl Simplificator {
                 // be checked twice unnecessarily. This is an unfortunate
                 // consequence of how backward subsumption is used to mimic
                 // forward subsumption.
-                self.subsumption_queue.push_back(cr);
+                self.subsumption_queue.push(cr);
 
                 for lit in core.db.ca.view(cr).iter() {
                     self.occurs.pushOcc(&lit.var(), cr);
@@ -475,18 +473,17 @@ impl Simplificator {
 
     fn eliminate(&mut self, core : &mut CoreSolver, elimclauses : &mut ElimClauses) -> bool {
         // Main simplification loop:
-        'cleanup: while self.n_touched > 0 || self.bwdsub_assigns < core.assigns.numberOfAssigns() || self.elim.len() > 0 {
+        'cleanup: while self.n_touched > 0 || self.subsumption_queue.bwdsub_assigns < core.assigns.numberOfAssigns() || self.elim.len() > 0 {
             self.gatherTouchedClauses(&mut core.db.ca);
 
-            trace!("BWD-SUB: queue = {}, trail = {}", self.subsumption_queue.len(), core.assigns.numberOfAssigns() - self.bwdsub_assigns);
-            if (self.subsumption_queue.len() > 0 || self.bwdsub_assigns < core.assigns.numberOfAssigns()) && !self.backwardSubsumptionCheck(core, true) {
+            if !self.backwardSubsumptionCheck(core, true) {
                 core.ok = false;
                 break 'cleanup;
             }
 
             // Empty elim_heap and return immediately on user-interrupt:
             if core.budget.interrupted() {
-                assert!(self.bwdsub_assigns == core.assigns.numberOfAssigns());
+                assert!(self.subsumption_queue.bwdsub_assigns == core.assigns.numberOfAssigns());
                 assert!(self.subsumption_queue.len() == 0);
                 assert!(self.n_touched == 0);
                 self.elim.clearHeap();
@@ -577,7 +574,7 @@ impl Simplificator {
 
         // FIX: this is too inefficient but would be nice to have (properly implemented)
         // if (!find(subsumption_queue, &c))
-        self.subsumption_queue.push_back(cr);
+        self.subsumption_queue.push(cr);
 
         let len = core.db.ca.view(cr).len();
         if len == 2 {
@@ -674,60 +671,57 @@ impl Simplificator {
     fn backwardSubsumptionCheck(&mut self, core : &mut CoreSolver, verbose : bool) -> bool {
         assert!(core.assigns.isGroundLevel());
 
+        if verbose {
+            trace!("BWD-SUB: queue = {}, trail = {}", self.subsumption_queue.len()
+                                                    , core.assigns.numberOfAssigns() - self.subsumption_queue.bwdsub_assigns);
+        }
+
         let mut cnt = 0u64;
         let mut subsumed = 0u64;
         let mut deleted_literals = 0u64;
 
-        loop {
+        while let Some(job) = self.subsumption_queue.pop(&core.assigns) {
             // Empty subsumption queue and return immediately on user-interrupt:
             if core.budget.interrupted() {
-                self.subsumption_queue.clear();
-                self.bwdsub_assigns = core.assigns.numberOfAssigns();
+                self.subsumption_queue.clear(&core.assigns);
                 break;
             }
 
-            let cr =
-                match self.subsumption_queue.pop_front() {
-                    Some(cr) => { cr }
-
-                    // Check top-level assignments by creating a dummy clause and placing it in the queue:
-                    None if self.bwdsub_assigns < core.assigns.numberOfAssigns() => {
+            let (cr, best) =
+                match job {
+                    SubsumptionJob::Assign(lit) => {
+                        // Check top-level assignments by creating a dummy clause and placing it in the queue:
                         let c = core.db.ca.edit(self.bwdsub_tmpunit);
-                        c[0] = core.assigns.assignAt(self.bwdsub_assigns);
-                        c.calcAbstraction();
-
-                        self.bwdsub_assigns += 1;
-                        self.bwdsub_tmpunit
+                        c[0] = lit; c.calcAbstraction();
+                        (self.bwdsub_tmpunit, lit.var())
                     }
 
-                    None => { break }
+                    SubsumptionJob::Clause(cr)  => {
+                        let c = core.db.ca.view(cr);
+
+                        if c.mark() != 0 {
+                            continue;
+                        }
+
+                        if verbose && cnt % 1000 == 0 {
+                            trace!("subsumption left: {:10} ({:10} subsumed, {:10} deleted literals)",
+                                self.subsumption_queue.len(), subsumed, deleted_literals);
+                        }
+                        cnt += 1;
+
+                        assert!(c.len() > 1); // Unit-clauses should have been propagated before this point.
+
+                        // Find best variable to scan:
+                        let mut best = c.head().var();
+                        for lit in c.iterFrom(1) {
+                            if self.occurs.getDirty(&lit.var()).len() < self.occurs.getDirty(&best).len() {
+                                best = lit.var();
+                            }
+                        }
+
+                        (cr, best)
+                    }
                 };
-
-            let best = {
-                let c = core.db.ca.view(cr);
-
-                if c.mark() != 0 {
-                    continue;
-                }
-
-                if verbose && cnt % 1000 == 0 {
-                    trace!("subsumption left: {:10} ({:10} subsumed, {:10} deleted literals)",
-                        self.subsumption_queue.len(), subsumed, deleted_literals);
-                }
-                cnt += 1;
-
-                assert!(c.len() > 1 || core.assigns.isSat(c.head())); // Unit-clauses should have been propagated before this point.
-
-                // Find best variable to scan:
-                let mut best = c.head().var();
-                for lit in c.iterFrom(1) {
-                    if self.occurs.getDirty(&lit.var()).len() < self.occurs.getDirty(&best).len() {
-                        best = lit.var();
-                    }
-                }
-
-                best
-            };
 
             // Search all candidates:
             for cj in self.occurs.lookup(&best, &core.db.ca).clone().iter() {
@@ -761,19 +755,14 @@ impl Simplificator {
     fn gatherTouchedClauses(&mut self, ca : &mut ClauseAllocator) {
         if self.n_touched == 0 { return; }
 
-        for cr in self.subsumption_queue.iter() {
-            let c = ca.edit(*cr);
-            if c.mark() == 0 {
-                c.setMark(2);
-            }
-        }
+        self.subsumption_queue.remarkQueued(ca, 0, 2);
 
         for (v, touched) in self.touched.iter_mut() {
             if *touched != 0 {
                 for cr in self.occurs.lookup(&v, ca) {
                     let c = ca.edit(*cr);
                     if c.mark() == 0 {
-                        self.subsumption_queue.push_back(*cr);
+                        self.subsumption_queue.push(*cr);
                         c.setMark(2);
                     }
                 }
@@ -781,13 +770,7 @@ impl Simplificator {
             }
         }
 
-        for cr in self.subsumption_queue.iter() {
-            let c = ca.edit(*cr);
-            if c.mark() == 2 {
-                c.setMark(0);
-            }
-        }
-
+        self.subsumption_queue.remarkQueued(ca, 2, 0);
         self.n_touched = 0;
     }
 
@@ -802,10 +785,7 @@ impl Simplificator {
         self.occurs.relocGC(from, to);
 
         // Subsumption queue:
-        self.subsumption_queue.retain(|cr| { !from.isDeleted(*cr) });
-        for cr in self.subsumption_queue.iter_mut() {
-            *cr = from.relocTo(to, *cr);
-        }
+        self.subsumption_queue.relocGC(from, to);
 
         // Temporary clause:
         self.bwdsub_tmpunit = from.relocTo(to, self.bwdsub_tmpunit);
@@ -841,6 +821,72 @@ fn asymmetricBranching(core : &mut CoreSolver, v : Var, cr : ClauseRef) -> Optio
     match res {
         None    => { None }
         Some(_) => { Some(l) }
+    }
+}
+
+
+struct SubsumptionQueue {
+    subsumption_queue : VecDeque<ClauseRef>,
+    bwdsub_assigns    : usize
+}
+
+enum SubsumptionJob {
+    Clause(ClauseRef),
+    Assign(Lit)
+}
+
+impl SubsumptionQueue {
+    pub fn new() -> Self {
+        SubsumptionQueue { subsumption_queue : VecDeque::new()
+                         , bwdsub_assigns    : 0
+                         }
+    }
+
+    pub fn pop(&mut self, assigns : &Assignment) -> Option<SubsumptionJob> {
+        match self.subsumption_queue.pop_front() {
+            Some(cr) => {
+                Some(SubsumptionJob::Clause(cr))
+            }
+
+            None if self.bwdsub_assigns < assigns.numberOfAssigns() => {
+                let lit = assigns.assignAt(self.bwdsub_assigns);
+                self.bwdsub_assigns += 1;
+                Some(SubsumptionJob::Assign(lit))
+            }
+
+            None => {
+                None
+            }
+        }
+    }
+
+    pub fn push(&mut self, cr : ClauseRef) {
+        self.subsumption_queue.push_back(cr);
+    }
+
+    pub fn len(&self) -> usize {
+        self.subsumption_queue.len()
+    }
+
+    pub fn clear(&mut self, assigns : &Assignment) {
+        self.subsumption_queue.clear();
+        self.bwdsub_assigns = assigns.numberOfAssigns();
+    }
+
+    pub fn remarkQueued(&mut self, ca : &mut ClauseAllocator, src : u32, dst : u32) {
+        for cr in self.subsumption_queue.iter() {
+            let c = ca.edit(*cr);
+            if c.mark() == src {
+                c.setMark(dst);
+            }
+        }
+    }
+
+    pub fn relocGC(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {
+        self.subsumption_queue.retain(|cr| { !from.isDeleted(*cr) });
+        for cr in self.subsumption_queue.iter_mut() {
+            *cr = from.relocTo(to, *cr);
+        }
     }
 }
 
