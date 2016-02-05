@@ -56,6 +56,24 @@ pub fn subsumes(this : &Clause, other : &Clause) -> Subsumes {
     return ret;
 }
 
+pub fn unitSubsumes(unit : Lit, c : &Clause) -> Subsumes {
+    assert!(!c.is_learnt());
+
+    if unit.abstraction() & !c.abstraction() != 0 {
+        return Subsumes::Different;
+    }
+
+    for cur in c.iter() {
+        if unit == cur {
+            return Subsumes::Exact;
+        } else if unit == !cur {
+            return Subsumes::LitSign(unit);
+        }
+    }
+
+    return Subsumes::Different;
+}
+
 
 // Returns None if clause is always satisfied
 pub fn merge(v : Var, _ps : &Clause, _qs : &Clause) -> Option<Vec<Lit>> {

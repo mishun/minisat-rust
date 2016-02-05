@@ -12,8 +12,7 @@ pub struct Var(usize);
 
 impl fmt::Debug for Var {
     fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
-        let Var(ref v) = *self;
-        write!(f, "x{}", v)
+        write!(f, "x{}", self.0)
     }
 }
 
@@ -29,14 +28,17 @@ impl Lit {
 
     #[inline]
     pub fn sign(&self) -> bool {
-        let Lit(l) = *self;
-        (l & 1) != 0
+        (self.0 & 1) != 0
     }
 
     #[inline]
     pub fn var(&self) -> Var {
-        let Lit(l) = *self;
-        Var(l >> 1)
+        Var(self.0 >> 1)
+    }
+
+    #[inline]
+    pub fn abstraction(&self) -> u32 {
+        1 << ((self.0 >> 1) & 31)
     }
 }
 
@@ -45,18 +47,7 @@ impl ops::Not for Lit {
 
     #[inline]
     fn not(self) -> Lit {
-        let Lit(l) = self;
-        Lit(l ^ 1)
-    }
-}
-
-impl ops::BitXor<bool> for Lit {
-    type Output = Lit;
-
-    #[inline]
-    fn bitxor(self, b : bool) -> Lit {
-        let Lit(l) = self;
-        Lit(l ^ (b as usize))
+        Lit(self.0 ^ 1)
     }
 }
 
@@ -66,7 +57,3 @@ impl fmt::Debug for Lit {
         write!(f, "{:?}", self.var())
     }
 }
-
-
-// TODO: remove
-pub const TempLit : Lit = Lit(0);

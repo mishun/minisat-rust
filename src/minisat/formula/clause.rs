@@ -81,7 +81,6 @@ impl Clause {
     #[inline]
     pub fn pullLiteral<F : FnMut(Lit) -> bool>(&mut self, place : usize, mut f : F) -> Option<Lit> {
         for k in (place + 1) .. self.header.size {
-            assert!(k < self.data.len());
             let lit = self.data[k];
             if f(lit) {
                 self.data.swap(place, k);
@@ -130,9 +129,8 @@ impl Clause {
     pub fn calcAbstraction(&mut self) {
         assert!(self.header.has_extra);
         let mut abstraction : u32 = 0;
-        for i in 0 .. self.header.size {
-            let Lit(p) = self.data[i];
-            abstraction |= 1 << ((p >> 1) & 31);
+        for lit in self.iter() {
+            abstraction |= lit.abstraction();
         }
         self.header.data_abs = abstraction; //data[header.size].abs = abstraction;
     }
@@ -150,14 +148,6 @@ impl ops::Index<usize> for Clause {
     fn index<'a>(&'a self, index : usize) -> &'a Lit {
         assert!(index < self.header.size);
         self.data.index(index)
-    }
-}
-
-impl ops::IndexMut<usize> for Clause {
-    #[inline]
-    fn index_mut<'a>(&'a mut self, index : usize) -> &'a mut Lit {
-        assert!(index < self.header.size);
-        self.data.index_mut(index)
     }
 }
 

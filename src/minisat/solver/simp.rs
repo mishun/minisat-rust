@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 use std::default::Default;
 use std::collections::vec_deque::VecDeque;
 use std::mem;
-use minisat::formula::{Var, Lit, TempLit};
+use minisat::formula::{Var, Lit};
 use minisat::formula::assignment::*;
 use minisat::formula::clause::*;
 use minisat::formula::index_map::{VarMap, LitMap};
@@ -270,10 +270,9 @@ impl SimpSolver {
         let mut core = CoreSolver::new(settings.core);
         core.db.ca.set_extra_clause_field(true); // NOTE: must happen before allocating the dummy clause below.
         core.db.settings.remove_satisfied = false;
-        let simp = Simplificator::new(settings.simp, &mut core.db.ca);
         SimpSolver { core        : core
                    , elimclauses : ElimClauses::new(settings.extend_model)
-                   , simp        : Some(simp)
+                   , simp        : Some(Simplificator::new(settings.simp))
                    }
     }
 
@@ -379,13 +378,11 @@ struct Simplificator {
     elim              : ElimQueue,
     touched           : VarMap<i8>,
     n_touched         : usize,
-    subsumption_queue : SubsumptionQueue,
-    bwdsub_tmpunit    : ClauseRef
+    subsumption_queue : SubsumptionQueue
 }
 
 impl Simplificator {
-    pub fn new(settings : SimpSettings, ca : &mut ClauseAllocator) -> Simplificator {
-        let (_, temp_clause) = ca.alloc(Box::new([TempLit]), false); // TODO: be ready to unexpected consequences
+    pub fn new(settings : SimpSettings) -> Simplificator {
         Simplificator { settings           : settings
                       , merges             : 0
                       , asymm_lits         : 0
@@ -396,7 +393,6 @@ impl Simplificator {
                       , touched            : VarMap::new()
                       , n_touched          : 0
                       , subsumption_queue  : SubsumptionQueue::new()
-                      , bwdsub_tmpunit     : temp_clause
                       }
     }
 
@@ -680,68 +676,74 @@ impl Simplificator {
         let mut subsumed = 0u64;
         let mut deleted_literals = 0u64;
 
-        while let Some(job) = self.subsumption_queue.pop(&core.assigns) {
+        while let Some(job) = self.subsumption_queue.pop(&core.db.ca, &core.assigns) {
             // Empty subsumption queue and return immediately on user-interrupt:
             if core.budget.interrupted() {
                 self.subsumption_queue.clear(&core.assigns);
                 break;
             }
 
-            let (cr, best) =
-                match job {
-                    SubsumptionJob::Assign(lit) => {
-                        // Check top-level assignments by creating a dummy clause and placing it in the queue:
-                        let c = core.db.ca.edit(self.bwdsub_tmpunit);
-                        c[0] = lit; c.calcAbstraction();
-                        (self.bwdsub_tmpunit, lit.var())
+            if verbose && cnt % 1000 == 0 {
+                trace!("subsumption left: {:10} ({:10} subsumed, {:10} deleted literals)",
+                    self.subsumption_queue.len(), subsumed, deleted_literals);
+            }
+            cnt += 1;
+
+            match job {
+                SubsumptionJob::Assign(unit) => {
+                    for cj in self.occurs.lookup(&unit.var(), &core.db.ca).clone().iter() {
+                        if { let c = core.db.ca.view(*cj); c.mark() == 0 && (self.settings.subsumption_lim == -1 || (c.len() as i32) < self.settings.subsumption_lim) } {
+                            match unitSubsumes(unit, core.db.ca.view(*cj)) {
+                                Subsumes::Different  => {}
+
+                                Subsumes::Exact      => {
+                                    subsumed += 1;
+                                    self.removeClause(core, *cj);
+                                }
+
+                                Subsumes::LitSign(l) => {
+                                    deleted_literals += 1;
+                                    if !self.strengthenClause(core, *cj, !l) {
+                                        return false;
+                                    }
+                                }
+                            }
+                        }
                     }
+                }
 
-                    SubsumptionJob::Clause(cr)  => {
+                SubsumptionJob::Clause(cr)  => {
+                    let best = {
                         let c = core.db.ca.view(cr);
-
-                        if c.mark() != 0 {
-                            continue;
-                        }
-
-                        if verbose && cnt % 1000 == 0 {
-                            trace!("subsumption left: {:10} ({:10} subsumed, {:10} deleted literals)",
-                                self.subsumption_queue.len(), subsumed, deleted_literals);
-                        }
-                        cnt += 1;
-
-                        assert!(c.len() > 1); // Unit-clauses should have been propagated before this point.
-
-                        // Find best variable to scan:
                         let mut best = c.head().var();
                         for lit in c.iterFrom(1) {
                             if self.occurs.getDirty(&lit.var()).len() < self.occurs.getDirty(&best).len() {
                                 best = lit.var();
                             }
                         }
+                        best
+                    };
 
-                        (cr, best)
-                    }
-                };
-
-            // Search all candidates:
-            for cj in self.occurs.lookup(&best, &core.db.ca).clone().iter() {
-                if core.db.ca.view(cr).mark() != 0 {
-                    break;
-                }
-
-                if *cj != cr && { let c = core.db.ca.view(*cj); c.mark() == 0 && (self.settings.subsumption_lim == -1 || (c.len() as i32) < self.settings.subsumption_lim) } {
-                    match subsumes(core.db.ca.view(cr), core.db.ca.view(*cj)) {
-                        Subsumes::Different  => {}
-
-                        Subsumes::Exact      => {
-                            subsumed += 1;
-                            self.removeClause(core, *cj);
+                    for cj in self.occurs.lookup(&best, &core.db.ca).clone().iter() {
+                        if core.db.ca.view(cr).mark() != 0 {
+                            break;
                         }
 
-                        Subsumes::LitSign(l) => {
-                            deleted_literals += 1;
-                            if !self.strengthenClause(core, *cj, !l) {
-                                return false;
+                        if *cj != cr && { let c = core.db.ca.view(*cj); c.mark() == 0 && (self.settings.subsumption_lim == -1 || (c.len() as i32) < self.settings.subsumption_lim) } {
+                            match subsumes(core.db.ca.view(cr), core.db.ca.view(*cj)) {
+                                Subsumes::Different  => {}
+
+                                Subsumes::Exact      => {
+                                    subsumed += 1;
+                                    self.removeClause(core, *cj);
+                                }
+
+                                Subsumes::LitSign(l) => {
+                                    deleted_literals += 1;
+                                    if !self.strengthenClause(core, *cj, !l) {
+                                        return false;
+                                    }
+                                }
                             }
                         }
                     }
@@ -781,14 +783,8 @@ impl Simplificator {
     }
 
     fn relocAll(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {
-        // All occurs lists:
         self.occurs.relocGC(from, to);
-
-        // Subsumption queue:
         self.subsumption_queue.relocGC(from, to);
-
-        // Temporary clause:
-        self.bwdsub_tmpunit = from.relocTo(to, self.bwdsub_tmpunit);
     }
 }
 
@@ -818,10 +814,7 @@ fn asymmetricBranching(core : &mut CoreSolver, v : Var, cr : ClauseRef) -> Optio
 
     let res = core.watches.propagate(&mut core.db.ca, &mut core.assigns);
     core.cancelUntil(GroundLevel);
-    match res {
-        None    => { None }
-        Some(_) => { Some(l) }
-    }
+    res.map(|_| l)
 }
 
 
@@ -842,20 +835,24 @@ impl SubsumptionQueue {
                          }
     }
 
-    pub fn pop(&mut self, assigns : &Assignment) -> Option<SubsumptionJob> {
-        match self.subsumption_queue.pop_front() {
-            Some(cr) => {
-                Some(SubsumptionJob::Clause(cr))
-            }
+    pub fn pop(&mut self, ca : &ClauseAllocator, assigns : &Assignment) -> Option<SubsumptionJob> {
+        loop {
+            match self.subsumption_queue.pop_front() {
+                Some(cr) => {
+                    if !ca.isDeleted(cr) {
+                        return Some(SubsumptionJob::Clause(cr));
+                    }
+                }
 
-            None if self.bwdsub_assigns < assigns.numberOfAssigns() => {
-                let lit = assigns.assignAt(self.bwdsub_assigns);
-                self.bwdsub_assigns += 1;
-                Some(SubsumptionJob::Assign(lit))
-            }
+                None if self.bwdsub_assigns < assigns.numberOfAssigns() => {
+                    let lit = assigns.assignAt(self.bwdsub_assigns);
+                    self.bwdsub_assigns += 1;
+                    return Some(SubsumptionJob::Assign(lit));
+                }
 
-            None => {
-                None
+                None => {
+                    return None;
+                }
             }
         }
     }
