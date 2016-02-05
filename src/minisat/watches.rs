@@ -30,8 +30,8 @@ impl Watches {
     }
 
     pub fn initVar(&mut self, var : Var) {
-        self.initLit(Lit::new(var, false));
-        self.initLit(Lit::new(var, true));
+        self.initLit(var.posLit());
+        self.initLit(var.negLit());
     }
 
     fn initLit(&mut self, lit : Lit) {
@@ -42,8 +42,8 @@ impl Watches {
     }
 
     pub fn tryClearVar(&mut self, var : Var) {
-        self.tryClearLit(Lit::new(var, false));
-        self.tryClearLit(Lit::new(var, true));
+        self.tryClearLit(var.posLit());
+        self.tryClearLit(var.negLit());
     }
 
     fn tryClearLit(&mut self, lit : Lit) {

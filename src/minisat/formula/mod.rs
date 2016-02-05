@@ -10,6 +10,23 @@ pub mod util;
 #[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
 pub struct Var(usize);
 
+impl Var {
+    #[inline]
+    pub fn lit(&self, sign : bool) -> Lit {
+        Lit(2 * self.0 + (sign as usize))
+    }
+
+    #[inline]
+    pub fn posLit(&self) -> Lit {
+        Lit(self.0 << 1)
+    }
+
+    #[inline]
+    pub fn negLit(&self) -> Lit {
+        Lit((self.0 << 1) | 1)
+    }
+}
+
 impl fmt::Debug for Var {
     fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
         write!(f, "x{}", self.0)
@@ -21,11 +38,6 @@ impl fmt::Debug for Var {
 pub struct Lit(usize);
 
 impl Lit {
-    #[inline]
-    pub fn new(Var(v) : Var, sign : bool) -> Lit {
-        Lit(v + v + (sign as usize))
-    }
-
     #[inline]
     pub fn sign(&self) -> bool {
         (self.0 & 1) != 0

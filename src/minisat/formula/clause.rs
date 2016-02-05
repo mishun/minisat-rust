@@ -231,20 +231,22 @@ impl ClauseAllocator {
     }
 
     pub fn alloc(&mut self, ps : Box<[Lit]>, learnt : bool) -> (&Clause, ClauseRef) {
+        assert!(ps.len() > 1);
+
         let use_extra = learnt | self.extra_clause_field;
         let len = ps.len();
 
         let mut c = Clause {
-            header   : ClauseHeader { size      : len
-                                    , mark      : 0
-                                    , learnt    : learnt
-                                    , reloced   : false
-                                    , has_extra : use_extra
-                                    , data_act  : 0.0
-                                    , data_abs  : 0
-                                    , data_rel  : None
-                                    },
-            data     : ps
+            header : ClauseHeader { size      : len
+                                  , mark      : 0
+                                  , learnt    : learnt
+                                  , reloced   : false
+                                  , has_extra : use_extra
+                                  , data_act  : 0.0
+                                  , data_abs  : 0
+                                  , data_rel  : None
+                                  },
+            data   : ps
         };
 
         if c.header.has_extra {

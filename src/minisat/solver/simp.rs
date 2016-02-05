@@ -95,8 +95,8 @@ impl ElimQueue {
     }
 
     pub fn addVar(&mut self, v : Var) {
-        self.n_occ.insert(&Lit::new(v, false), 0);
-        self.n_occ.insert(&Lit::new(v, true ), 0);
+        self.n_occ.insert(&v.posLit(), 0);
+        self.n_occ.insert(&v.negLit(), 0);
         self.insert(v);
     }
 
@@ -123,7 +123,7 @@ impl ElimQueue {
     }
 
     fn cost(&self, x : Var) -> u64 {
-        (self.n_occ[&Lit::new(x, false)] as u64) * (self.n_occ[&Lit::new(x, true)] as u64)
+        (self.n_occ[&x.posLit()] as u64) * (self.n_occ[&x.negLit()] as u64)
     }
 
     fn sift_up(&mut self, mut i : usize) {
@@ -630,12 +630,12 @@ impl Simplificator {
             for cr in neg.iter() {
                 elimclauses.mkElimClause(v, core.db.ca.view(*cr));
             }
-            elimclauses.mkElimUnit(Lit::new(v, false));
+            elimclauses.mkElimUnit(v.posLit());
         } else {
             for cr in pos.iter() {
                 elimclauses.mkElimClause(v, core.db.ca.view(*cr));
             }
-            elimclauses.mkElimUnit(Lit::new(v, true));
+            elimclauses.mkElimUnit(v.negLit());
         }
 
         for cr in cls.iter() {

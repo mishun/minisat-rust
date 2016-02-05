@@ -92,7 +92,7 @@ impl<'s, S : Solver> Subst<'s, S> {
             }
         }
 
-        Lit::new(self.forward_subst[&lit_id.abs()], lit_id < 0)
+        self.forward_subst[&lit_id.abs()].lit(lit_id < 0)
     }
 
     fn newVar(&mut self, var_id : i32) {
