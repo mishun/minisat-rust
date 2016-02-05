@@ -6,6 +6,7 @@ use super::{Var, Lit};
 
 pub type VarMap<V> = IdxMap<Var, V>;
 pub type LitMap<V> = IdxMap<Lit, V>;
+pub type VarHeap = IdxHeap<Var>;
 
 
 trait Idx {
@@ -16,8 +17,7 @@ trait Idx {
 impl Idx for Var {
     #[inline]
     fn idx(&self) -> usize {
-        let Var(ref idx) = *self;
-        *idx
+        self.0
     }
 
     #[inline]
@@ -29,8 +29,7 @@ impl Idx for Var {
 impl Idx for Lit {
     #[inline]
     fn idx(&self) -> usize {
-        let Lit(ref idx) = *self;
-        *idx
+        self.0
     }
 
     #[inline]
@@ -48,15 +47,6 @@ struct IdxMap<K : Idx, V> {
 impl<K : Idx, V> IdxMap<K, V> {
     pub fn new() -> IdxMap<K, V> {
         IdxMap { map : vec_map::VecMap::new(), ph : marker::PhantomData }
-    }
-
-    pub fn clear(&mut self) {
-        self.map.clear();
-    }
-
-    #[inline]
-    pub fn contains_key(&self, k : &K) -> bool {
-        self.map.contains_key(&k.idx())
     }
 
     #[inline]
@@ -128,5 +118,135 @@ impl<'a, K : Idx, V : 'a> Iterator for IterMut<'a, K, V> {
     #[inline]
     fn next(&mut self) -> Option<(K, &'a mut V)> {
         self.it.next().map(|(idx, v)| (Idx::unidx(idx), v))
+    }
+}
+
+
+struct IdxHeap<K : Idx> {
+    heap  : Vec<K>,
+    index : vec_map::VecMap<usize>
+}
+
+impl<K : Idx> IdxHeap<K> {
+    pub fn new() -> Self {
+        IdxHeap { heap  : Vec::new()
+                , index : vec_map::VecMap::new()
+                }
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.heap.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.heap.is_empty()
+    }
+
+    #[inline]
+    pub fn contains(&self, key : &K) -> bool {
+        self.index.contains_key(&key.idx())
+    }
+
+    #[inline]
+    pub fn clear(&mut self) {
+        self.heap.clear();
+        self.index.clear();
+    }
+
+    #[inline]
+    pub fn insert<F : Fn(&K, &K) -> bool>(&mut self, key : K, before : F) -> bool {
+        if !self.index.contains_key(&key.idx()) {
+            let place = self.heap.len();
+            self.heap.push(key);
+            self.sift_up(place, before);
+            true
+        } else {
+            false
+        }
+    }
+
+    #[inline]
+    pub fn pop<F : Fn(&K, &K) -> bool>(&mut self, before : F) -> Option<K> {
+        if self.heap.is_empty() {
+            None
+        } else {
+            let res = self.heap.swap_remove(0);
+            self.index.remove(&res.idx());
+            if !self.heap.is_empty() {
+                self.sift_down(0, &before);
+            }
+            Some(res)
+        }
+    }
+
+    #[inline]
+    pub fn update<F : Fn(&K, &K) -> bool>(&mut self, key : &K, before : F) -> bool {
+        let place =
+            match self.index.get(&key.idx()) {
+                None    => { return false; }
+                Some(i) => { *i }
+            };
+
+        self.sift_down(place, &before);
+        self.sift_up(place, before);
+        true
+    }
+
+    pub fn heapifyFrom<F : Fn(&K, &K) -> bool>(&mut self, from : Vec<K>, before : F) {
+        self.index.clear();
+        self.heap = from;
+
+        for i in (0 .. self.heap.len()).rev() {
+            self.sift_down(i, &before);
+        }
+    }
+
+    #[inline]
+    fn sift_up<F : Fn(&K, &K) -> bool>(&mut self, mut i : usize, before : F) {
+        while i > 0 {
+            let p = (i - 1) >> 1;
+            if before(&self.heap[i], &self.heap[p]) {
+                self.index.insert(self.heap[p].idx(), i);
+                self.heap.swap(i, p);
+                i = p;
+            } else {
+                break;
+            }
+        }
+
+        self.index.insert(self.heap[i].idx(), i);
+    }
+
+    #[inline]
+    fn sift_down<F : Fn(&K, &K) -> bool>(&mut self, mut i : usize, before : &F) {
+        loop {
+            let c = {
+                let l = 2 * i + 1;
+                if l >= self.heap.len() { break; }
+                let r = l + 1;
+                if r < self.heap.len() && before(&self.heap[r], &self.heap[l]) { r } else { l }
+            };
+
+            if before(&self.heap[c], &self.heap[i]) {
+                self.index.insert(self.heap[c].idx(), i);
+                self.heap.swap(c, i);
+                i = c;
+            } else {
+                break;
+            }
+        }
+
+        self.index.insert(self.heap[i].idx(), i);
+    }
+}
+
+impl<K : Idx> ops::Index<usize> for IdxHeap<K> {
+    type Output = K;
+
+    #[inline]
+    fn index(&self, i : usize) -> &K {
+        self.heap.index(i)
     }
 }

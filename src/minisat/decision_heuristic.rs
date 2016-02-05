@@ -1,7 +1,6 @@
-use std::ops;
 use minisat::formula::{Var, Lit};
-use minisat::formula::assignment::*;
-use minisat::formula::index_map::VarMap;
+use minisat::formula::assignment::Assignment;
+use minisat::formula::index_map::{VarMap, VarHeap};
 use minisat::random;
 
 
@@ -42,7 +41,8 @@ pub struct DecisionHeuristic {
     var_inc           : f64,                         // Amount to bump next variable with.
     rand              : random::Random,
     var               : VarMap<VarLine>,
-    activity_queue    : ActivityQueue,               // A priority queue of variables ordered with respect to the variable activity.
+    activity          : VarMap<f64>,
+    queue             : VarHeap,                     // A priority queue of variables ordered with respect to the variable activity.
 
     pub dec_vars      : usize,
     pub rnd_decisions : u64
@@ -51,26 +51,35 @@ pub struct DecisionHeuristic {
 impl DecisionHeuristic {
     pub fn new(settings : DecisionHeuristicSettings) -> DecisionHeuristic {
         let seed = settings.random_seed;
-        DecisionHeuristic { settings       : settings
-                          , var_inc        : 1.0
-                          , rand           : random::Random::new(seed)
-                          , var            : VarMap::new()
-                          , activity_queue : ActivityQueue::new()
-                          , dec_vars       : 0
-                          , rnd_decisions  : 0
+        DecisionHeuristic { settings      : settings
+                          , var_inc       : 1.0
+                          , rand          : random::Random::new(seed)
+                          , var           : VarMap::new()
+                          , activity      : VarMap::new()
+                          , queue         : VarHeap::new()
+                          , dec_vars      : 0
+                          , rnd_decisions : 0
                           }
     }
 
     pub fn initVar(&mut self, v : Var, upol : Option<bool>, dvar : bool) {
-        self.activity_queue.setActivity(&v,
-            if self.settings.rnd_init_act {
-                self.rand.drand() * 0.00001
-            } else {
-                0.0
-            });
-
+        self.activity.insert(&v, if self.settings.rnd_init_act { self.rand.drand() * 0.00001 } else { 0.0 });
         self.var.insert(&v, VarLine { polarity : true, user_pol : upol, decision : false });
         self.setDecisionVar(v, dvar);
+    }
+
+    pub fn setDecisionVar(&mut self, v : Var, b : bool) {
+        let ref mut ln = self.var[&v];
+        if b != ln.decision {
+            if b {
+                self.dec_vars += 1;
+                let ref act = self.activity;
+                self.queue.insert(v, |a, b| { act[a] > act[b] });
+            } else {
+                self.dec_vars -= 1;
+            }
+            ln.decision = b;
+        }
     }
 
     pub fn cancel(&mut self, lit : Lit, top_level : bool) {
@@ -81,52 +90,47 @@ impl DecisionHeuristic {
             _                                 => {}
         }
         if ln.decision {
-            self.activity_queue.insert(lit.var());
+            let ref act = self.activity;
+            self.queue.insert(lit.var(), |a, b| { act[a] > act[b] });
         }
     }
 
-    pub fn bumpActivity(&mut self, v : Var) {
-        let new = self.activity_queue.getActivity(&v) + self.var_inc;
+    pub fn bumpActivity(&mut self, v : &Var) {
+        let new = self.activity[v] + self.var_inc;
         if new > 1e100 {
             self.var_inc *= 1e-100;
-            self.activity_queue.scaleActivity(1e-100);
-            self.activity_queue.setActivity(&v, new * 1e-100);
+            for (_, act) in self.activity.iter_mut() {
+                *act *= 1e-100;
+            }
+            self.activity[v] = new * 1e-100;
         } else {
-            self.activity_queue.setActivity(&v, new);
+            self.activity[v] = new;
         }
+
+        let ref act = self.activity;
+        self.queue.update(v, |a, b| { act[a] > act[b] });
     }
 
     pub fn decayActivity(&mut self) {
         self.var_inc *= 1.0 / self.settings.var_decay;
     }
 
-    pub fn setDecisionVar(&mut self, v : Var, b : bool) {
-        let ref mut ln = self.var[&v];
-        if b != ln.decision {
-            if b {
-                self.dec_vars += 1;
-                self.activity_queue.insert(v);
-            } else {
-                self.dec_vars -= 1;
-            }
-            ln.decision = b;
-        }
-    }
-
     pub fn rebuildOrderHeap(&mut self, assigns : &Assignment) {
-        let mut tmp = Vec::with_capacity(self.activity_queue.len());
+        let mut tmp = Vec::with_capacity(self.queue.len());
         for (v, vl) in self.var.iter() {
             if vl.decision && assigns.isUndef(v) {
                 tmp.push(v);
             }
         }
-        self.activity_queue.heapifyFrom(tmp);
+
+        let ref act = self.activity;
+        self.queue.heapifyFrom(tmp, |a, b| { act[a] > act[b] });
     }
 
     fn pickBranchVar(&mut self, assigns : &Assignment) -> Option<Var> {
         // Random decision:
-        if self.rand.chance(self.settings.random_var_freq) && !self.activity_queue.is_empty() {
-            let v = self.activity_queue[self.rand.irand(self.activity_queue.len())];
+        if self.rand.chance(self.settings.random_var_freq) && !self.queue.is_empty() {
+            let v = self.queue[self.rand.irand(self.queue.len())];
             if assigns.isUndef(v) && self.var[&v].decision {
                 self.rnd_decisions += 1;
                 return Some(v);
@@ -134,7 +138,7 @@ impl DecisionHeuristic {
         }
 
         // Activity based decision:
-        while let Some(v) = self.activity_queue.pop() {
+        while let Some(v) = { let ref act = self.activity; self.queue.pop(|a, b| { act[a] > act[b] }) } {
             if assigns.isUndef(v) && self.var[&v].decision {
                 return Some(v);
             }
@@ -154,158 +158,5 @@ impl DecisionHeuristic {
             };
             v.lit(s)
         })
-    }
-
-    // Insert a variable in the decision order priority queue.
-//    fn insertVarOrder(&mut self, x : Var) {
-//        if self.decision[&x] {
-//            self.activity_queue.insert(x);
-//        }
-//    }
-}
-
-
-struct ActivityQueue {
-    heap     : Vec<Var>,
-    indices  : VarMap<usize>,
-    activity : VarMap<f64>,
-}
-
-impl ActivityQueue {
-    pub fn new() -> ActivityQueue {
-        ActivityQueue {
-            heap     : Vec::new(),
-            indices  : VarMap::new(),
-            activity : VarMap::new(),
-        }
-    }
-
-    #[inline]
-    pub fn len(&self) -> usize {
-        self.heap.len()
-    }
-
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.heap.is_empty()
-    }
-
-    #[inline]
-    pub fn contains(&self, v : &Var) -> bool {
-        self.indices.contains_key(v)
-    }
-
-    #[inline]
-    pub fn getActivity(&self, v : &Var) -> f64 {
-        self.activity[v]
-    }
-
-    pub fn scaleActivity(&mut self, factor : f64) {
-        for (_, act) in self.activity.iter_mut() {
-            *act *= factor;
-        }
-    }
-
-    pub fn setActivity(&mut self, v : &Var, new : f64) {
-        if let Some(old) = self.activity.insert(v, new) {
-            if self.indices.contains_key(v) {
-                let i = self.indices[v];
-                if new > old { self.sift_up(i) } else { self.sift_down(i) }
-            }
-        }
-    }
-
-    pub fn insert(&mut self, v : Var) {
-        if !self.contains(&v) {
-            if !self.activity.contains_key(&v) {
-                self.activity.insert(&v, 0.0);
-            }
-
-            let i = self.heap.len();
-            self.indices.insert(&v, i);
-            self.heap.push(v);
-            self.sift_up(i);
-        }
-    }
-
-    pub fn pop(&mut self) -> Option<Var>
-    {
-        match self.heap.len() {
-            0 => { None }
-            1 => {
-                let h = self.heap.pop().unwrap();
-                self.indices.remove(&h);
-                Some(h)
-            }
-            _ => {
-                let h = self.heap[0].clone();
-                self.indices.remove(&h);
-
-                let t = self.heap.pop().unwrap();
-                self.set(0, t);
-
-                self.sift_down(0);
-                Some(h)
-            }
-        }
-    }
-
-    pub fn heapifyFrom(&mut self, from : Vec<Var>) {
-        self.heap = from;
-        self.indices.clear();
-        for i in 0 .. self.heap.len() {
-            self.indices.insert(&self.heap[i], i);
-        }
-
-        for i in (0 .. self.heap.len() / 2).rev() {
-            self.sift_down(i);
-        }
-    }
-
-
-    fn sift_up(&mut self, mut i : usize) {
-        let x = self.heap[i].clone();
-        while i > 0 {
-            let pi = (i - 1) >> 1;
-            let p = self.heap[pi].clone();
-            if self.activity[&x] > self.activity[&p] {
-                self.set(i, p);
-                i = pi;
-            } else {
-                break
-            }
-        }
-        self.set(i, x);
-    }
-
-    fn sift_down(&mut self, mut i : usize) {
-        let x = self.heap[i].clone();
-        let len = self.heap.len();
-        loop {
-            let li = i + i + 1;
-            if li >= len { break; }
-            let ri = i + i + 2;
-            let ci = if ri < len && self.activity[&self.heap[ri]] > self.activity[&self.heap[li]] { ri } else { li };
-            let c = self.heap[ci].clone();
-            if self.activity[&c] <= self.activity[&x] { break; }
-            self.set(i, c);
-            i = ci;
-        }
-        self.set(i, x);
-    }
-
-    #[inline]
-    fn set(&mut self, i : usize, v : Var) {
-        self.indices.insert(&v, i);
-        self.heap[i] = v;
-    }
-}
-
-impl ops::Index<usize> for ActivityQueue {
-    type Output = Var;
-
-    #[inline]
-    fn index(&self, i : usize) -> &Var {
-        self.heap.index(i)
     }
 }

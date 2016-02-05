@@ -80,7 +80,7 @@ impl AnalyzeContext {
                 for q in db.ca.view(confl).iterFrom(match p { None => 0, Some(_) => 1 }) {
                     let v = q.var();
                     if self.seen[&v] == Seen::Undef && assigns.vardata(v).level > GroundLevel {
-                        heur.bumpActivity(v);
+                        heur.bumpActivity(&v);
 
                         self.seen[&v] = Seen::Source;
                         if assigns.vardata(v).level >= assigns.decisionLevel() {

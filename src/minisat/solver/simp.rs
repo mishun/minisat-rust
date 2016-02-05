@@ -5,7 +5,7 @@ use std::mem;
 use minisat::formula::{Var, Lit};
 use minisat::formula::assignment::*;
 use minisat::formula::clause::*;
-use minisat::formula::index_map::{VarMap, LitMap};
+use minisat::formula::index_map::{VarMap, LitMap, VarHeap};
 use minisat::formula::util::*;
 use super::{Solver, CoreSolver};
 
@@ -28,18 +28,31 @@ impl Default for Settings {
 
 
 struct ElimQueue {
-    heap    : Vec<Var>,
-    indices : VarMap<usize>,
-    n_occ   : LitMap<i32>
+    heap  : VarHeap,
+    n_occ : LitMap<i32>
 }
 
 impl ElimQueue {
     pub fn new() -> ElimQueue {
         ElimQueue {
-            heap    : Vec::new(),
-            indices : VarMap::new(),
-            n_occ   : LitMap::new()
+            heap  : VarHeap::new(),
+            n_occ : LitMap::new()
         }
+    }
+
+    pub fn initVar(&mut self, v : Var) {
+        self.n_occ.insert(&v.posLit(), 0);
+        self.n_occ.insert(&v.negLit(), 0);
+
+        let ref n_occ = self.n_occ;
+        self.heap.insert(v, |a, b| { Self::before(n_occ, a, b) });
+    }
+
+    #[inline]
+    fn before(n_occ : &LitMap<i32>, a : &Var, b : &Var) -> bool {
+        let costA = (n_occ[&a.posLit()] as u64) * (n_occ[&a.negLit()] as u64);
+        let costB = (n_occ[&b.posLit()] as u64) * (n_occ[&b.negLit()] as u64);
+        costA < costB
     }
 
     #[inline]
@@ -47,120 +60,30 @@ impl ElimQueue {
         self.heap.len()
     }
 
-    #[inline]
-    fn inHeap(&self, v : &Var) -> bool {
-        self.indices.contains_key(v)
-    }
-
-    fn update(&mut self, v : Var) {
-        if !self.inHeap(&v) {
-            self.insert(v);
-        } else {
-            {
-                let i = self.indices[&v];
-                self.sift_up(i);
-            }
-            {
-                let i = self.indices[&v];
-                self.sift_down(i);
-            }
+    fn updateElimHeap(&mut self, v : Var, var_status : &VarMap<VarStatus>, assigns : &Assignment) {
+        let ref n_occ = self.n_occ;
+        if self.heap.contains(&v) {
+            self.heap.update(&v, |a, b| { Self::before(n_occ, a, b) });
+        } else if var_status[&v].frozen == 0 && var_status[&v].eliminated == 0 && assigns.isUndef(v) {
+            self.heap.insert(v, |a, b| { Self::before(n_occ, a, b) });
         }
     }
 
-    fn insert(&mut self, v : Var) {
-        if !self.inHeap(&v) {
-            let i = self.heap.len();
-            self.indices.insert(&v, i);
-            self.heap.push(v);
-            self.sift_up(i);
-        }
-    }
-
-    fn updateElimHeap(&mut self, v : &Var, var_status : &VarMap<VarStatus>, assigns : &Assignment) {
-        if self.inHeap(&v) || (var_status[v].frozen == 0 && var_status[v].eliminated == 0 && assigns.isUndef(*v)) {
-            self.update(*v);
-        }
-    }
-
-    pub fn clearHeap(&mut self) {
+    pub fn clear(&mut self) {
         self.heap.clear();
-        self.indices.clear();
     }
 
     pub fn bumpLitOcc(&mut self, lit : &Lit, delta : i32) {
         self.n_occ[lit] += delta;
-        if self.inHeap(&lit.var()) {
-            self.update(lit.var());
-        }
-    }
 
-    pub fn addVar(&mut self, v : Var) {
-        self.n_occ.insert(&v.posLit(), 0);
-        self.n_occ.insert(&v.negLit(), 0);
-        self.insert(v);
+        let ref n_occ = self.n_occ;
+        self.heap.update(&lit.var(), |a, b| { Self::before(n_occ, a, b) });
     }
 
     pub fn pop(&mut self) -> Option<Var>
     {
-        match self.heap.len() {
-            0 => { None }
-            1 => {
-                let h = self.heap.pop().unwrap();
-                self.indices.remove(&h);
-                Some(h)
-            }
-            _ => {
-                let h = self.heap[0].clone();
-                self.indices.remove(&h);
-
-                let t = self.heap.pop().unwrap();
-                self.set(0, t);
-
-                self.sift_down(0);
-                Some(h)
-            }
-        }
-    }
-
-    fn cost(&self, x : Var) -> u64 {
-        (self.n_occ[&x.posLit()] as u64) * (self.n_occ[&x.negLit()] as u64)
-    }
-
-    fn sift_up(&mut self, mut i : usize) {
-        let x = self.heap[i].clone();
-        while i > 0 {
-            let pi = (i - 1) >> 1;
-            let p = self.heap[pi].clone();
-            if self.cost(x) < self.cost(p) {
-                self.set(i, p);
-                i = pi;
-            } else {
-                break
-            }
-        }
-        self.set(i, x);
-    }
-
-    fn sift_down(&mut self, mut i : usize) {
-        let x = self.heap[i].clone();
-        let len = self.heap.len();
-        loop {
-            let li = i + i + 1;
-            if li >= len { break; }
-            let ri = i + i + 2;
-            let ci = if ri < len && self.cost(self.heap[ri]) < self.cost(self.heap[li]) { ri } else { li };
-            let c = self.heap[ci].clone();
-            if self.cost(c) >= self.cost(x) { break; }
-            self.set(i, c);
-            i = ci;
-        }
-        self.set(i, x);
-    }
-
-    #[inline]
-    fn set(&mut self, i : usize, v : Var) {
-        self.indices.insert(&v, i);
-        self.heap[i] = v;
+        let ref n_occ = self.n_occ;
+        self.heap.pop(|a, b| { Self::before(n_occ, a, b) })
     }
 }
 
@@ -268,7 +191,7 @@ impl Solver for SimpSolver {
 impl SimpSolver {
     pub fn new(settings : Settings) -> SimpSolver {
         let mut core = CoreSolver::new(settings.core);
-        core.db.ca.set_extra_clause_field(true); // NOTE: must happen before allocating the dummy clause below.
+        core.db.ca.set_extra_clause_field(true);
         core.db.settings.remove_satisfied = false;
         SimpSolver { core        : core
                    , elimclauses : ElimClauses::new(settings.extend_model)
@@ -400,7 +323,7 @@ impl Simplificator {
         self.var_status.insert(&v, VarStatus { frozen : 0, eliminated : 0 });
         self.occurs.initVar(&v);
         self.touched.insert(&v, 0);
-        self.elim.addVar(v);
+        self.elim.initVar(v);
     }
 
     fn addClause(&mut self, core : &mut CoreSolver, ps : &[Lit]) -> bool {
@@ -461,7 +384,7 @@ impl Simplificator {
         // Unfreeze the assumptions that were frozen:
         for v in extra_frozen.iter() {
             self.var_status[v].frozen = 0;
-            self.elim.updateElimHeap(v, &self.var_status, &core.assigns);
+            self.elim.updateElimHeap(*v, &self.var_status, &core.assigns);
         }
 
         result
@@ -482,7 +405,7 @@ impl Simplificator {
                 assert!(self.subsumption_queue.bwdsub_assigns == core.assigns.numberOfAssigns());
                 assert!(self.subsumption_queue.len() == 0);
                 assert!(self.n_touched == 0);
-                self.elim.clearHeap();
+                self.elim.clear();
                 break 'cleanup;
             }
 
@@ -557,7 +480,7 @@ impl Simplificator {
     fn removeClause(&mut self, core : &mut CoreSolver, cr : ClauseRef) {
         for lit in core.db.ca.view(cr).iter() {
             self.elim.bumpLitOcc(&lit, -1);
-            self.elim.updateElimHeap(&lit.var(), &self.var_status, &core.assigns);
+            self.elim.updateElimHeap(lit.var(), &self.var_status, &core.assigns);
             self.occurs.smudge(&lit.var());
         }
 
@@ -584,7 +507,7 @@ impl Simplificator {
 
             self.occurs.removeOcc(&l.var(), cr);
             self.elim.bumpLitOcc(&l, -1);
-            self.elim.updateElimHeap(&l.var(), &self.var_status, &core.assigns);
+            self.elim.updateElimHeap(l.var(), &self.var_status, &core.assigns);
             true
         }
     }
@@ -717,6 +640,7 @@ impl Simplificator {
                         let c = core.db.ca.view(cr);
                         let mut best = c.head().var();
                         for lit in c.iterFrom(1) {
+                            // TODO: why not use n_occ?
                             if self.occurs.getDirty(&lit.var()).len() < self.occurs.getDirty(&best).len() {
                                 best = lit.var();
                             }
@@ -725,7 +649,7 @@ impl Simplificator {
                     };
 
                     for cj in self.occurs.lookup(&best, &core.db.ca).clone().iter() {
-                        if core.db.ca.view(cr).mark() != 0 {
+                        if core.db.ca.isDeleted(cr) {
                             break;
                         }
 
