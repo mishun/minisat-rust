@@ -2,12 +2,13 @@ use std::borrow::Borrow;
 use std::default::Default;
 use std::collections::vec_deque::VecDeque;
 use std::mem;
+use minisat::{TotalResult, PartialResult, Solver};
 use minisat::formula::{Var, Lit};
 use minisat::formula::assignment::*;
 use minisat::formula::clause::*;
 use minisat::formula::index_map::{VarMap, LitMap, VarHeap};
 use minisat::formula::util::*;
-use super::{Solver, CoreSolver};
+use super::CoreSolver;
 
 
 pub struct Settings {
@@ -183,6 +184,16 @@ impl Solver for SimpSolver {
         }
     }
 
+    fn solve(&mut self) -> TotalResult {
+        self.core.budget.off();
+        match self.solveLimited(&[], true, false) {
+                PartialResult::UnSAT          => { TotalResult::UnSAT }
+                PartialResult::SAT(model)     => { TotalResult::SAT(model) }
+                PartialResult::Interrupted(_) => { TotalResult::Interrupted }
+                // _                             => { panic!("Impossible happened") }
+            }
+    }
+
     fn printStats(&self) {
         self.core.printStats();
     }
@@ -199,7 +210,7 @@ impl SimpSolver {
                    }
     }
 
-    pub fn solveLimited(&mut self, assumptions : &[Lit], do_simp : bool, turn_off_simp : bool) -> super::PartialResult {
+    pub fn solveLimited(&mut self, assumptions : &[Lit], do_simp : bool, turn_off_simp : bool) -> PartialResult {
         let mut result =
             match self.simp {
                 Some(ref mut simp) if do_simp => {
@@ -211,7 +222,7 @@ impl SimpSolver {
                 }
             };
 
-        if let super::PartialResult::SAT(ref mut model) = result {
+        if let PartialResult::SAT(ref mut model) = result {
             self.elimclauses.extendModel(model);
         }
 
@@ -357,7 +368,7 @@ impl Simplificator {
         }
     }
 
-    fn solveLimited(&mut self, core : &mut CoreSolver, elimclauses : &mut ElimClauses, assumptions : &[Lit]) -> super::PartialResult {
+    fn solveLimited(&mut self, core : &mut CoreSolver, elimclauses : &mut ElimClauses, assumptions : &[Lit]) -> PartialResult {
         let mut extra_frozen : Vec<Var> = Vec::new();
 
         // Assumptions must be temporarily frozen to run variable elimination:
@@ -378,7 +389,7 @@ impl Simplificator {
                 core.solveLimited(assumptions)
             } else {
                 info!("===============================================================================");
-                super::PartialResult::UnSAT
+                PartialResult::UnSAT
             };
 
         // Unfreeze the assumptions that were frozen:

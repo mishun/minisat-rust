@@ -32,7 +32,7 @@ impl LitVal {
 }
 
 
-struct VarData {
+pub struct VarData {
     pub reason : Option<clause::ClauseRef>,
     pub level  : DecisionLevel
 }
@@ -229,19 +229,6 @@ impl Assignment {
     }
 
 
-    pub fn extractModel(&self) -> VarMap<bool> {
-        let mut model = VarMap::new();
-        for i in 0 .. self.assignment.len() {
-            match self.assignment[i].assign[0] {
-                LitVal::Undef => {}
-                LitVal::False => { model.insert(&Var(i), false); }
-                LitVal::True  => { model.insert(&Var(i), true); }
-            }
-        }
-        model
-    }
-
-
     pub fn relocGC(&mut self, from : &mut clause::ClauseAllocator, to : &mut clause::ClauseAllocator) {
         for l in self.trail.iter() {
             let Var(v) = l.var();
@@ -289,6 +276,19 @@ pub fn progressEstimate(assigns : &Assignment) -> f64 {
         progress += F.powi(level as i32) * ((r - l) as f64);
     }
     progress * F
+}
+
+
+pub fn extractModel(assigns : &Assignment) -> VarMap<bool> {
+    let mut model = VarMap::new();
+    for i in 0 .. assigns.assignment.len() {
+        match assigns.assignment[i].assign[0] {
+            LitVal::Undef => {}
+            LitVal::False => { model.insert(&Var(i), false); }
+            LitVal::True  => { model.insert(&Var(i), true); }
+        }
+    }
+    model
 }
 
 

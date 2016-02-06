@@ -5,7 +5,7 @@ use std::borrow::Borrow;
 use std::collections::{HashSet, HashMap};
 use minisat::formula::{Var, Lit};
 use minisat::formula::index_map::VarMap;
-use minisat::solver::Solver;
+use minisat::Solver;
 
 
 pub fn write<W : io::Write, S : Solver>(_ : &mut W, _ : &S) -> io::Result<()> {

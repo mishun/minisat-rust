@@ -13,7 +13,7 @@ pub struct Var(usize);
 impl Var {
     #[inline]
     pub fn lit(&self, sign : bool) -> Lit {
-        Lit(2 * self.0 + (sign as usize))
+        Lit((self.0 << 1) | (sign as usize))
     }
 
     #[inline]

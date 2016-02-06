@@ -2,10 +2,11 @@ extern crate time;
 
 use std::default::Default;
 use std::sync::atomic;
+use minisat::{PartialResult, TotalResult, Solver};
 use minisat::formula::{Var, Lit};
 use minisat::formula::clause::*;
 use minisat::formula::assignment::*;
-use minisat::formula::index_map::{VarMap, LitMap};
+use minisat::formula::index_map::LitMap;
 use minisat::clause_db::*;
 use minisat::conflict::*;
 use minisat::decision_heuristic::*;
@@ -14,16 +15,6 @@ use minisat::util;
 
 
 pub mod simp;
-
-
-pub trait Solver {
-    fn nVars(&self) -> usize;
-    fn nClauses(&self) -> usize;
-    fn newVar(&mut self, upol : Option<bool>, dvar : bool) -> Var;
-    fn addClause(&mut self, clause : &[Lit]) -> bool;
-    fn printStats(&self);
-}
-
 
 
 pub struct Settings {
@@ -161,10 +152,10 @@ impl Budget {
         self.asynch_interrupt.load(atomic::Ordering::Relaxed)
     }
 
-//    pub fn off(&mut self) {
-//        self.conflict_budget = -1;
-//        self.propagation_budget = -1;
-//    }
+    pub fn off(&mut self) {
+        self.conflict_budget = -1;
+        self.propagation_budget = -1;
+    }
 }
 
 
@@ -192,9 +183,6 @@ impl SimplifyGuard {
 
 
 enum SearchResult { UnSAT, SAT, Interrupted(f64), AssumpsConfl(LitMap<()>) }
-
-
-pub enum PartialResult { UnSAT, SAT(VarMap<bool>), Interrupted(f64) }
 
 
 pub struct CoreSettings {
@@ -264,6 +252,16 @@ impl Solver for CoreSolver {
         match self.addClause_(clause) {
             AddClause::UnSAT => { false }
             _                => { true }
+        }
+    }
+
+    fn solve(&mut self) -> TotalResult {
+        self.budget.off();
+        match self.solveLimited(&[]) {
+            PartialResult::UnSAT          => { TotalResult::UnSAT }
+            PartialResult::SAT(model)     => { TotalResult::SAT(model) }
+            PartialResult::Interrupted(_) => { TotalResult::Interrupted }
+            // _                             => { panic!("Impossible happened") }
         }
     }
 
@@ -366,15 +364,6 @@ impl CoreSolver {
         }
     }
 
-//    pub fn solve(&mut self, assumps : &[Lit]) -> bool {
-//        self.budget.off();
-//        match self.solveLimited(assumps) {
-//            PartialResult::UnSAT  => { false }
-//            PartialResult::SAT(_) => { true }
-//            _                     => { panic!("Impossible happened") }
-//        }
-//    }
-
     // Description:
     //   Simplify the clause database according to the current top-level assigment. Currently, the only
     //   thing done here is the removal of satisfied clauses, but more things can be put here.
@@ -461,7 +450,7 @@ impl CoreSolver {
 
             match self.search(conflicts_to_go, assumptions) {
                 SearchResult::SAT             => {
-                    return PartialResult::SAT(self.assigns.extractModel());
+                    return PartialResult::SAT(extractModel(&self.assigns));
                 }
 
                 SearchResult::UnSAT           => {
