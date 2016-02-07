@@ -1,7 +1,6 @@
-use minisat::formula::{Var, Lit};
-use minisat::formula::assignment::Assignment;
-use minisat::formula::index_map::{VarMap, VarHeap};
-use minisat::random;
+use sat::formula::{Var, Lit, VarMap, VarHeap};
+use sat::formula::assignment::Assignment;
+use super::util;
 
 
 #[derive(PartialEq, Eq)]
@@ -39,7 +38,7 @@ struct VarLine {
 pub struct DecisionHeuristic {
     settings          : DecisionHeuristicSettings,
     var_inc           : f64,                         // Amount to bump next variable with.
-    rand              : random::Random,
+    rand              : util::Random,
     var               : VarMap<VarLine>,
     activity          : VarMap<f64>,
     queue             : VarHeap,                     // A priority queue of variables ordered with respect to the variable activity.
@@ -53,7 +52,7 @@ impl DecisionHeuristic {
         let seed = settings.random_seed;
         DecisionHeuristic { settings      : settings
                           , var_inc       : 1.0
-                          , rand          : random::Random::new(seed)
+                          , rand          : util::Random::new(seed)
                           , var           : VarMap::new()
                           , activity      : VarMap::new()
                           , queue         : VarHeap::new()

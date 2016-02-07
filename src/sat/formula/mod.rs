@@ -1,9 +1,10 @@
 use std::fmt;
 use std::ops;
+pub use self::index_map::{VarMap, LitMap, VarHeap};
 
 pub mod assignment;
 pub mod clause;
-pub mod index_map;
+mod index_map;
 pub mod util;
 
 

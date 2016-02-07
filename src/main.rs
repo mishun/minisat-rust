@@ -9,14 +9,11 @@ extern crate env_logger;
 
 use std::fs;
 use std::io;
-use minisat::{TotalResult, Solver};
-use minisat::formula::index_map::VarMap;
-use minisat::decision_heuristic::PhaseSaving;
-use minisat::conflict::CCMinMode;
-use minisat::solver;
-use minisat::dimacs;
+use sat::{dimacs, TotalResult, Solver};
+use sat::formula::VarMap;
+use sat::minisat::{self, PhaseSaving, CCMinMode};
 
-mod minisat;
+mod sat;
 
 
 struct MainOptions {
@@ -89,7 +86,7 @@ fn main() {
     }
 
     let core_options = {
-        let mut s = solver::Settings::default();
+        let mut s = minisat::Settings::default();
 
         for x in matches.value_of("var-decay").and_then(|s| s.parse().ok()).iter() {
             if 0.0 < *x && *x < 1.0 { s.heur.var_decay = *x; }
@@ -164,11 +161,11 @@ fn main() {
         };
 
     if matches.is_present("core") {
-        let solver = solver::CoreSolver::new(core_options);
+        let solver = minisat::CoreSolver::new(core_options);
         solveFileCore(solver, options).expect("Error");
     } else {
         let simp_options = {
-            let mut s = solver::simp::Settings::default();
+            let mut s = minisat::simp::Settings::default();
             s.core = core_options;
 
             if matches.is_present("asymm") { s.simp.use_asymm = true; }
@@ -196,12 +193,12 @@ fn main() {
             s
         };
 
-        let solver = solver::simp::SimpSolver::new(simp_options);
+        let solver = minisat::simp::SimpSolver::new(simp_options);
         solveFileSimp(solver, options).expect("Error");
     }
 }
 
-fn solveFileCore(mut solver : solver::CoreSolver, options : MainOptions) -> io::Result<()> {
+fn solveFileCore(mut solver : minisat::CoreSolver, options : MainOptions) -> io::Result<()> {
     let initial_time = time::precise_time_s();
 
     info!("============================[ Problem Statistics ]=============================");
@@ -248,7 +245,7 @@ fn solveFileCore(mut solver : solver::CoreSolver, options : MainOptions) -> io::
     Ok(())
 }
 
-fn solveFileSimp(mut solver : solver::simp::SimpSolver, options : MainOptions) -> io::Result<()> {
+fn solveFileSimp(mut solver : minisat::simp::SimpSolver, options : MainOptions) -> io::Result<()> {
     if !options.pre { solver.eliminate(true); }
     let initial_time = time::precise_time_s();
 
@@ -335,4 +332,3 @@ fn writeResultTo<W : io::Write>(stream : &mut W, backward_subst : &VarMap<i32>, 
         }
     }
 }
-

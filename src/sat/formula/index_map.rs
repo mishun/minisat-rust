@@ -9,7 +9,7 @@ pub type LitMap<V> = IdxMap<Lit, V>;
 pub type VarHeap = IdxHeap<Var>;
 
 
-trait Idx {
+pub trait Idx {
     fn idx(&self) -> usize;
     fn unidx(usize) -> Self;
 }
@@ -39,7 +39,7 @@ impl Idx for Lit {
 }
 
 
-struct IdxMap<K : Idx, V> {
+pub struct IdxMap<K : Idx, V> {
     map : vec_map::VecMap<V>,
     ph  : marker::PhantomData<K>
 }
@@ -92,7 +92,7 @@ impl<'r, K : Idx, V> ops::IndexMut<&'r K> for IdxMap<K, V> {
 }
 
 
-struct Iter<'a, K : Idx, V : 'a> {
+pub struct Iter<'a, K : Idx, V : 'a> {
     it : vec_map::Iter<'a, V>,
     ph : marker::PhantomData<K>
 }
@@ -107,7 +107,7 @@ impl<'a, K : Idx, V : 'a> Iterator for Iter<'a, K, V> {
 }
 
 
-struct IterMut<'a, K : Idx, V : 'a> {
+pub struct IterMut<'a, K : Idx, V : 'a> {
     it : vec_map::IterMut<'a, V>,
     ph : marker::PhantomData<K>
 }
@@ -122,7 +122,7 @@ impl<'a, K : Idx, V : 'a> Iterator for IterMut<'a, K, V> {
 }
 
 
-struct IdxHeap<K : Idx> {
+pub struct IdxHeap<K : Idx> {
     heap  : Vec<K>,
     index : vec_map::VecMap<usize>
 }

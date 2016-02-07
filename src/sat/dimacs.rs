@@ -3,9 +3,8 @@ use std::io;
 use std::str;
 use std::borrow::Borrow;
 use std::collections::{HashSet, HashMap};
-use minisat::formula::{Var, Lit};
-use minisat::formula::index_map::VarMap;
-use minisat::Solver;
+use sat::formula::{Var, Lit, VarMap};
+use sat::Solver;
 
 
 pub fn write<W : io::Write, S : Solver>(_ : &mut W, _ : &S) -> io::Result<()> {

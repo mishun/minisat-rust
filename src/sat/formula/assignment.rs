@@ -11,8 +11,7 @@ pub const GroundLevel : DecisionLevel = DecisionLevel(0);
 
 impl DecisionLevel {
     pub fn offset(&self) -> usize {
-        let DecisionLevel(level) = *self;
-        level
+        self.0
     }
 }
 

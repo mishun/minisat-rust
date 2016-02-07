@@ -1,15 +1,8 @@
-use minisat::formula::{Var, Lit};
-use minisat::formula::index_map::VarMap;
+use sat::formula::{Var, Lit, VarMap};
 
-pub mod decision_heuristic;
-pub mod formula;
 pub mod dimacs;
-mod random;
-pub mod solver;
-mod watches;
-mod util;
-pub mod conflict;
-pub mod clause_db;
+pub mod formula;
+pub mod minisat;
 
 
 pub enum PartialResult {

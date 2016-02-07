@@ -1,14 +1,18 @@
 use std::borrow::Borrow;
 use std::default::Default;
-use std::collections::vec_deque::VecDeque;
-use std::mem;
-use minisat::{TotalResult, PartialResult, Solver};
-use minisat::formula::{Var, Lit};
-use minisat::formula::assignment::*;
-use minisat::formula::clause::*;
-use minisat::formula::index_map::{VarMap, LitMap, VarHeap};
-use minisat::formula::util::*;
+use sat::{TotalResult, PartialResult, Solver};
+use sat::formula::{Var, Lit, VarMap};
+use sat::formula::assignment::*;
+use sat::formula::clause::*;
+use sat::formula::util::*;
 use super::CoreSolver;
+use self::elim_clauses::*;
+use self::elim_queue::*;
+use self::subsumption_queue::*;
+
+mod elim_clauses;
+mod elim_queue;
+mod subsumption_queue;
 
 
 pub struct Settings {
@@ -24,67 +28,6 @@ impl Default for Settings {
             simp         : Default::default(),
             extend_model : true
         }
-    }
-}
-
-
-struct ElimQueue {
-    heap  : VarHeap,
-    n_occ : LitMap<i32>
-}
-
-impl ElimQueue {
-    pub fn new() -> ElimQueue {
-        ElimQueue {
-            heap  : VarHeap::new(),
-            n_occ : LitMap::new()
-        }
-    }
-
-    pub fn initVar(&mut self, v : Var) {
-        self.n_occ.insert(&v.posLit(), 0);
-        self.n_occ.insert(&v.negLit(), 0);
-
-        let ref n_occ = self.n_occ;
-        self.heap.insert(v, |a, b| { Self::before(n_occ, a, b) });
-    }
-
-    #[inline]
-    fn before(n_occ : &LitMap<i32>, a : &Var, b : &Var) -> bool {
-        let costA = (n_occ[&a.posLit()] as u64) * (n_occ[&a.negLit()] as u64);
-        let costB = (n_occ[&b.posLit()] as u64) * (n_occ[&b.negLit()] as u64);
-        costA < costB
-    }
-
-    #[inline]
-    pub fn len(&self) -> usize {
-        self.heap.len()
-    }
-
-    fn updateElimHeap(&mut self, v : Var, var_status : &VarMap<VarStatus>, assigns : &Assignment) {
-        let ref n_occ = self.n_occ;
-        if self.heap.contains(&v) {
-            self.heap.update(&v, |a, b| { Self::before(n_occ, a, b) });
-        } else if var_status[&v].frozen == 0 && var_status[&v].eliminated == 0 && assigns.isUndef(v) {
-            self.heap.insert(v, |a, b| { Self::before(n_occ, a, b) });
-        }
-    }
-
-    pub fn clear(&mut self) {
-        self.heap.clear();
-    }
-
-    pub fn bumpLitOcc(&mut self, lit : &Lit, delta : i32) {
-        self.n_occ[lit] += delta;
-
-        let ref n_occ = self.n_occ;
-        self.heap.update(&lit.var(), |a, b| { Self::before(n_occ, a, b) });
-    }
-
-    pub fn pop(&mut self) -> Option<Var>
-    {
-        let ref n_occ = self.n_occ;
-        self.heap.pop(|a, b| { Self::before(n_occ, a, b) })
     }
 }
 
@@ -294,11 +237,6 @@ impl Default for SimpSettings {
 }
 
 
-struct VarStatus {
-    frozen     : i8,
-    eliminated : i8
-}
-
 struct Simplificator {
     settings          : SimpSettings,
 
@@ -403,7 +341,7 @@ impl Simplificator {
 
     fn eliminate(&mut self, core : &mut CoreSolver, elimclauses : &mut ElimClauses) -> bool {
         // Main simplification loop:
-        'cleanup: while self.n_touched > 0 || self.subsumption_queue.bwdsub_assigns < core.assigns.numberOfAssigns() || self.elim.len() > 0 {
+        'cleanup: while self.n_touched > 0 || self.subsumption_queue.assignsLeft(&core.assigns) > 0 || self.elim.len() > 0 {
             self.gatherTouchedClauses(&mut core.db.ca);
 
             if !self.backwardSubsumptionCheck(core, true) {
@@ -413,7 +351,7 @@ impl Simplificator {
 
             // Empty elim_heap and return immediately on user-interrupt:
             if core.budget.interrupted() {
-                assert!(self.subsumption_queue.bwdsub_assigns == core.assigns.numberOfAssigns());
+                assert!(self.subsumption_queue.assignsLeft(&core.assigns) == 0);
                 assert!(self.subsumption_queue.len() == 0);
                 assert!(self.n_touched == 0);
                 self.elim.clear();
@@ -603,7 +541,7 @@ impl Simplificator {
 
         if verbose {
             trace!("BWD-SUB: queue = {}, trail = {}", self.subsumption_queue.len()
-                                                    , core.assigns.numberOfAssigns() - self.subsumption_queue.bwdsub_assigns);
+                                                    , self.subsumption_queue.assignsLeft(&core.assigns));
         }
 
         let mut cnt = 0u64;
@@ -750,163 +688,4 @@ fn asymmetricBranching(core : &mut CoreSolver, v : Var, cr : ClauseRef) -> Optio
     let res = core.watches.propagate(&mut core.db.ca, &mut core.assigns);
     core.cancelUntil(GroundLevel);
     res.map(|_| l)
-}
-
-
-struct SubsumptionQueue {
-    subsumption_queue : VecDeque<ClauseRef>,
-    bwdsub_assigns    : usize
-}
-
-enum SubsumptionJob {
-    Clause(ClauseRef),
-    Assign(Lit)
-}
-
-impl SubsumptionQueue {
-    pub fn new() -> Self {
-        SubsumptionQueue { subsumption_queue : VecDeque::new()
-                         , bwdsub_assigns    : 0
-                         }
-    }
-
-    pub fn pop(&mut self, ca : &ClauseAllocator, assigns : &Assignment) -> Option<SubsumptionJob> {
-        loop {
-            match self.subsumption_queue.pop_front() {
-                Some(cr) => {
-                    if !ca.isDeleted(cr) {
-                        return Some(SubsumptionJob::Clause(cr));
-                    }
-                }
-
-                None if self.bwdsub_assigns < assigns.numberOfAssigns() => {
-                    let lit = assigns.assignAt(self.bwdsub_assigns);
-                    self.bwdsub_assigns += 1;
-                    return Some(SubsumptionJob::Assign(lit));
-                }
-
-                None => {
-                    return None;
-                }
-            }
-        }
-    }
-
-    pub fn push(&mut self, cr : ClauseRef) {
-        self.subsumption_queue.push_back(cr);
-    }
-
-    pub fn len(&self) -> usize {
-        self.subsumption_queue.len()
-    }
-
-    pub fn clear(&mut self, assigns : &Assignment) {
-        self.subsumption_queue.clear();
-        self.bwdsub_assigns = assigns.numberOfAssigns();
-    }
-
-    pub fn remarkQueued(&mut self, ca : &mut ClauseAllocator, src : u32, dst : u32) {
-        for cr in self.subsumption_queue.iter() {
-            let c = ca.edit(*cr);
-            if c.mark() == src {
-                c.setMark(dst);
-            }
-        }
-    }
-
-    pub fn relocGC(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {
-        self.subsumption_queue.retain(|cr| { !from.isDeleted(*cr) });
-        for cr in self.subsumption_queue.iter_mut() {
-            *cr = from.relocTo(to, *cr);
-        }
-    }
-}
-
-
-struct ElimClauses {
-    extend_model : bool,
-    literals     : Vec<Lit>,
-    sizes        : Vec<usize>
-}
-
-impl ElimClauses {
-    pub fn new(extend_model : bool) -> ElimClauses {
-        ElimClauses { extend_model : extend_model
-                    , literals     : Vec::new()
-                    , sizes        : Vec::new()
-                    }
-    }
-
-    pub fn mkElimUnit(&mut self, x : Lit) {
-        self.literals.push(x);
-        self.sizes.push(1);
-    }
-
-    pub fn mkElimClause(&mut self, v : Var, c : &Clause) {
-        let first = self.literals.len();
-
-        // Copy clause to elimclauses-vector. Remember position where the
-        // variable 'v' occurs:
-        let mut v_pos = first;
-        let mut v_found = false;
-        for lit in c.iter() {
-            self.literals.push(lit);
-            if lit.var() == v {
-                v_found = true;
-            } else if !v_found {
-                v_pos += 1;
-            }
-        }
-        assert!(v_found);
-
-        // Swap the first literal with the 'v' literal, so that the literal
-        // containing 'v' will occur first in the clause:
-        self.literals.swap(first, v_pos);
-
-        // Store the length of the clause last:
-        self.sizes.push(c.len());
-    }
-
-    pub fn extendModel(&self, model : &mut VarMap<bool>) {
-        if !self.extend_model { return; }
-
-        let mut i = self.literals.len();
-        let mut cl = self.sizes.len();
-        while cl > 0 && i > 0 {
-            cl -= 1;
-            let mut j = self.sizes[cl];
-            assert!(j > 0);
-
-            i -= 1;
-            let mut skip = false;
-            while j > 1 {
-                let x = self.literals[i];
-                match model.get(&x.var()) {
-                    Some(s) if *s == x.sign() => {}
-                    _                         => { skip = true; break; }
-                }
-
-                j -= 1;
-                i -= 1;
-            }
-
-            if !skip {
-                let x = self.literals[i];
-                model.insert(&x.var(), !x.sign());
-            }
-
-            if i > j - 1 {
-                i -= j - 1;
-            } else {
-                i = 0
-            }
-        }
-    }
-
-    pub fn logSize(&self) {
-        let sz = self.literals.len() + self.sizes.len();
-        if sz > 0 {
-            info!("|  Eliminated clauses:     {:10.2} Mb                                      |", ((sz * mem::size_of::<u32>()) as f64) / (1024.0 * 1024.0));
-        }
-    }
 }

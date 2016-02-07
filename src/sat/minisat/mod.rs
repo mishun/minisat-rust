@@ -1,20 +1,22 @@
 extern crate time;
-
 use std::default::Default;
-use std::sync::atomic;
-use minisat::{PartialResult, TotalResult, Solver};
-use minisat::formula::{Var, Lit};
-use minisat::formula::clause::*;
-use minisat::formula::assignment::*;
-use minisat::formula::index_map::LitMap;
-use minisat::clause_db::*;
-use minisat::conflict::*;
-use minisat::decision_heuristic::*;
-use minisat::watches::*;
-use minisat::util;
+use sat::{PartialResult, TotalResult, Solver};
+use sat::formula::{Var, Lit, LitMap};
+use sat::formula::clause::*;
+use sat::formula::assignment::*;
+use self::clause_db::*;
+use self::conflict::{AnalyzeContext, Seen, Conflict};
+pub use self::conflict::CCMinMode;
+use self::decision_heuristic::{DecisionHeuristicSettings, DecisionHeuristic};
+pub use self::decision_heuristic::PhaseSaving;
 
-
+mod budget;
+mod clause_db;
+mod conflict;
+mod decision_heuristic;
 pub mod simp;
+mod util;
+mod watches;
 
 
 pub struct Settings {
@@ -127,38 +129,6 @@ impl LearningStrategy {
 }
 
 
-// Resource contraints:
-struct Budget {
-    conflict_budget    : i64, // -1 means no budget.
-    propagation_budget : i64, // -1 means no budget.
-    asynch_interrupt   : atomic::AtomicBool
-}
-
-impl Budget {
-    pub fn new() -> Budget {
-        Budget { conflict_budget    : -1
-               , propagation_budget : -1
-               , asynch_interrupt   : atomic::AtomicBool::new(false)
-               }
-    }
-
-    pub fn within(&self, conflicts : u64, propagations : u64) -> bool {
-        !self.asynch_interrupt.load(atomic::Ordering::Relaxed) &&
-            (self.conflict_budget    < 0 || conflicts < self.conflict_budget as u64) &&
-            (self.propagation_budget < 0 || propagations < self.propagation_budget as u64)
-    }
-
-    pub fn interrupted(&self) -> bool {
-        self.asynch_interrupt.load(atomic::Ordering::Relaxed)
-    }
-
-    pub fn off(&mut self) {
-        self.conflict_budget = -1;
-        self.propagation_budget = -1;
-    }
-}
-
-
 struct SimplifyGuard {
     simpDB_assigns : Option<usize>, // Number of top-level assignments since last execution of 'simplify()'.
     simpDB_props   : u64
@@ -221,14 +191,14 @@ pub struct CoreSolver {
     stats         : Stats,                  // Statistics: (read-only member variable)
     db            : ClauseDB,
     assigns       : Assignment,             // The current assignments.
-    watches       : Watches,                // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
+    watches       : watches::Watches,       // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
     heur          : DecisionHeuristic,
     ok            : bool,                   // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
     simp          : SimplifyGuard,
     released_vars : Vec<Var>,
     analyze       : AnalyzeContext,
     learnt        : LearningStrategy,
-    budget        : Budget
+    budget        : budget::Budget
 }
 
 impl Solver for CoreSolver {
@@ -301,14 +271,14 @@ impl CoreSolver {
                    , stats         : Stats::new()
                    , db            : ClauseDB::new(settings.db)
                    , assigns       : Assignment::new()
-                   , watches       : Watches::new()
+                   , watches       : watches::Watches::new()
                    , heur          : DecisionHeuristic::new(settings.heur)
                    , simp          : SimplifyGuard::new()
                    , ok            : true
                    , released_vars : Vec::new()
                    , analyze       : AnalyzeContext::new(settings.ccmin_mode)
                    , learnt        : LearningStrategy::new(settings.learnt)
-                   , budget        : Budget::new()
+                   , budget        : budget::Budget::new()
                    }
     }
 

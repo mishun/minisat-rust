@@ -1,9 +1,8 @@
-use minisat::formula::{Var, Lit};
-use minisat::formula::clause::*;
-use minisat::formula::assignment::*;
-use minisat::formula::index_map::{VarMap, LitMap};
-use minisat::clause_db::*;
-use minisat::decision_heuristic::*;
+use sat::formula::{Var, Lit, VarMap, LitMap};
+use sat::formula::clause::ClauseRef;
+use sat::formula::assignment::*;
+use sat::minisat::clause_db::*;
+use sat::minisat::decision_heuristic::*;
 
 
 #[derive(PartialEq, Eq)]

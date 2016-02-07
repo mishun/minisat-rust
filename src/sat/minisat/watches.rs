@@ -1,7 +1,6 @@
-use minisat::formula::{Lit, Var};
-use minisat::formula::index_map::LitMap;
-use minisat::formula::clause::*;
-use minisat::formula::assignment::*;
+use sat::formula::{Lit, Var, LitMap};
+use sat::formula::assignment::Assignment;
+use sat::formula::clause::*;
 
 
 #[derive(Clone, Copy)]

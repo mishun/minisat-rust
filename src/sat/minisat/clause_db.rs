@@ -1,9 +1,9 @@
 use std::cmp::Ordering;
-use minisat::formula::Lit;
-use minisat::formula::assignment::*;
-use minisat::formula::clause::*;
-use minisat::formula::util::*;
-use minisat::watches::*;
+use sat::formula::Lit;
+use sat::formula::assignment::Assignment;
+use sat::formula::clause::*;
+use sat::formula::util::*;
+use super::watches::Watches;
 
 
 pub struct ClauseDBSettings {
