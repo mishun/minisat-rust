@@ -3,6 +3,7 @@ use std::ops;
 use super::Lit;
 
 
+#[derive(Clone, Copy)]
 struct ClauseHeader {
     size      : usize,
     mark      : u32,
@@ -188,15 +189,6 @@ impl<'c> Iterator for ClauseIter<'c> {
 }
 
 
-fn clauseToVec(clause : &Clause) -> Vec<Lit> {
-    let mut v = Vec::with_capacity(clause.len());
-    for lit in clause.iter() {
-        v.push(lit);
-    }
-    v
-}
-
-
 #[derive(PartialEq, Eq, Copy, Clone)]
 pub struct ClauseRef(usize);
 
@@ -264,6 +256,23 @@ impl ClauseAllocator {
         (&self.clauses[index], ClauseRef(index))
     }
 
+    fn reloc(&mut self, src : &Clause) -> ClauseRef {
+        let use_extra = src.header.learnt | self.extra_clause_field;
+        let len = src.header.size;
+
+        let mut c = Clause {
+            header : src.header,
+            data   : src.data.clone()
+        };
+        c.header.has_extra = use_extra;
+
+        let index = self.clauses.len();
+        self.clauses.push(c);
+        self.size += ClauseAllocator::clauseSize(len, use_extra);
+
+        ClauseRef(index)
+    }
+
     pub fn free(&mut self, ClauseRef(cr) : ClauseRef) {
         let ref mut c = self.clauses[cr];
         assert!(!c.is_deleted());
@@ -277,7 +286,7 @@ impl ClauseAllocator {
         if c.header.reloced {
             c.header.data_rel.unwrap()
         } else {
-            let (_, dst) = to.alloc(clauseToVec(c).into_boxed_slice(), c.header.learnt);
+            let dst = to.reloc(c);
             c.header.reloced = true;
             c.header.data_rel = Some(dst);
             dst
