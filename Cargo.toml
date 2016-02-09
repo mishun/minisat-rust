@@ -2,14 +2,15 @@
 name = "minisat-rust"
 version = "0.0.1"
 authors = ["Alexander Mishunin <alexander.mishunin@gmail.com>"]
+repository = "https://github.com/mishun/minisat-rust.git"
 
 [profile.dev]
 opt-level = 0
 debug = true
 
 [dependencies]
-time = "*"
-vec_map = "0.4.0"
-log = "0.3.*"
-env_logger = "0.3.*"
-clap = "*"
+time = ">= 0.1.0"
+vec_map = ">= 0.4.0"
+log = ">= 0.3.0"
+env_logger = ">= 0.3.0"
+clap = ">= 2.0.0"
