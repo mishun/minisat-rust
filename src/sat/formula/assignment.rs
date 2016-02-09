@@ -76,8 +76,8 @@ impl Assignment {
     #[inline]
     pub fn numberOfGroundAssigns(&self) -> usize {
         match self.lim.first() {
-            Some(lim) => { *lim }
-            None      => { self.trail.len() }
+            Some(&lim) => { lim }
+            None       => { self.trail.len() }
         }
     }
 

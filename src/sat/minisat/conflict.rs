@@ -122,8 +122,8 @@ impl AnalyzeContext {
         self.analyze_toclear = out_learnt.clone();
         self.max_literals += out_learnt.len() as u64;
         match self.ccmin_mode {
-            CCMinMode::Deep  => { out_learnt.retain(|l| { !self.litRedundant(&db.ca, assigns, *l) }); }
-            CCMinMode::Basic => { out_learnt.retain(|l| { !self.litRedundantBasic(&db.ca, assigns, *l) }); }
+            CCMinMode::Deep  => { out_learnt.retain(|&l| { !self.litRedundant(&db.ca, assigns, l) }); }
+            CCMinMode::Basic => { out_learnt.retain(|&l| { !self.litRedundantBasic(&db.ca, assigns, l) }); }
             CCMinMode::None  => {}
         }
         self.tot_literals += out_learnt.len() as u64;

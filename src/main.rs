@@ -88,24 +88,24 @@ fn main() {
     let core_options = {
         let mut s = minisat::Settings::default();
 
-        for x in matches.value_of("var-decay").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < *x && *x < 1.0 { s.heur.var_decay = *x; }
+        for &x in matches.value_of("var-decay").and_then(|s| s.parse().ok()).iter() {
+            if 0.0 < x && x < 1.0 { s.heur.var_decay = x; }
         }
 
-        for x in matches.value_of("cla-decay").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < *x && *x < 1.0 { s.db.clause_decay = *x; }
+        for &x in matches.value_of("cla-decay").and_then(|s| s.parse().ok()).iter() {
+            if 0.0 < x && x < 1.0 { s.db.clause_decay = x; }
         }
 
-        for x in matches.value_of("rnd-freq").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 <= *x && *x <= 1.0 { s.heur.random_var_freq = *x; }
+        for &x in matches.value_of("rnd-freq").and_then(|s| s.parse().ok()).iter() {
+            if 0.0 <= x && x <= 1.0 { s.heur.random_var_freq = x; }
         }
 
-        for x in matches.value_of("rnd-seed").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < *x { s.heur.random_seed = *x; }
+        for &x in matches.value_of("rnd-seed").and_then(|s| s.parse().ok()).iter() {
+            if 0.0 < x { s.heur.random_seed = x; }
         }
 
-        for x in matches.value_of("ccmin-mode").iter() {
-            match *x {
+        for &x in matches.value_of("ccmin-mode").iter() {
+            match x {
                 "0" => { s.ccmin_mode = CCMinMode::None; }
                 "1" => { s.ccmin_mode = CCMinMode::Basic; }
                 "2" => { s.ccmin_mode = CCMinMode::Deep; }
@@ -113,8 +113,8 @@ fn main() {
             }
         }
 
-        for x in matches.value_of("phase_saving").iter() {
-            match *x {
+        for &x in matches.value_of("phase_saving").iter() {
+            match x {
                 "0" => { s.heur.phase_saving = PhaseSaving::None; }
                 "1" => { s.heur.phase_saving = PhaseSaving::Limited; }
                 "2" => { s.heur.phase_saving = PhaseSaving::Full; }
@@ -128,20 +128,20 @@ fn main() {
         if matches.is_present("luby") { s.restart.luby_restart = true; }
         if matches.is_present("no-luby") { s.restart.luby_restart = false; }
 
-        for x in matches.value_of("rfirst").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < *x { s.restart.restart_first = *x; }
+        for &x in matches.value_of("rfirst").and_then(|s| s.parse().ok()).iter() {
+            if 0.0 < x { s.restart.restart_first = x; }
         }
 
-        for x in matches.value_of("rinc").and_then(|s| s.parse().ok()).iter() {
-            if 1.0 < *x { s.restart.restart_inc = *x; }
+        for &x in matches.value_of("rinc").and_then(|s| s.parse().ok()).iter() {
+            if 1.0 < x { s.restart.restart_inc = x; }
         }
 
-        for x in matches.value_of("gc-frac").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < *x && *x <= 1.0 { s.core.garbage_frac = *x; }
+        for &x in matches.value_of("gc-frac").and_then(|s| s.parse().ok()).iter() {
+            if 0.0 < x && x <= 1.0 { s.core.garbage_frac = x; }
         }
 
-        for x in matches.value_of("min-learnts").and_then(|s| s.parse().ok()).iter() {
-            if 0 <= *x { s.learnt.min_learnts_lim = *x; }
+        for &x in matches.value_of("min-learnts").and_then(|s| s.parse().ok()).iter() {
+            if 0 <= x { s.learnt.min_learnts_lim = x; }
         }
 
         if matches.is_present("rcheck") { s.core.use_rcheck = true; }
@@ -174,20 +174,20 @@ fn main() {
             if matches.is_present("elim") { s.simp.use_elim = true; }
             if matches.is_present("no-elim") { s.simp.use_elim = false; }
 
-            for x in matches.value_of("grow").and_then(|s| s.parse().ok()).iter() {
-                s.simp.grow = *x;
+            for &x in matches.value_of("grow").and_then(|s| s.parse().ok()).iter() {
+                s.simp.grow = x;
             }
 
-            for x in matches.value_of("cl-lim").and_then(|s| s.parse().ok()).iter() {
-                if -1 <= *x { s.simp.clause_lim = *x; }
+            for &x in matches.value_of("cl-lim").and_then(|s| s.parse().ok()).iter() {
+                if -1 <= x { s.simp.clause_lim = x; }
             }
 
-            for x in matches.value_of("sub-lim").and_then(|s| s.parse().ok()).iter() {
-                if -1 <= *x { s.simp.subsumption_lim = *x; }
+            for &x in matches.value_of("sub-lim").and_then(|s| s.parse().ok()).iter() {
+                if -1 <= x { s.simp.subsumption_lim = x; }
             }
 
-            for x in matches.value_of("simp-gc-frac").and_then(|s| s.parse().ok()).iter() {
-                if 0.0 < *x && *x <= 1.0 { s.simp.simp_garbage_frac = *x; }
+            for &x in matches.value_of("simp-gc-frac").and_then(|s| s.parse().ok()).iter() {
+                if 0.0 < x && x <= 1.0 { s.simp.simp_garbage_frac = x; }
             }
 
             s

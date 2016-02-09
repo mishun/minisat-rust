@@ -102,8 +102,8 @@ impl ClauseDB {
 
         if new > 1e20 {
             self.cla_inc *= 1e-20;
-            for cri in self.learnts.iter() {
-                let c = self.ca.edit(*cri);
+            for &cri in self.learnts.iter() {
+                let c = self.ca.edit(cri);
                 let scaled = c.activity() * 1e-20;
                 c.setActivity(scaled);
             }
@@ -124,9 +124,9 @@ impl ClauseDB {
     pub fn reduce(&mut self, assigns : &mut Assignment, watches : &mut Watches) {
         {
             let ca = &self.ca;
-            self.learnts.sort_by(|rx, ry| {
-                let x = ca.view(*rx);
-                let y = ca.view(*ry);
+            self.learnts.sort_by(|&rx, &ry| {
+                let x = ca.view(rx);
+                let y = ca.view(ry);
                 if x.len() > 2 && (y.len() == 2 || x.activity() < y.activity()) {
                     Ordering::Less
                 } else {
@@ -171,7 +171,7 @@ impl ClauseDB {
         } else {
             let c = self.ca.edit(cr);
             assert!({ let (c0, c1) = c.headPair(); assigns.isUndef(c0.var()) && assigns.isUndef(c1.var()) });
-            c.retainSuffix(2, |lit| !assigns.isUnsat(*lit));
+            c.retainSuffix(2, |&lit| !assigns.isUnsat(lit));
             true
         }
     }

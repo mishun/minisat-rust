@@ -266,9 +266,9 @@ impl Simplificator {
             };
 
         // Unfreeze the assumptions that were frozen:
-        for v in extra_frozen.iter() {
-            self.var_status[v].frozen = 0;
-            self.elim.updateElimHeap(*v, &self.var_status, &core.assigns);
+        for &v in extra_frozen.iter() {
+            self.var_status[&v].frozen = 0;
+            self.elim.updateElimHeap(v, &self.var_status, &core.assigns);
         }
 
         result
@@ -344,15 +344,15 @@ impl Simplificator {
         };
 
         let mut bug = false;
-        for cr in cls.iter() {
+        for &cr in cls.iter() {
             // TODO: this mimics original MiniSat bug. Fix it?
             if bug { bug = false; continue; }
 
-            if let Some(l) = asymmetricBranching(core, v, *cr) {
-                if core.db.ca.view(*cr).len() > 2 { bug = true; }
+            if let Some(l) = asymmetricBranching(core, v, cr) {
+                if core.db.ca.view(cr).len() > 2 { bug = true; }
 
                 self.asymm_lits += 1;
-                if !self.strengthenClause(core, *cr, l) {
+                if !self.strengthenClause(core, cr, l) {
                     return false;
                 }
             }
@@ -404,10 +404,10 @@ impl Simplificator {
         let cls = self.occurs.lookup(&v, &core.db.ca).clone();
         let mut pos = Vec::new();
         let mut neg = Vec::new();
-        for cr in cls.iter() {
-            for l in core.db.ca.view(*cr).iter() {
+        for &cr in cls.iter() {
+            for l in core.db.ca.view(cr).iter() {
                 if l.var() == v {
-                    if l.sign() { neg.push(*cr); } else { pos.push(*cr); }
+                    if l.sign() { neg.push(cr); } else { pos.push(cr); }
                     break;
                 }
             }
@@ -416,10 +416,10 @@ impl Simplificator {
         // Check wether the increase in number of clauses stays within the allowed ('grow'). Moreover, no
         // clause must exceed the limit on the maximal clause size (if it is set):
         let mut cnt = 0;
-        for pr in pos.iter() {
-            for nr in neg.iter() {
+        for &pr in pos.iter() {
+            for &nr in neg.iter() {
                 self.merges += 1;
-                if let Some(resolvent) = merge(v, core.db.ca.view(*pr), core.db.ca.view(*nr)) {
+                if let Some(resolvent) = merge(v, core.db.ca.view(pr), core.db.ca.view(nr)) {
                     cnt += 1;
                     if cnt > cls.len() + self.settings.grow || (self.settings.clause_lim != -1 && (resolvent.len() as i32) > self.settings.clause_lim) {
                         return true;
@@ -434,26 +434,26 @@ impl Simplificator {
         self.eliminated_vars += 1;
 
         if pos.len() > neg.len() {
-            for cr in neg.iter() {
-                elimclauses.mkElimClause(v, core.db.ca.view(*cr));
+            for &cr in neg.iter() {
+                elimclauses.mkElimClause(v, core.db.ca.view(cr));
             }
             elimclauses.mkElimUnit(v.posLit());
         } else {
-            for cr in pos.iter() {
-                elimclauses.mkElimClause(v, core.db.ca.view(*cr));
+            for &cr in pos.iter() {
+                elimclauses.mkElimClause(v, core.db.ca.view(cr));
             }
             elimclauses.mkElimUnit(v.negLit());
         }
 
-        for cr in cls.iter() {
-            self.removeClause(core, *cr);
+        for &cr in cls.iter() {
+            self.removeClause(core, cr);
         }
 
         // Produce clauses in cross product:
-        for pr in pos.iter() {
-            for nr in neg.iter() {
+        for &pr in pos.iter() {
+            for &nr in neg.iter() {
                 self.merges += 1;
-                if let Some(resolvent) = merge(v, core.db.ca.view(*pr), core.db.ca.view(*nr)) {
+                if let Some(resolvent) = merge(v, core.db.ca.view(pr), core.db.ca.view(nr)) {
                     if !self.addClause(core, resolvent.borrow()) {
                         return false;
                     }
@@ -498,19 +498,19 @@ impl Simplificator {
 
             match job {
                 SubsumptionJob::Assign(unit) => {
-                    for cj in self.occurs.lookup(&unit.var(), &core.db.ca).clone().iter() {
-                        if { let c = core.db.ca.view(*cj); c.mark() == 0 && (self.settings.subsumption_lim == -1 || (c.len() as i32) < self.settings.subsumption_lim) } {
-                            match unitSubsumes(unit, core.db.ca.view(*cj)) {
+                    for &cj in self.occurs.lookup(&unit.var(), &core.db.ca).clone().iter() {
+                        if { let c = core.db.ca.view(cj); c.mark() == 0 && (self.settings.subsumption_lim == -1 || (c.len() as i32) < self.settings.subsumption_lim) } {
+                            match unitSubsumes(unit, core.db.ca.view(cj)) {
                                 Subsumes::Different  => {}
 
                                 Subsumes::Exact      => {
                                     subsumed += 1;
-                                    self.removeClause(core, *cj);
+                                    self.removeClause(core, cj);
                                 }
 
                                 Subsumes::LitSign(l) => {
                                     deleted_literals += 1;
-                                    if !self.strengthenClause(core, *cj, !l) {
+                                    if !self.strengthenClause(core, cj, !l) {
                                         return false;
                                     }
                                 }
@@ -532,23 +532,23 @@ impl Simplificator {
                         best
                     };
 
-                    for cj in self.occurs.lookup(&best, &core.db.ca).clone().iter() {
+                    for &cj in self.occurs.lookup(&best, &core.db.ca).clone().iter() {
                         if core.db.ca.isDeleted(cr) {
                             break;
                         }
 
-                        if *cj != cr && { let c = core.db.ca.view(*cj); c.mark() == 0 && (self.settings.subsumption_lim == -1 || (c.len() as i32) < self.settings.subsumption_lim) } {
-                            match subsumes(core.db.ca.view(cr), core.db.ca.view(*cj)) {
+                        if cj != cr && { let c = core.db.ca.view(cj); c.mark() == 0 && (self.settings.subsumption_lim == -1 || (c.len() as i32) < self.settings.subsumption_lim) } {
+                            match subsumes(core.db.ca.view(cr), core.db.ca.view(cj)) {
                                 Subsumes::Different  => {}
 
                                 Subsumes::Exact      => {
                                     subsumed += 1;
-                                    self.removeClause(core, *cj);
+                                    self.removeClause(core, cj);
                                 }
 
                                 Subsumes::LitSign(l) => {
                                     deleted_literals += 1;
-                                    if !self.strengthenClause(core, *cj, !l) {
+                                    if !self.strengthenClause(core, cj, !l) {
                                         return false;
                                     }
                                 }
@@ -569,10 +569,10 @@ impl Simplificator {
 
         for (v, touched) in self.touched.iter_mut() {
             if *touched != 0 {
-                for cr in self.occurs.lookup(&v, ca) {
-                    let c = ca.edit(*cr);
+                for &cr in self.occurs.lookup(&v, ca) {
+                    let c = ca.edit(cr);
                     if c.mark() == 0 {
-                        self.subsumption_queue.push(*cr);
+                        self.subsumption_queue.push(cr);
                         c.setMark(2);
                     }
                 }

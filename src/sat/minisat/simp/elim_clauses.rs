@@ -62,7 +62,7 @@ impl ElimClauses {
             while j > 1 {
                 let x = self.literals[i];
                 match model.get(&x.var()) {
-                    Some(s) if *s == x.sign() => {}
+                    Some(&s) if s == x.sign() => {}
                     _                         => { skip = true; break; }
                 }
 

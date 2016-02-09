@@ -21,9 +21,9 @@ pub fn parse<R : io::Read, S : Solver>(stream : &mut R, solver : &mut S, validat
 
 
 pub fn writeModel<W : io::Write>(stream : &mut W, backward_subst : &VarMap<i32>, model : &VarMap<bool>) -> io::Result<()> {
-    for (var, val) in model.iter() {
+    for (var, &val) in model.iter() {
         let var_id = backward_subst[&var];
-        try!(write!(stream, "{} ", if *val { var_id } else { -var_id }));
+        try!(write!(stream, "{} ", if val { var_id } else { -var_id }));
     }
     try!(writeln!(stream, "0"));
     Ok(())
@@ -32,10 +32,10 @@ pub fn writeModel<W : io::Write>(stream : &mut W, backward_subst : &VarMap<i32>,
 
 pub fn validateModel<R : io::Read>(stream : &mut R, backward_subst : &VarMap<i32>, model : &VarMap<bool>) -> io::Result<bool> {
     let mut lits = HashSet::new();
-    for (var, value) in model.iter() {
+    for (var, &value) in model.iter() {
         let lit_id = {
             let var_id = backward_subst[&var];
-            if *value { var_id } else { -var_id }
+            if value { var_id } else { -var_id }
         };
 
         lits.insert(lit_id);
@@ -78,7 +78,7 @@ impl<'s, S : Solver> Subst<'s, S> {
     }
 
     pub fn addClause(&mut self, raw : Vec<i32>) {
-        let lits : Vec<Lit> = raw.iter().map(|lit_id| { self.litById(*lit_id) }).collect();
+        let lits : Vec<Lit> = raw.iter().map(|&lit_id| { self.litById(lit_id) }).collect();
         self.solver.addClause(lits.borrow());
     }
 

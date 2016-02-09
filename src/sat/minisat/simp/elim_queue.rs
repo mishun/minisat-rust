@@ -97,13 +97,13 @@ impl OccLists {
     }
 
     pub fn removeOcc(&mut self, v : &Var, x : ClauseRef) {
-        self.occs[v].occs.retain(|y| { *y != x })
+        self.occs[v].occs.retain(|&y| { y != x })
     }
 
     pub fn lookup(&mut self, v : &Var, ca : &ClauseAllocator) -> &Vec<ClauseRef> {
         let ol = &mut self.occs[v];
         if ol.dirty {
-            ol.occs.retain(|cr| { !ca.isDeleted(*cr) });
+            ol.occs.retain(|&cr| { !ca.isDeleted(cr) });
             ol.dirty = false;
         }
         &ol.occs
@@ -123,7 +123,7 @@ impl OccLists {
     pub fn relocGC(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {
         for (_, ol) in self.occs.iter_mut() {
             if ol.dirty {
-                ol.occs.retain(|cr| { !from.isDeleted(*cr) });
+                ol.occs.retain(|&cr| { !from.isDeleted(cr) });
                 ol.dirty = false;
             }
 

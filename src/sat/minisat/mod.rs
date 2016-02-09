@@ -297,15 +297,15 @@ impl CoreSolver {
             // Check if clause is satisfied and remove false/duplicate literals:
             ps.sort();
             ps.dedup();
-            ps.retain(|lit| { !self.assigns.isUnsat(*lit) });
+            ps.retain(|&lit| { !self.assigns.isUnsat(lit) });
 
             {
                 let mut prev = None;
-                for lit in ps.iter() {
-                    if self.assigns.isSat(*lit) || prev == Some(!*lit) {
+                for &lit in ps.iter() {
+                    if self.assigns.isSat(lit) || prev == Some(!lit) {
                         return AddClause::Consumed;
                     }
-                    prev = Some(*lit);
+                    prev = Some(lit);
                 }
             }
 
@@ -370,8 +370,8 @@ impl CoreSolver {
             }
 
             // Released variables are now ready to be reused:
-            for v in self.released_vars.iter() {
-                self.assigns.freeVar(*v);
+            for &v in self.released_vars.iter() {
+                self.assigns.freeVar(v);
             }
             self.released_vars.clear();
         }
@@ -573,10 +573,10 @@ fn isImplied(core : &mut CoreSolver, c : &[Lit]) -> bool {
     assert!(core.assigns.isGroundLevel());
 
     core.assigns.newDecisionLevel();
-    for lit in c.iter() {
-        match core.assigns.ofLit(*lit) {
+    for &lit in c.iter() {
+        match core.assigns.ofLit(lit) {
             LitVal::True  => { core.cancelUntil(GroundLevel); return true; }
-            LitVal::Undef => { core.assigns.assignLit(!*lit, None); }
+            LitVal::Undef => { core.assigns.assignLit(!lit, None); }
             LitVal::False => {}
         }
     }

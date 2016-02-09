@@ -61,8 +61,8 @@ impl SubsumptionQueue {
     }
 
     pub fn remarkQueued(&mut self, ca : &mut ClauseAllocator, src : u32, dst : u32) {
-        for cr in self.subsumption_queue.iter() {
-            let c = ca.edit(*cr);
+        for &cr in self.subsumption_queue.iter() {
+            let c = ca.edit(cr);
             if c.mark() == src {
                 c.setMark(dst);
             }
@@ -70,7 +70,7 @@ impl SubsumptionQueue {
     }
 
     pub fn relocGC(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {
-        self.subsumption_queue.retain(|cr| { !from.isDeleted(*cr) });
+        self.subsumption_queue.retain(|&cr| { !from.isDeleted(cr) });
         for cr in self.subsumption_queue.iter_mut() {
             *cr = from.relocTo(to, *cr);
         }
