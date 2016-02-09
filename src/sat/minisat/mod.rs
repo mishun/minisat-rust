@@ -526,7 +526,7 @@ impl CoreSolver {
                                 self.assigns.newDecisionLevel();
                             }
                             LitVal::False => {
-                                let conflict = self.analyze.analyzeFinal(&self.db, &self.assigns, !p);
+                                let conflict = self.analyze.analyzeFinal(&self.db.ca, &self.assigns, !p);
                                 return SearchResult::AssumpsConfl(conflict);
                             }
                             LitVal::Undef => {

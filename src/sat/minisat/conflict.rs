@@ -1,15 +1,19 @@
 use sat::formula::{Var, Lit, VarMap, LitMap};
-use sat::formula::clause::ClauseRef;
+use sat::formula::clause::*;
 use sat::formula::assignment::*;
 use sat::minisat::clause_db::*;
 use sat::minisat::decision_heuristic::*;
 
 
 #[derive(PartialEq, Eq)]
-pub enum CCMinMode { None, Basic, Deep }
+pub enum CCMinMode {
+    None,
+    Basic,
+    Deep
+}
 
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 #[repr(u8)]
 pub enum Seen {
     Undef     = 0,
@@ -60,7 +64,7 @@ impl AnalyzeContext {
     //     * If out_learnt.size() > 1 then 'out_learnt[1]' has the greatest decision level of the
     //       rest of literals. There may be others from the same level though.
     //
-    pub fn analyze(&mut self, db : &mut ClauseDB, heur : &mut DecisionHeuristic, assigns : &Assignment, mut confl : ClauseRef) -> Conflict {
+    pub fn analyze(&mut self, db : &mut ClauseDB, heur : &mut DecisionHeuristic, assigns : &Assignment, confl0 : ClauseRef) -> Conflict {
         if assigns.isGroundLevel() {
             return Conflict::Ground;
         }
@@ -69,19 +73,17 @@ impl AnalyzeContext {
         let mut out_learnt = Vec::new();
 
         {
-            let mut pathC = 0i32;
-            let mut p = None;
+            let mut confl = confl0;
+            let mut pathC = 0;
             let mut index = assigns.numberOfAssigns();
-
             loop {
                 db.bumpActivity(confl);
 
-                for q in db.ca.view(confl).iterFrom(match p { None => 0, Some(_) => 1 }) {
+                for q in db.ca.view(confl).iterFrom(if confl == confl0 { 0 } else { 1 }) {
                     let v = q.var();
                     if self.seen[&v] == Seen::Undef && assigns.vardata(v).level > GroundLevel {
-                        heur.bumpActivity(&v);
-
                         self.seen[&v] = Seen::Source;
+                        heur.bumpActivity(&v);
                         if assigns.vardata(v).level >= assigns.decisionLevel() {
                             pathC += 1;
                         } else {
@@ -100,10 +102,12 @@ impl AnalyzeContext {
                 };
 
                 self.seen[&pl.var()] = Seen::Undef;
-                p = Some(pl);
 
                 pathC -= 1;
-                if pathC <= 0 { break; }
+                if pathC <= 0 {
+                    out_learnt.insert(0, !pl);
+                    break;
+                }
 
                 confl = {
                     let reason = assigns.vardata(pl.var()).reason;
@@ -111,8 +115,6 @@ impl AnalyzeContext {
                     reason.unwrap()
                 };
             }
-
-            out_learnt.insert(0, !p.unwrap());
         }
 
 
@@ -120,8 +122,8 @@ impl AnalyzeContext {
         self.analyze_toclear = out_learnt.clone();
         self.max_literals += out_learnt.len() as u64;
         match self.ccmin_mode {
-            CCMinMode::Deep  => { out_learnt.retain(|l| { assigns.vardata(l.var()).reason.is_none() || !self.litRedundant(db, assigns, *l) }); }
-            CCMinMode::Basic => { out_learnt.retain(|l| { self.preserveLitBasic(db, assigns, l.var()) }); }
+            CCMinMode::Deep  => { out_learnt.retain(|l| { !self.litRedundant(&db.ca, assigns, *l) }); }
+            CCMinMode::Basic => { out_learnt.retain(|l| { !self.litRedundantBasic(&db.ca, assigns, *l) }); }
             CCMinMode::None  => {}
         }
         self.tot_literals += out_learnt.len() as u64;
@@ -151,71 +153,67 @@ impl AnalyzeContext {
         }
     }
 
-    fn preserveLitBasic(&self, db : &ClauseDB, assigns : &Assignment, x : Var) -> bool {
-        match assigns.vardata(x).reason {
-            None     => { true }
+    fn litRedundantBasic(&self, ca : &ClauseAllocator, assigns : &Assignment, literal : Lit) -> bool {
+        match assigns.vardata(literal.var()).reason {
+            None     => { false }
             Some(cr) => {
-                for lit in db.ca.view(cr).iterFrom(1) {
+                for lit in ca.view(cr).iterFrom(1) {
                     let y = lit.var();
                     if self.seen[&y] == Seen::Undef && assigns.vardata(y).level > GroundLevel {
-                        return true;
+                        return false;
                     }
                 }
-                false
+                true
             }
         }
     }
 
     // Check if 'p' can be removed from a conflict clause.
-    fn litRedundant(&mut self, db : &ClauseDB, assigns : &Assignment, mut p : Lit) -> bool {
-        assert!(self.seen[&p.var()] == Seen::Undef || self.seen[&p.var()] == Seen::Source);
+    fn litRedundant(&mut self, ca : &ClauseAllocator, assigns : &Assignment, literal : Lit) -> bool {
+        assert!({ let s = self.seen[&literal.var()]; s == Seen::Undef || s == Seen::Source });
 
-        let mut stack = Vec::new();
-        let mut i = 0;
-        loop {
-            i += 1;
+        let mut analyze_stack =
+            match assigns.vardata(literal.var()).reason {
+                None     => { return false; }
+                Some(cr) => { vec![(literal, ca.view(cr).iterFrom(1))] }
+            };
 
-            assert!(assigns.vardata(p.var()).reason.is_some());
-            let c = db.ca.view(assigns.vardata(p.var()).reason.unwrap());
+        while let Some((p, mut it)) = analyze_stack.pop() {
+            match it.next() {
+                Some(l) => {
+                    analyze_stack.push((p, it));
+                    let ref vd = assigns.vardata(l.var());
+                    let seen = self.seen[&l.var()];
 
-            if i < c.len() {
-                // Checking 'p'-parents 'l':
-                let l = c[i];
+                    // Variable at level 0 or previously removable:
+                    if vd.level == GroundLevel || seen == Seen::Source || seen == Seen::Removable {
+                        continue;
+                    }
 
-                // Variable at level 0 or previously removable:
-                if assigns.vardata(l.var()).level == GroundLevel || self.seen[&l.var()] == Seen::Source || self.seen[&l.var()] == Seen::Removable {
-                    continue;
-                }
+                    match vd.reason {
+                        // Recursively check 'l':
+                        Some(cr) if seen == Seen::Undef => {
+                            analyze_stack.push((l, ca.view(cr).iterFrom(1)));
+                        }
 
-                // Check variable can not be removed for some local reason:
-                if assigns.vardata(l.var()).reason.is_none() || self.seen[&l.var()] == Seen::Failed {
-                    stack.push((0, p));
-                    for &(_, l) in stack.iter() {
-                        if self.seen[&l.var()] == Seen::Undef {
-                            self.seen[&l.var()] = Seen::Failed;
-                            self.analyze_toclear.push(l);
+                        // Check variable can not be removed for some local reason:
+                        _                                => {
+                            for &(l, _) in analyze_stack.iter() {
+                                if self.seen[&l.var()] == Seen::Undef {
+                                    self.seen[&l.var()] = Seen::Failed;
+                                    self.analyze_toclear.push(l);
+                                }
+                            }
+                            return false;
                         }
                     }
-                    return false;
                 }
 
-                // Recursively check 'l':
-                stack.push((i, p));
-                i  = 0;
-                p  = l;
-            } else {
-                // Finished with current element 'p' and reason 'c':
-                if self.seen[&p.var()] == Seen::Undef {
-                    self.seen[&p.var()] = Seen::Removable;
-                    self.analyze_toclear.push(p);
-                }
-
-                match stack.pop() {
-                    None           => { break; } // Terminate with success if stack is empty:
-                    Some((ni, nl)) => {
-                        // Continue with top element on stack:
-                        i = ni;
-                        p = nl;
+                None    => {
+                    // Finished with current element 'p' and reason 'c':
+                    if self.seen[&p.var()] == Seen::Undef {
+                        self.seen[&p.var()] = Seen::Removable;
+                        self.analyze_toclear.push(p);
                     }
                 }
             }
@@ -228,7 +226,7 @@ impl AnalyzeContext {
     //   Specialized analysis procedure to express the final conflict in terms of assumptions.
     //   Calculates the (possibly empty) set of assumptions that led to the assignment of 'p', and
     //   stores the result in 'out_conflict'.
-    pub fn analyzeFinal(&mut self, db : &ClauseDB, assigns : &Assignment, p : Lit) -> LitMap<()> {
+    pub fn analyzeFinal(&mut self, ca : &ClauseAllocator, assigns : &Assignment, p : Lit) -> LitMap<()> {
         let mut out_conflict = LitMap::new();
         out_conflict.insert(&p, ());
 
@@ -242,7 +240,7 @@ impl AnalyzeContext {
                     }
 
                     Some(cr) => {
-                        for lit in db.ca.view(cr).iterFrom(1) {
+                        for lit in ca.view(cr).iterFrom(1) {
                             let v = lit.var();
                             if assigns.vardata(v).level > GroundLevel {
                                 self.seen[&v] = Seen::Source;
