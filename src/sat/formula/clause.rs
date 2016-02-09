@@ -1,5 +1,7 @@
 use std::fmt;
+use std::marker;
 use std::ops;
+use std::ptr;
 use super::Lit;
 
 
@@ -81,24 +83,44 @@ impl Clause {
 
     #[inline]
     pub fn pullLiteral<F : FnMut(Lit) -> bool>(&mut self, place : usize, mut f : F) -> Option<Lit> {
-        for k in (place + 1) .. self.header.size {
-            let lit = self.data[k];
-            if f(lit) {
-                self.data.swap(place, k);
-                return Some(lit);
+        unsafe {
+            let p = self.data.as_mut_ptr();
+            let src = p.offset(place as isize);
+            let end = p.offset(self.header.size as isize);
+
+            let mut ptr = src.offset(1);
+            while ptr < end {
+                if f(*ptr) {
+                    ptr::swap(ptr, src);
+                    return Some(*src);
+                }
+                ptr = ptr.offset(1);
             }
+
+            None
         }
-        None
     }
 
     #[inline]
-    pub fn iter(&self) -> ClauseIter {
-        ClauseIter { clause : self, index : 0 }
+    pub fn iter<'c>(&'c self) -> ClauseIter<'c> {
+        unsafe {
+            let p = self.data.as_ptr();
+            ClauseIter { ptr : p
+                       , end : p.offset(self.header.size as isize)
+                       , ph  : marker::PhantomData
+                       }
+        }
     }
 
     #[inline]
-    pub fn iterFrom(&self, start : usize) -> ClauseIter {
-        ClauseIter { clause : self, index : start }
+    pub fn iterFrom<'c>(&'c self, start : usize) -> ClauseIter<'c> {
+        unsafe {
+            let p = self.data.as_ptr();
+            ClauseIter { ptr : p.offset(start as isize)
+                       , end : p.offset(self.header.size as isize)
+                       , ph  : marker::PhantomData
+                       }
+        }
     }
 
     #[inline]
@@ -160,7 +182,8 @@ impl fmt::Debug for Clause {
         try!(write!(f, "("));
         let mut first = true;
         for lit in self.iter() {
-            if first { first = false; } else { try!(write!(f, " ∨ ")); }
+            if !first { try!(write!(f, " ∨ ")); }
+            first = false;
             try!(write!(f, "{:?}", lit));
         }
         write!(f, ")")
@@ -169,8 +192,9 @@ impl fmt::Debug for Clause {
 
 
 pub struct ClauseIter<'c> {
-    clause : &'c Clause,
-    index  : usize
+    ptr : *const Lit,
+    end : *const Lit,
+    ph  : marker::PhantomData<&'c Lit>
 }
 
 impl<'c> Iterator for ClauseIter<'c> {
@@ -178,12 +202,14 @@ impl<'c> Iterator for ClauseIter<'c> {
 
     #[inline]
     fn next(&mut self) -> Option<Lit> {
-        if self.index < self.clause.header.size {
-            let lit = self.clause.data[self.index];
-            self.index += 1;
-            Some(lit)
-        } else {
-            None
+        unsafe {
+            if self.ptr >= self.end {
+                None
+            } else {
+                let lit = *self.ptr;
+                self.ptr = self.ptr.offset(1);
+                Some(lit)
+            }
         }
     }
 }
