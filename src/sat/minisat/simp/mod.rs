@@ -62,6 +62,10 @@ impl Solver for SimpSolver {
         }
     }
 
+    fn preprocess(&mut self) -> bool {
+        self.eliminate(true)
+    }
+
     fn solve(&mut self) -> TotalResult {
         self.core.budget.off();
         match self.solveLimited(&[], true, false) {

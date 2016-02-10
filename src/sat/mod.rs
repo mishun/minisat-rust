@@ -24,6 +24,7 @@ pub trait Solver {
     fn nClauses(&self) -> usize;
     fn newVar(&mut self, upol : Option<bool>, dvar : bool) -> Var;
     fn addClause(&mut self, clause : &[Lit]) -> bool;
+    fn preprocess(&mut self) -> bool;
     fn solve(&mut self) -> TotalResult;
     fn printStats(&self);
 }

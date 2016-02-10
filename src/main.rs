@@ -8,9 +8,8 @@ extern crate env_logger;
 #[macro_use] extern crate clap;
 
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use sat::{dimacs, TotalResult, Solver};
-use sat::formula::VarMap;
 use sat::minisat::{self, PhaseSaving, CCMinMode};
 
 mod sat;
@@ -162,7 +161,7 @@ fn main() {
 
     if matches.is_present("core") {
         let solver = minisat::CoreSolver::new(core_options);
-        solveFileCore(solver, options).expect("Error");
+        solveFile(solver, true, options).expect("Error");
     } else {
         let simp_options = {
             let mut s = minisat::simp::Settings::default();
@@ -193,60 +192,13 @@ fn main() {
             s
         };
 
-        let solver = minisat::simp::SimpSolver::new(simp_options);
-        solveFileSimp(solver, options).expect("Error");
+        let mut solver = minisat::simp::SimpSolver::new(simp_options);
+        if !options.pre { solver.eliminate(true); }
+        solveFile(solver, false, options).expect("Error");
     }
 }
 
-fn solveFileCore(mut solver : minisat::CoreSolver, options : MainOptions) -> io::Result<()> {
-    let initial_time = time::precise_time_s();
-
-    info!("============================[ Problem Statistics ]=============================");
-    info!("|                                                                             |");
-
-    let backward_subst = {
-        let in_file = try!(fs::File::open(options.in_path.clone()));
-        try!(dimacs::parse(&mut io::BufReader::new(in_file), &mut solver, options.strict))
-    };
-
-    info!("|  Number of variables:  {:12}                                         |", solver.nVars());
-    info!("|  Number of clauses:    {:12}                                         |", solver.nClauses());
-
-    let parsed_time = time::precise_time_s();
-    info!("|  Parse time:           {:12.2} s                                       |", parsed_time - initial_time);
-    info!("|                                                                             |");
-
-    let result =
-        if !solver.simplify() {
-            info!("===============================================================================");
-            info!("Solved by unit propagation");
-            solver.printStats();
-            TotalResult::UnSAT
-        } else {
-            let result = solver.solve();
-            solver.printStats();
-            result
-        };
-
-    printOutcome(&result);
-    if let Some(path) = options.out_path {
-        let mut out = try!(fs::File::create(path));
-        try!(writeResultTo(&mut out, &backward_subst, &result));
-    }
-
-    if let TotalResult::SAT(ref model) = result {
-        let in_file = try!(fs::File::open(options.in_path));
-        let ok = try!(dimacs::validateModel(&mut io::BufReader::new(in_file), &backward_subst, &model));
-        if !ok {
-            println!("SELF-CHECK FAILED!!!");
-        }
-    }
-
-    Ok(())
-}
-
-fn solveFileSimp(mut solver : minisat::simp::SimpSolver, options : MainOptions) -> io::Result<()> {
-    if !options.pre { solver.eliminate(true); }
+fn solveFile<S : Solver>(mut solver : S, core : bool, options : MainOptions) -> io::Result<()> {
     let initial_time = time::precise_time_s();
 
     info!("============================[ Problem Statistics ]=============================");
@@ -263,16 +215,18 @@ fn solveFileSimp(mut solver : minisat::simp::SimpSolver, options : MainOptions) 
     let parsed_time = time::precise_time_s();
     info!("|  Parse time:           {:12.2} s                                       |", parsed_time - initial_time);
 
-    let elim_res = solver.eliminate(true);
+    let elim_res = solver.preprocess();
+    if !core {
+        let simplified_time = time::precise_time_s();
+        info!("|  Simplification time:  {:12.2} s                                       |", simplified_time - parsed_time);
+    }
 
-    let simplified_time = time::precise_time_s();
-    info!("|  Simplification time:  {:12.2} s                                       |", simplified_time - parsed_time);
     info!("|                                                                             |");
 
     let result =
         if !elim_res {
             info!("===============================================================================");
-            info!("Solved by simplification");
+            info!("Solved by {}", if core { "unit propagation" } else { "simplification" });
             solver.printStats();
             info!("");
             TotalResult::UnSAT
@@ -296,10 +250,23 @@ fn solveFileSimp(mut solver : minisat::simp::SimpSolver, options : MainOptions) 
             result
         };
 
-    printOutcome(&result);
+    println!("{}",
+        match result {
+            TotalResult::SAT(_)      => { "SATISFIABLE" }
+            TotalResult::UnSAT       => { "UNSATISFIABLE" }
+            TotalResult::Interrupted => { "INDETERMINATE" }
+        });
+
     if let Some(path) = options.out_path {
-        let mut out = try!(fs::File::create(path));
-        try!(writeResultTo(&mut out, &backward_subst, &result));
+        let mut file = try!(fs::File::create(path));
+        match result {
+            TotalResult::UnSAT          => { try!(writeln!(file, "UNSAT")); }
+            TotalResult::Interrupted    => { try!(writeln!(file, "INDET")); }
+            TotalResult::SAT(ref model) => {
+                try!(writeln!(file, "SAT"));
+                try!(dimacs::writeModel(&mut file, &backward_subst, &model));
+            }
+        }
     }
 
     if let TotalResult::SAT(ref model) = result {
@@ -311,24 +278,4 @@ fn solveFileSimp(mut solver : minisat::simp::SimpSolver, options : MainOptions) 
     }
 
     Ok(())
-}
-
-fn printOutcome(ret : &TotalResult) {
-    println!("{}",
-        match *ret {
-            TotalResult::SAT(_)      => { "SATISFIABLE" }
-            TotalResult::UnSAT       => { "UNSATISFIABLE" }
-            TotalResult::Interrupted => { "INDETERMINATE" }
-        });
-}
-
-fn writeResultTo<W : io::Write>(stream : &mut W, backward_subst : &VarMap<i32>, ret : &TotalResult) -> io::Result<()> {
-    match *ret {
-        TotalResult::UnSAT          => { try!(writeln!(stream, "UNSAT")); Ok(()) }
-        TotalResult::Interrupted    => { try!(writeln!(stream, "INDET")); Ok(()) }
-        TotalResult::SAT(ref model) => {
-            try!(writeln!(stream, "SAT"));
-            dimacs::writeModel(stream, backward_subst, &model)
-        }
-    }
 }

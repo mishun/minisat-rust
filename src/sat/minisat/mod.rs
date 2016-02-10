@@ -225,6 +225,10 @@ impl Solver for CoreSolver {
         }
     }
 
+    fn preprocess(&mut self) -> bool {
+        self.simplify()
+    }
+
     fn solve(&mut self) -> TotalResult {
         self.budget.off();
         match self.solveLimited(&[]) {
