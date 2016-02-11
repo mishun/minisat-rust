@@ -1,5 +1,9 @@
 language: rust
 
+install:
+  - sudo apt-get update
+  - sudo apt-get install minisat
+
 rust:
   - nightly
   - beta
