@@ -1,28 +1,11 @@
-#![allow(non_snake_case)]
-#![allow(non_upper_case_globals)]
-
-extern crate time;
-extern crate vec_map;
 #[macro_use] extern crate log;
 extern crate env_logger;
 #[macro_use] extern crate clap;
+extern crate minisat_rust;
 
-use std::fs;
-use std::io::{self, Write};
-use sat::{dimacs, TotalResult, Solver};
-use sat::minisat::{self, PhaseSaving, CCMinMode};
+use std::path;
+use minisat_rust::sat::minisat::{self, PhaseSaving, CCMinMode};
 
-mod sat;
-
-
-struct MainOptions {
-    strict      : bool,
-    pre         : bool,
-    solve       : bool,
-    in_path     : String,
-    out_path    : Option<String>,
-    dimacs_path : Option<String>
-}
 
 fn main() {
     let ls012 = ["0", "1", "2"];
@@ -84,198 +67,117 @@ fn main() {
         builder.init().unwrap();
     }
 
-    let core_options = {
-        let mut s = minisat::Settings::default();
-
-        for &x in matches.value_of("var-decay").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < x && x < 1.0 { s.heur.var_decay = x; }
-        }
-
-        for &x in matches.value_of("cla-decay").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < x && x < 1.0 { s.db.clause_decay = x; }
-        }
-
-        for &x in matches.value_of("rnd-freq").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 <= x && x <= 1.0 { s.heur.random_var_freq = x; }
-        }
-
-        for &x in matches.value_of("rnd-seed").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < x { s.heur.random_seed = x; }
-        }
-
-        for &x in matches.value_of("ccmin-mode").iter() {
-            match x {
-                "0" => { s.ccmin_mode = CCMinMode::None; }
-                "1" => { s.ccmin_mode = CCMinMode::Basic; }
-                "2" => { s.ccmin_mode = CCMinMode::Deep; }
-                _   => {}
-            }
-        }
-
-        for &x in matches.value_of("phase_saving").iter() {
-            match x {
-                "0" => { s.heur.phase_saving = PhaseSaving::None; }
-                "1" => { s.heur.phase_saving = PhaseSaving::Limited; }
-                "2" => { s.heur.phase_saving = PhaseSaving::Full; }
-                _   => {}
-            }
-        }
-
-        if matches.is_present("rnd-init") { s.heur.rnd_init_act = true; }
-        if matches.is_present("no-rnd-init") { s.heur.rnd_init_act = false; }
-
-        if matches.is_present("luby") { s.restart.luby_restart = true; }
-        if matches.is_present("no-luby") { s.restart.luby_restart = false; }
-
-        for &x in matches.value_of("rfirst").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < x { s.restart.restart_first = x; }
-        }
-
-        for &x in matches.value_of("rinc").and_then(|s| s.parse().ok()).iter() {
-            if 1.0 < x { s.restart.restart_inc = x; }
-        }
-
-        for &x in matches.value_of("gc-frac").and_then(|s| s.parse().ok()).iter() {
-            if 0.0 < x && x <= 1.0 { s.core.garbage_frac = x; }
-        }
-
-        for &x in matches.value_of("min-learnts").and_then(|s| s.parse().ok()).iter() {
-            if 0 <= x { s.learnt.min_learnts_lim = x; }
-        }
-
-        if matches.is_present("rcheck") { s.core.use_rcheck = true; }
-        if matches.is_present("no-rcheck") { s.core.use_rcheck = false; }
-
-        s
-    };
-
-    let options =
-        MainOptions {
+    let main =
+        minisat_rust::MainOptions {
             strict      : matches.is_present("strict"),
             pre         : !matches.is_present("no-pre"),
             solve       : !matches.is_present("no-solve"),
-            in_path     : matches.value_of("input").unwrap().to_string(),
-            out_path    : matches.value_of("output").map(|x| x.to_string()),
-            dimacs_path : matches.value_of("dimacs").map(|x| x.to_string())
+            in_path     : path::PathBuf::from(matches.value_of("input").unwrap()),
+            out_path    : matches.value_of("output").map(|x| path::PathBuf::from(x)),
+            dimacs_path : matches.value_of("dimacs").map(|x| path::PathBuf::from(x))
         };
 
-    if matches.is_present("core") {
-        let solver = minisat::CoreSolver::new(core_options);
-        solveFile(solver, true, options).expect("Error");
-    } else {
-        let simp_options = {
-            let mut s = minisat::simp::Settings::default();
-            s.core = core_options;
+    let solver = {
+        let core_options = {
+            let mut s = minisat::Settings::default();
 
-            if matches.is_present("asymm") { s.simp.use_asymm = true; }
-            if matches.is_present("no-asymm") { s.simp.use_asymm = false; }
-
-            if matches.is_present("elim") { s.simp.use_elim = true; }
-            if matches.is_present("no-elim") { s.simp.use_elim = false; }
-
-            for &x in matches.value_of("grow").and_then(|s| s.parse().ok()).iter() {
-                s.simp.grow = x;
+            for &x in matches.value_of("var-decay").and_then(|s| s.parse().ok()).iter() {
+                if 0.0 < x && x < 1.0 { s.heur.var_decay = x; }
             }
 
-            for &x in matches.value_of("cl-lim").and_then(|s| s.parse().ok()).iter() {
-                if -1 <= x { s.simp.clause_lim = x; }
+            for &x in matches.value_of("cla-decay").and_then(|s| s.parse().ok()).iter() {
+                if 0.0 < x && x < 1.0 { s.db.clause_decay = x; }
             }
 
-            for &x in matches.value_of("sub-lim").and_then(|s| s.parse().ok()).iter() {
-                if -1 <= x { s.simp.subsumption_lim = x; }
+            for &x in matches.value_of("rnd-freq").and_then(|s| s.parse().ok()).iter() {
+                if 0.0 <= x && x <= 1.0 { s.heur.random_var_freq = x; }
             }
 
-            for &x in matches.value_of("simp-gc-frac").and_then(|s| s.parse().ok()).iter() {
-                if 0.0 < x && x <= 1.0 { s.simp.simp_garbage_frac = x; }
+            for &x in matches.value_of("rnd-seed").and_then(|s| s.parse().ok()).iter() {
+                if 0.0 < x { s.heur.random_seed = x; }
             }
+
+            for &x in matches.value_of("ccmin-mode").iter() {
+                match x {
+                    "0" => { s.ccmin_mode = CCMinMode::None; }
+                    "1" => { s.ccmin_mode = CCMinMode::Basic; }
+                    "2" => { s.ccmin_mode = CCMinMode::Deep; }
+                    _   => {}
+                }
+            }
+
+            for &x in matches.value_of("phase_saving").iter() {
+                match x {
+                    "0" => { s.heur.phase_saving = PhaseSaving::None; }
+                    "1" => { s.heur.phase_saving = PhaseSaving::Limited; }
+                    "2" => { s.heur.phase_saving = PhaseSaving::Full; }
+                    _   => {}
+                }
+            }
+
+            if matches.is_present("rnd-init") { s.heur.rnd_init_act = true; }
+            if matches.is_present("no-rnd-init") { s.heur.rnd_init_act = false; }
+
+            if matches.is_present("luby") { s.restart.luby_restart = true; }
+            if matches.is_present("no-luby") { s.restart.luby_restart = false; }
+
+            for &x in matches.value_of("rfirst").and_then(|s| s.parse().ok()).iter() {
+                if 0.0 < x { s.restart.restart_first = x; }
+            }
+
+            for &x in matches.value_of("rinc").and_then(|s| s.parse().ok()).iter() {
+                if 1.0 < x { s.restart.restart_inc = x; }
+            }
+
+            for &x in matches.value_of("gc-frac").and_then(|s| s.parse().ok()).iter() {
+                if 0.0 < x && x <= 1.0 { s.core.garbage_frac = x; }
+            }
+
+            for &x in matches.value_of("min-learnts").and_then(|s| s.parse().ok()).iter() {
+                if 0 <= x { s.learnt.min_learnts_lim = x; }
+            }
+
+            if matches.is_present("rcheck") { s.core.use_rcheck = true; }
+            if matches.is_present("no-rcheck") { s.core.use_rcheck = false; }
 
             s
         };
 
-        let mut solver = minisat::simp::SimpSolver::new(simp_options);
-        if !options.pre { solver.eliminate(true); }
-        solveFile(solver, false, options).expect("Error");
-    }
-}
+        if matches.is_present("core") {
+            minisat_rust::SolverOptions::Core(core_options)
+        } else {
+            let simp_options = {
+                let mut s = minisat::simp::Settings::default();
+                s.core = core_options;
 
-fn solveFile<S : Solver>(mut solver : S, core : bool, options : MainOptions) -> io::Result<()> {
-    let initial_time = time::precise_time_s();
+                if matches.is_present("asymm") { s.simp.use_asymm = true; }
+                if matches.is_present("no-asymm") { s.simp.use_asymm = false; }
 
-    info!("============================[ Problem Statistics ]=============================");
-    info!("|                                                                             |");
+                if matches.is_present("elim") { s.simp.use_elim = true; }
+                if matches.is_present("no-elim") { s.simp.use_elim = false; }
 
-    let backward_subst = {
-        let in_file = try!(fs::File::open(options.in_path.clone()));
-        try!(dimacs::parse(&mut io::BufReader::new(in_file), &mut solver, options.strict))
+                for &x in matches.value_of("grow").and_then(|s| s.parse().ok()).iter() {
+                    s.simp.grow = x;
+                }
+
+                for &x in matches.value_of("cl-lim").and_then(|s| s.parse().ok()).iter() {
+                    if -1 <= x { s.simp.clause_lim = x; }
+                }
+
+                for &x in matches.value_of("sub-lim").and_then(|s| s.parse().ok()).iter() {
+                    if -1 <= x { s.simp.subsumption_lim = x; }
+                }
+
+                for &x in matches.value_of("simp-gc-frac").and_then(|s| s.parse().ok()).iter() {
+                    if 0.0 < x && x <= 1.0 { s.simp.simp_garbage_frac = x; }
+                }
+
+                s
+            };
+
+            minisat_rust::SolverOptions::Simp(simp_options)
+        }
     };
 
-    info!("|  Number of variables:  {:12}                                         |", solver.nVars());
-    info!("|  Number of clauses:    {:12}                                         |", solver.nClauses());
-
-    let parsed_time = time::precise_time_s();
-    info!("|  Parse time:           {:12.2} s                                       |", parsed_time - initial_time);
-
-    let elim_res = solver.preprocess();
-    if !core {
-        let simplified_time = time::precise_time_s();
-        info!("|  Simplification time:  {:12.2} s                                       |", simplified_time - parsed_time);
-    }
-
-    info!("|                                                                             |");
-
-    let result =
-        if !elim_res {
-            info!("===============================================================================");
-            info!("Solved by {}", if core { "unit propagation" } else { "simplification" });
-            solver.printStats();
-            info!("");
-            TotalResult::UnSAT
-        } else {
-            let result =
-                if options.solve {
-                    solver.solve()
-                } else {
-                    info!("===============================================================================");
-                    TotalResult::Interrupted
-                };
-
-            if let TotalResult::Interrupted = result {
-                if let Some(path) = options.dimacs_path {
-                    let mut out = try!(fs::File::create(path));
-                    try!(dimacs::write(&mut out, &solver));
-                }
-            }
-
-            solver.printStats();
-            result
-        };
-
-    println!("{}",
-        match result {
-            TotalResult::SAT(_)      => { "SATISFIABLE" }
-            TotalResult::UnSAT       => { "UNSATISFIABLE" }
-            TotalResult::Interrupted => { "INDETERMINATE" }
-        });
-
-    if let Some(path) = options.out_path {
-        let mut file = try!(fs::File::create(path));
-        match result {
-            TotalResult::UnSAT          => { try!(writeln!(file, "UNSAT")); }
-            TotalResult::Interrupted    => { try!(writeln!(file, "INDET")); }
-            TotalResult::SAT(ref model) => {
-                try!(writeln!(file, "SAT"));
-                try!(dimacs::writeModel(&mut file, &backward_subst, &model));
-            }
-        }
-    }
-
-    if let TotalResult::SAT(ref model) = result {
-        let in_file = try!(fs::File::open(options.in_path));
-        let ok = try!(dimacs::validateModel(&mut io::BufReader::new(in_file), &backward_subst, &model));
-        if !ok {
-            println!("SELF-CHECK FAILED!!!");
-        }
-    }
-
-    Ok(())
+    minisat_rust::solve(main, solver).expect("IO Error");
 }
