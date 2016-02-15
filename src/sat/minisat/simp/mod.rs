@@ -572,7 +572,7 @@ impl Simplificator {
         self.subsumption_queue.remarkQueued(ca, 0, 2);
 
         for (v, touched) in self.touched.iter_mut() {
-            if *touched != 0 {
+            if *touched != 0 && self.var_status[&v].eliminated == 0 {
                 for &cr in self.occurs.lookup(&v, ca) {
                     let c = ca.edit(cr);
                     if c.mark() == 0 {

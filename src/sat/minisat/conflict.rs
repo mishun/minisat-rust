@@ -13,7 +13,7 @@ pub enum CCMinMode {
 }
 
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum Seen {
     Undef     = 0,

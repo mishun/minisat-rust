@@ -29,6 +29,7 @@ impl Default for DecisionHeuristicSettings {
 }
 
 
+#[derive(Debug)]
 struct VarLine {
     polarity : bool,         // The preferred polarity of each variable.
     user_pol : Option<bool>, // The users preferred polarity of each variable.

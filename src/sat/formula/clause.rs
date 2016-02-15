@@ -1,7 +1,4 @@
-use std::fmt;
-use std::marker;
-use std::ops;
-use std::ptr;
+use std::{fmt, marker, ops, ptr};
 use super::Lit;
 
 
@@ -215,7 +212,7 @@ impl<'c> Iterator for ClauseIter<'c> {
 }
 
 
-#[derive(PartialEq, Eq, Copy, Clone)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct ClauseRef(usize);
 
 

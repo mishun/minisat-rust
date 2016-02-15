@@ -3,6 +3,7 @@ use sat::formula::assignment::Assignment;
 use sat::formula::clause::*;
 
 
+#[derive(Debug)]
 pub struct VarStatus {
     pub frozen     : i8,
     pub eliminated : i8
@@ -70,6 +71,7 @@ impl ElimQueue {
 }
 
 
+#[derive(Debug)]
 struct OccLine {
     occs  : Vec<ClauseRef>,
     dirty : bool

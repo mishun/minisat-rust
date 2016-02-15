@@ -3,13 +3,14 @@ use sat::formula::assignment::Assignment;
 use sat::formula::clause::*;
 
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct Watcher {
     pub cref    : ClauseRef,
     pub blocker : Lit
 }
 
 
+#[derive(Debug)]
 struct WatchesLine {
     watchers : Vec<Watcher>,
     dirty    : bool

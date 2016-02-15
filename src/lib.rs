@@ -5,9 +5,8 @@ extern crate time;
 extern crate vec_map;
 #[macro_use] extern crate log;
 
-use std::fs;
+use std::{fs, path};
 use std::io::{self, Write};
-use std::path;
 use sat::{minisat, dimacs, TotalResult, Solver};
 
 pub mod sat;

@@ -1,5 +1,4 @@
-use std::fmt;
-use std::ops;
+use std::{fmt, ops};
 pub use self::index_map::{VarMap, LitMap, VarHeap};
 
 pub mod assignment;

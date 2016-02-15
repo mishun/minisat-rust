@@ -1,5 +1,4 @@
-use std::marker;
-use std::ops;
+use std::{marker, ops};
 use vec_map;
 use super::{Var, Lit};
 

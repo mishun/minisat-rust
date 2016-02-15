@@ -1,6 +1,5 @@
 // TODO: wait for io stabilization and completely rewrite it
-use std::io;
-use std::str;
+use std::{io, str};
 use std::borrow::Borrow;
 use std::collections::{HashSet, HashMap};
 use sat::formula::{Var, Lit, VarMap};

@@ -1,5 +1,4 @@
-use std::cmp;
-use std::fmt;
+use std::{cmp, fmt};
 use super::{Var, Lit};
 use super::clause;
 use super::index_map::VarMap;
