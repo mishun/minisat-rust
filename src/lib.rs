@@ -4,6 +4,7 @@
 extern crate time;
 extern crate vec_map;
 #[macro_use] extern crate log;
+extern crate flate2;
 
 use std::{fs, path};
 use std::io::{self, Write};
@@ -49,10 +50,7 @@ pub fn solveWith<S : Solver>(mut solver : S, options : MainOptions) -> io::Resul
     info!("============================[ Problem Statistics ]=============================");
     info!("|                                                                             |");
 
-    let backward_subst = {
-        let in_file = try!(fs::File::open(options.in_path.as_path()));
-        try!(dimacs::parse(&mut io::BufReader::new(in_file), &mut solver, options.strict))
-    };
+    let backward_subst = try!(dimacs::parseFile(&options.in_path, &mut solver, options.strict));
 
     info!("|  Number of variables:  {:12}                                         |", solver.nVars());
     info!("|  Number of clauses:    {:12}                                         |", solver.nClauses());
@@ -115,8 +113,7 @@ pub fn solveWith<S : Solver>(mut solver : S, options : MainOptions) -> io::Resul
     }
 
     if let TotalResult::SAT(ref model) = result {
-        let in_file = try!(fs::File::open(options.in_path.as_path()));
-        assert!(try!(dimacs::validateModel(&mut io::BufReader::new(in_file), &backward_subst, &model)), "SELF-CHECK FAILED!");
+        assert!(try!(dimacs::validateModelFile(&options.in_path, &backward_subst, &model)), "SELF-CHECK FAILED!");
     }
 
     Ok(())

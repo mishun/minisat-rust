@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::default::Default;
 use sat::{TotalResult, PartialResult, Solver};
 use sat::formula::{Var, Lit, VarMap};
@@ -458,7 +457,7 @@ impl Simplificator {
             for &nr in neg.iter() {
                 self.merges += 1;
                 if let Some(resolvent) = merge(v, core.db.ca.view(pr), core.db.ca.view(nr)) {
-                    if !self.addClause(core, resolvent.borrow()) {
+                    if !self.addClause(core, &resolvent[..]) {
                         return false;
                     }
                 }

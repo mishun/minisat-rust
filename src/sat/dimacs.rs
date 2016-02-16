@@ -1,7 +1,7 @@
 // TODO: wait for io stabilization and completely rewrite it
-use std::{io, str};
-use std::borrow::Borrow;
+use std::{fs, io, path, str};
 use std::collections::{HashSet, HashMap};
+use flate2::read::GzDecoder;
 use sat::formula::{Var, Lit, VarMap};
 use sat::Solver;
 
@@ -9,6 +9,15 @@ use sat::Solver;
 pub fn write<W : io::Write, S : Solver>(_ : &mut W, _ : &S) -> io::Result<()> {
     // TODO: implement
     unimplemented!()
+}
+
+
+pub fn parseFile<P : AsRef<path::Path>, S : Solver>(path : &P, solver : &mut S, validate : bool) -> io::Result<VarMap<i32>> {
+    let open = || { fs::File::open(path).map(|file| io::BufReader::new(file)) };
+    match GzDecoder::new(try!(open())) {
+        Ok(mut gz) => { parse(&mut gz, solver, validate) }
+        Err(_)     => { parse(&mut try!(open()), solver, validate) }
+    }
 }
 
 
@@ -28,6 +37,14 @@ pub fn writeModel<W : io::Write>(stream : &mut W, backward_subst : &VarMap<i32>,
     Ok(())
 }
 
+
+pub fn validateModelFile<P : AsRef<path::Path>>(path : &P, backward_subst : &VarMap<i32>, model : &VarMap<bool>) -> io::Result<bool> {
+    let open = || { fs::File::open(path).map(|file| io::BufReader::new(file)) };
+    match GzDecoder::new(try!(open())) {
+        Ok(mut gz) => { validateModel(&mut gz, backward_subst, model) }
+        Err(_)     => { validateModel(&mut try!(open()), backward_subst, model) }
+    }
+}
 
 pub fn validateModel<R : io::Read>(stream : &mut R, backward_subst : &VarMap<i32>, model : &VarMap<bool>) -> io::Result<bool> {
     let mut lits = HashSet::new();
@@ -78,7 +95,7 @@ impl<'s, S : Solver> Subst<'s, S> {
 
     pub fn addClause(&mut self, raw : Vec<i32>) {
         let lits : Vec<Lit> = raw.iter().map(|&lit_id| { self.litById(lit_id) }).collect();
-        self.solver.addClause(lits.borrow());
+        self.solver.addClause(&lits[..]);
     }
 
     fn litById(&mut self, lit_id : i32) -> Lit {
