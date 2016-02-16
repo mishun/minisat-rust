@@ -4,8 +4,8 @@ install:
   - git clone https://github.com/niklasso/minisat.git minisat
   - cd minisat
   - make
-  - sudo make install
   - cd ..
+  - export PATH=./minisat/build/release/bin:$PATH
 
 rust:
   - nightly

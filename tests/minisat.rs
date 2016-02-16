@@ -30,21 +30,22 @@ fn walk() -> io::Result<()> {
 fn test_file(path : &path::Path) -> io::Result<()> {
     let target = try!(run_minisat(path));
     let test = try!(run_me(path));
-    assert!(target == test, "Difference on file {:?}", path);
+    assert!(target == test, "Difference on file {:?}\nExpected:\n{}\nGot:\n{}", path, target, test);
     Ok(())
 }
 
 
 fn run_minisat(cnf_path : &path::Path) -> io::Result<String> {
     let result = try!(tempfile::NamedTempFile::new());
-    let _ = try!(process::Command::new("minisat")
+    let out = try!(process::Command::new("minisat")
                         .arg(cnf_path)
                         .arg(result.path())
                         .output()
-    );
+                  );
 
     let mut buf = String::new();
     try!(try!(result.reopen()).read_to_string(&mut buf));
+    assert!(!buf.is_empty(), "Minisat output is empty\n{}", String::from_utf8(out.stdout).unwrap());
     Ok(buf)
 }
 
