@@ -9,7 +9,8 @@ use minisat_rust::*;
 
 
 #[test]
-fn test() {
+#[ignore]
+fn compare_with_minisat() {
     walk().expect("IO Error");
 }
 
@@ -29,7 +30,7 @@ fn walk() -> io::Result<()> {
 fn test_file(path : &path::Path) -> io::Result<()> {
     let target = try!(run_minisat(path));
     let test = try!(run_me(path));
-    assert_eq!(target, test);
+    assert!(target == test, "Difference on file {:?}", path);
     Ok(())
 }
 

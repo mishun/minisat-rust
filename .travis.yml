@@ -1,8 +1,11 @@
 language: rust
 
 install:
-  - sudo apt-get update
-  - sudo apt-get install minisat
+  - git clone https://github.com/niklasso/minisat.git minisat
+  - cd minisat
+  - make
+  - sudo make install
+  - cd ..
 
 rust:
   - nightly
@@ -14,5 +17,6 @@ matrix:
     - rust: nightly
 
 script:
-  - cargo build --release --verbose
-  - cargo test --release --verbose
+  - cargo build --verbose
+  - cargo test --verbose
+  - cargo test --release --verbose -- --ignored
