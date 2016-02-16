@@ -55,12 +55,12 @@ impl<K : Idx, V> IdxMap<K, V> {
 
     #[inline]
     pub fn remove(&mut self, k : &K) -> Option<V> {
-        self.map.remove(&k.idx())
+        self.map.remove(k.idx())
     }
 
     #[inline]
     pub fn get(&self, k : &K) -> Option<&V> {
-        self.map.get(&k.idx())
+        self.map.get(k.idx())
     }
 
     #[inline]
@@ -145,7 +145,7 @@ impl<K : Idx> IdxHeap<K> {
 
     #[inline]
     pub fn contains(&self, key : &K) -> bool {
-        self.index.contains_key(&key.idx())
+        self.index.contains_key(key.idx())
     }
 
     #[inline]
@@ -156,7 +156,7 @@ impl<K : Idx> IdxHeap<K> {
 
     #[inline]
     pub fn insert<F : Fn(&K, &K) -> bool>(&mut self, key : K, before : F) -> bool {
-        if !self.index.contains_key(&key.idx()) {
+        if !self.index.contains_key(key.idx()) {
             let place = self.heap.len();
             self.heap.push(key);
             self.sift_up(place, before);
@@ -172,7 +172,7 @@ impl<K : Idx> IdxHeap<K> {
             None
         } else {
             let res = self.heap.swap_remove(0);
-            self.index.remove(&res.idx());
+            self.index.remove(res.idx());
             if !self.heap.is_empty() {
                 self.sift_down(0, &before);
             }
@@ -183,7 +183,7 @@ impl<K : Idx> IdxHeap<K> {
     #[inline]
     pub fn update<F : Fn(&K, &K) -> bool>(&mut self, key : &K, before : F) -> bool {
         let place =
-            match self.index.get(&key.idx()) {
+            match self.index.get(key.idx()) {
                 None    => { return false; }
                 Some(i) => { *i }
             };
