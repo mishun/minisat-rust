@@ -1,52 +1,57 @@
 // TODO: wait for io stabilization and completely rewrite it
 use std::{fs, io, path, str};
+use std::io::{Seek, SeekFrom};
 use std::collections::{HashSet, HashMap};
 use flate2::read::GzDecoder;
 use sat::formula::{Var, Lit, VarMap};
 use sat::Solver;
 
 
-pub fn write<W : io::Write, S : Solver>(_ : &mut W, _ : &S) -> io::Result<()> {
+pub fn write<W : io::Write, S : Solver>(_ : W, _ : &S) -> io::Result<()> {
     // TODO: implement
     unimplemented!()
 }
 
 
-pub fn parseFile<P : AsRef<path::Path>, S : Solver>(path : &P, solver : &mut S, validate : bool) -> io::Result<VarMap<i32>> {
-    let open = || { fs::File::open(path).map(|file| io::BufReader::new(file)) };
-    match GzDecoder::new(try!(open())) {
-        Ok(mut gz) => { parse(&mut gz, solver, validate) }
-        Err(_)     => { parse(&mut try!(open()), solver, validate) }
+pub fn parseFile<P : AsRef<path::Path>, S : Solver>(path : P, solver : &mut S, validate : bool) -> io::Result<VarMap<i32>> {
+    let mut reader = io::BufReader::new(try!(fs::File::open(path)));
+    if let Ok(gz) = GzDecoder::new(&mut reader) {
+        return parse(gz, solver, validate);
     }
+
+    try!(reader.seek(SeekFrom::Start(0)));
+    parse(reader, solver, validate)
 }
 
 
-pub fn parse<R : io::Read, S : Solver>(stream : &mut R, solver : &mut S, validate : bool) -> io::Result<VarMap<i32>> {
+pub fn parse<R : io::Read, S : Solver>(reader : R, solver : &mut S, validate : bool) -> io::Result<VarMap<i32>> {
     let mut subst = Subst::new(solver);
-    try!(DimacsParser::parse(stream, validate, |cl| { subst.addClause(cl) }));
+    try!(DimacsParser::parse(reader, validate, |cl| { subst.addClause(cl) }));
     Ok(subst.backward_subst)
 }
 
 
-pub fn writeModel<W : io::Write>(stream : &mut W, backward_subst : &VarMap<i32>, model : &VarMap<bool>) -> io::Result<()> {
+pub fn writeModel<W : io::Write>(mut writer : W, backward_subst : &VarMap<i32>, model : &VarMap<bool>) -> io::Result<()> {
     for (var, &val) in model.iter() {
         let var_id = backward_subst[&var];
-        try!(write!(stream, "{} ", if val { var_id } else { -var_id }));
+        try!(write!(writer, "{} ", if val { var_id } else { -var_id }));
     }
-    try!(writeln!(stream, "0"));
+    try!(writeln!(writer, "0"));
     Ok(())
 }
 
 
-pub fn validateModelFile<P : AsRef<path::Path>>(path : &P, backward_subst : &VarMap<i32>, model : &VarMap<bool>) -> io::Result<bool> {
-    let open = || { fs::File::open(path).map(|file| io::BufReader::new(file)) };
-    match GzDecoder::new(try!(open())) {
-        Ok(mut gz) => { validateModel(&mut gz, backward_subst, model) }
-        Err(_)     => { validateModel(&mut try!(open()), backward_subst, model) }
+pub fn validateModelFile<P : AsRef<path::Path>>(path : P, backward_subst : &VarMap<i32>, model : &VarMap<bool>) -> io::Result<bool> {
+    let mut reader = io::BufReader::new(try!(fs::File::open(path)));
+    if let Ok(gz) = GzDecoder::new(&mut reader) {
+        return validateModel(gz, backward_subst, model);
     }
+
+    try!(reader.seek(SeekFrom::Start(0)));
+    validateModel(reader, backward_subst, model)
 }
 
-pub fn validateModel<R : io::Read>(stream : &mut R, backward_subst : &VarMap<i32>, model : &VarMap<bool>) -> io::Result<bool> {
+pub fn validateModel<R : io::Read>(reader : R, backward_subst : &VarMap<i32>, model : &VarMap<bool>) -> io::Result<bool> {
     let mut lits = HashSet::new();
     for (var, &value) in model.iter() {
         let lit_id = {
@@ -61,7 +66,7 @@ pub fn validateModel<R : io::Read>(stream : &mut R, backward_subst : &VarMap<i32
     }
 
     let mut ok = true;
-    try!(DimacsParser::parse(stream, false, |cl| {
+    try!(DimacsParser::parse(reader, false, |cl| {
         let mut found = false;
         for lit in cl {
             if lits.contains(&lit) {
@@ -126,7 +131,7 @@ struct DimacsParser<'p> {
 }
 
 impl<'p> DimacsParser<'p> {
-    pub fn parse<R : io::Read, F : FnMut(Vec<i32>) -> ()>(reader : &'p mut R, validate : bool, clause : F) -> io::Result<()> {
+    pub fn parse<R : io::Read + 'p, F : FnMut(Vec<i32>) -> ()>(mut reader : R, validate : bool, clause : F) -> io::Result<()> {
         let mut buf = String::new();
         try!(reader.read_to_string(&mut buf));
 

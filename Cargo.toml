@@ -6,12 +6,12 @@ repository = "https://github.com/mishun/minisat-rust.git"
 keywords = ["sat", "minisat"]
 
 [dependencies]
-time = "0.1"
-vec_map = "0.6"
-log = "0.3"
-env_logger = "0.3"
-clap = "2.0"
-flate2 = "0.2"
+time = "0.1.*"
+vec_map = "0.6.*"
+log = "0.3.*"
+env_logger = "0.3.*"
+clap = "2.*"
+flate2 = "0.2.*"
 
 [dev-dependencies]
-tempfile = "2.0"
+tempfile = "2.*"

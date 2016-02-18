@@ -93,27 +93,32 @@ pub fn solveWith<S : Solver>(mut solver : S, options : MainOptions) -> io::Resul
             result
         };
 
-    println!("{}",
-        match result {
-            TotalResult::SAT(_)      => { "SATISFIABLE" }
-            TotalResult::UnSAT       => { "UNSATISFIABLE" }
-            TotalResult::Interrupted => { "INDETERMINATE" }
-        });
-
-    if let Some(path) = options.out_path {
-        let mut file = try!(fs::File::create(path));
-        match result {
-            TotalResult::UnSAT          => { try!(writeln!(file, "UNSAT")); }
-            TotalResult::Interrupted    => { try!(writeln!(file, "INDET")); }
-            TotalResult::SAT(ref model) => {
-                try!(writeln!(file, "SAT"));
-                try!(dimacs::writeModel(&mut file, &backward_subst, &model));
+    match result {
+        TotalResult::UnSAT       => {
+            println!("UNSATISFIABLE");
+            if let Some(path) = options.out_path {
+                let mut out = try!(fs::File::create(path));
+                try!(writeln!(out, "UNSAT"));
             }
         }
-    }
 
-    if let TotalResult::SAT(ref model) = result {
-        assert!(try!(dimacs::validateModelFile(&options.in_path, &backward_subst, &model)), "SELF-CHECK FAILED!");
+        TotalResult::Interrupted => {
+            println!("INDETERMINATE");
+            if let Some(path) = options.out_path {
+                let mut out = try!(fs::File::create(path));
+                try!(writeln!(out, "INDET"));
+            }
+        }
+
+        TotalResult::SAT(model)  => {
+            println!("SATISFIABLE");
+            assert!(try!(dimacs::validateModelFile(&options.in_path, &backward_subst, &model)), "SELF-CHECK FAILED");
+            if let Some(path) = options.out_path {
+                let mut out = try!(fs::File::create(path));
+                try!(writeln!(out, "SAT"));
+                try!(dimacs::writeModel(out, &backward_subst, &model));
+            }
+        }
     }
 
     Ok(())
