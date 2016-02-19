@@ -123,8 +123,8 @@ impl LearningStrategy {
         }
     }
 
-    pub fn border(&self) -> usize {
-        self.max_learnts as usize
+    pub fn border(&self) -> f64 {
+        self.max_learnts
     }
 }
 
@@ -471,7 +471,7 @@ impl CoreSolver {
                                self.heur.dec_vars - self.assigns.numberOfGroundAssigns(),
                                self.nClauses(),
                                self.db.clauses_literals,
-                               self.learnt.border(),
+                               self.learnt.border() as u64,
                                self.db.num_learnts,
                                (self.db.learnts_literals as f64) / (self.db.num_learnts as f64),
                                progressEstimate(&self.assigns) * 100.0);
@@ -491,7 +491,7 @@ impl CoreSolver {
                         return SearchResult::UnSAT;
                     }
 
-                    if self.db.needReduce(self.assigns.numberOfAssigns() + self.learnt.border()) {
+                    if (self.db.learnts() as f64) >= self.learnt.border() + (self.assigns.numberOfAssigns() as f64) {
                         // Reduce the set of learnt clauses:
                         self.db.reduce(&mut self.assigns, &mut self.watches);
                         if self.db.ca.checkGarbage(self.settings.garbage_frac) {

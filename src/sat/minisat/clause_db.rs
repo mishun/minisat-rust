@@ -114,8 +114,8 @@ impl ClauseDB {
         self.cla_inc *= 1.0 / self.settings.clause_decay;
     }
 
-    pub fn needReduce(&self, border : usize) -> bool {
-        self.learnts.len() >= border
+    pub fn learnts(&self) -> usize {
+        self.learnts.len()
     }
 
     // Description:
@@ -127,10 +127,15 @@ impl ClauseDB {
             self.learnts.sort_by(|&rx, &ry| {
                 let x = ca.view(rx);
                 let y = ca.view(ry);
-                if x.len() > 2 && (y.len() == 2 || x.activity() < y.activity()) {
+
+                if x.len() == 2 && y.len() == 2 {
+                    Ordering::Equal
+                } else if x.len() == 2 {
+                    Ordering::Greater
+                } else if y.len() == 2 {
                     Ordering::Less
                 } else {
-                    Ordering::Greater
+                    x.activity().partial_cmp(&y.activity()).unwrap()
                 }
             });
         }
