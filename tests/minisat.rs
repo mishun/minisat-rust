@@ -17,7 +17,9 @@ fn walk() -> io::Result<()> {
     for _entry in try!(fs::read_dir("./tests/cnf")) {
         let entry = try!(_entry);
         if try!(entry.file_type()).is_file() {
-            try!(test_file(entry.path().as_path()));
+            let ref path = entry.path();
+            try!(test_file(path.as_path()));
+            println!("ok: {}", path.display());
         }
     }
 
