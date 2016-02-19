@@ -6,8 +6,7 @@ extern crate vec_map;
 #[macro_use] extern crate log;
 extern crate flate2;
 
-use std::{fs, path};
-use std::io::{self, Write};
+use std::{io, fs, path};
 use sat::{minisat, dimacs, TotalResult, Solver};
 
 pub mod sat;
@@ -70,8 +69,6 @@ pub fn solveWith<S : Solver>(mut solver : S, options : MainOptions) -> io::Resul
         if !elim_res {
             info!("===============================================================================");
             info!("Solved by simplification");
-            solver.printStats();
-            info!("");
             TotalResult::UnSAT
         } else {
             let result =
@@ -89,36 +86,51 @@ pub fn solveWith<S : Solver>(mut solver : S, options : MainOptions) -> io::Resul
                 }
             }
 
-            solver.printStats();
             result
         };
+
+    {
+        let cpu_time = time::precise_time_s() - initial_time;
+        let stats = solver.stats();
+
+        info!("restarts              : {:<12}", stats.restarts);
+        info!("conflicts             : {:<12}   ({:.0} /sec)", stats.conflicts, (stats.conflicts as f64) / cpu_time);
+
+        info!("decisions             : {:<12}   ({:4.2} % random) ({:.0} /sec)",
+            stats.decisions,
+            (stats.rnd_decisions as f64) * 100.0 / (stats.decisions as f64),
+            (stats.decisions as f64) / cpu_time
+        );
+
+        info!("propagations          : {:<12}   ({:.0} /sec)",  stats.propagations, (stats.propagations as f64) / cpu_time);
+
+        info!("conflict literals     : {:<12}   ({:4.2} % deleted)",
+            stats.tot_literals,
+            (stats.del_literals as f64) * 100.0 / (stats.tot_literals as f64)
+        );
+
+        info!("Memory used           : {:.2} MB", 0.0);
+        info!("CPU time              : {} s", cpu_time);
+        info!("");
+    }
 
     match result {
         TotalResult::UnSAT       => {
             println!("UNSATISFIABLE");
-            if let Some(path) = options.out_path {
-                let mut out = try!(fs::File::create(path));
-                try!(writeln!(out, "UNSAT"));
-            }
         }
 
         TotalResult::Interrupted => {
             println!("INDETERMINATE");
-            if let Some(path) = options.out_path {
-                let mut out = try!(fs::File::create(path));
-                try!(writeln!(out, "INDET"));
-            }
         }
 
-        TotalResult::SAT(model)  => {
+        TotalResult::SAT(ref model)  => {
             println!("SATISFIABLE");
             assert!(try!(dimacs::validateModelFile(&options.in_path, &backward_subst, &model)), "SELF-CHECK FAILED");
-            if let Some(path) = options.out_path {
-                let mut out = try!(fs::File::create(path));
-                try!(writeln!(out, "SAT"));
-                try!(dimacs::writeModel(out, &backward_subst, &model));
-            }
         }
+    }
+
+    if let Some(path) = options.out_path {
+        try!(dimacs::writeResult(try!(fs::File::create(path)), result, &backward_subst));
     }
 
     Ok(())

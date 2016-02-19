@@ -4,7 +4,7 @@ use std::io::{Seek, SeekFrom};
 use std::collections::{HashSet, HashMap};
 use flate2::read::GzDecoder;
 use sat::formula::{Var, Lit, VarMap};
-use sat::Solver;
+use sat::{TotalResult, Solver};
 
 
 pub fn write<W : io::Write, S : Solver>(_ : W, _ : &S) -> io::Result<()> {
@@ -31,12 +31,25 @@ pub fn parse<R : io::Read, S : Solver>(reader : R, solver : &mut S, validate : b
 }
 
 
-pub fn writeModel<W : io::Write>(mut writer : W, backward_subst : &VarMap<i32>, model : &VarMap<bool>) -> io::Result<()> {
-    for (var, &val) in model.iter() {
-        let var_id = backward_subst[&var];
-        try!(write!(writer, "{} ", if val { var_id } else { -var_id }));
+pub fn writeResult<W : io::Write>(mut writer : W, result : TotalResult, backward_subst : &VarMap<i32>) -> io::Result<()> {
+    match result {
+        TotalResult::UnSAT       => {
+            try!(writeln!(writer, "UNSAT"));
+        }
+
+        TotalResult::Interrupted => {
+            try!(writeln!(writer, "INDET"));
+        }
+
+        TotalResult::SAT(model)  => {
+            try!(writeln!(writer, "SAT"));
+            for (var, &val) in model.iter() {
+                let var_id = backward_subst[&var];
+                try!(write!(writer, "{} ", if val { var_id } else { -var_id }));
+            }
+            try!(writeln!(writer, "0"));
+        }
     }
-    try!(writeln!(writer, "0"));
     Ok(())
 }
 

@@ -19,6 +19,18 @@ pub enum TotalResult {
 }
 
 
+pub struct Stats {
+    pub solves        : u64,
+    pub restarts      : u64,
+    pub decisions     : u64,
+    pub rnd_decisions : u64,
+    pub conflicts     : u64,
+    pub propagations  : u64,
+    pub tot_literals  : u64,
+    pub del_literals  : u64
+}
+
+
 pub trait Solver {
     fn nVars(&self) -> usize;
     fn nClauses(&self) -> usize;
@@ -26,5 +38,5 @@ pub trait Solver {
     fn addClause(&mut self, clause : &[Lit]) -> bool;
     fn preprocess(&mut self) -> bool;
     fn solve(&mut self) -> TotalResult;
-    fn printStats(&self);
+    fn stats(&self) -> Stats;
 }

@@ -1,5 +1,5 @@
 use std::default::Default;
-use sat::{TotalResult, PartialResult, Solver};
+use sat::{TotalResult, PartialResult, Stats, Solver};
 use sat::formula::{Var, Lit, VarMap};
 use sat::formula::assignment::*;
 use sat::formula::clause::*;
@@ -75,8 +75,8 @@ impl Solver for SimpSolver {
             }
     }
 
-    fn printStats(&self) {
-        self.core.printStats();
+    fn stats(&self) -> Stats {
+        self.core.stats()
     }
 }
 

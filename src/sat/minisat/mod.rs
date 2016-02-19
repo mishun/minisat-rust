@@ -1,6 +1,6 @@
 extern crate time;
 use std::default::Default;
-use sat::{PartialResult, TotalResult, Solver};
+use sat::{self, PartialResult, TotalResult, Solver};
 use sat::formula::{Var, Lit, LitMap};
 use sat::formula::clause::*;
 use sat::formula::assignment::*;
@@ -171,17 +171,10 @@ impl Default for CoreSettings {
 
 #[derive(Default)]
 struct Stats {
-    solves       : u64,
-    starts       : u64,
-    decisions    : u64,
-    conflicts    : u64,
-    start_time   : f64
-}
-
-impl Stats {
-    pub fn new() -> Stats {
-        Stats { start_time : time::precise_time_s(), ..Default::default() }
-    }
+    solves    : u64,
+    starts    : u64,
+    decisions : u64,
+    conflicts : u64
 }
 
 
@@ -239,30 +232,16 @@ impl Solver for CoreSolver {
         }
     }
 
-    fn printStats(&self) {
-        let cpu_time = time::precise_time_s() - self.stats.start_time;
-
-        info!("restarts              : {:<12}", self.stats.starts);
-        info!("conflicts             : {:<12}   ({:.0} /sec)",
-            self.stats.conflicts,
-            (self.stats.conflicts as f64) / cpu_time);
-
-        info!("decisions             : {:<12}   ({:4.2} % random) ({:.0} /sec)",
-            self.stats.decisions,
-            (self.heur.rnd_decisions as f64) * 100.0 / (self.stats.decisions as f64),
-            (self.stats.decisions as f64) / cpu_time);
-
-        info!("propagations          : {:<12}   ({:.0} /sec)",
-            self.watches.propagations,
-            (self.watches.propagations as f64) / cpu_time);
-
-        info!("conflict literals     : {:<12}   ({:4.2} % deleted)",
-            self.analyze.tot_literals,
-            ((self.analyze.max_literals - self.analyze.tot_literals) as f64) * 100.0 / (self.analyze.max_literals as f64));
-
-        info!("Memory used           : {:.2} MB", 0.0);
-        info!("CPU time              : {} s", cpu_time);
-        info!("");
+    fn stats(&self) -> sat::Stats {
+        sat::Stats { solves        : self.stats.solves
+                   , restarts      : self.stats.starts
+                   , decisions     : self.stats.decisions
+                   , rnd_decisions : self.heur.rnd_decisions
+                   , conflicts     : self.stats.conflicts
+                   , propagations  : self.watches.propagations
+                   , tot_literals  : self.analyze.tot_literals
+                   , del_literals  : self.analyze.max_literals - self.analyze.tot_literals
+                   }
     }
 }
 
@@ -272,7 +251,7 @@ impl CoreSolver {
     pub fn new(settings : Settings) -> CoreSolver {
         CoreSolver { settings      : settings.core
                    , restart       : settings.restart
-                   , stats         : Stats::new()
+                   , stats         : Stats::default()
                    , db            : ClauseDB::new(settings.db)
                    , assigns       : Assignment::new()
                    , watches       : watches::Watches::new()
