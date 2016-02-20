@@ -4,7 +4,8 @@ use sat::formula::{Var, Lit, VarMap};
 use sat::formula::assignment::*;
 use sat::formula::clause::*;
 use sat::formula::util::*;
-use super::CoreSolver;
+use super::{CoreSolver, CoreSearcher};
+use super::budget::Budget;
 use self::elim_clauses::*;
 use self::elim_queue::*;
 use self::subsumption_queue::*;
@@ -56,23 +57,50 @@ impl Solver for SimpSolver {
 
     fn addClause(&mut self, ps : &[Lit]) -> bool {
         match self.simp {
-            Some(ref mut simp) => { simp.addClause(&mut self.core, ps) }
             None               => { self.core.addClause(ps) }
+            Some(ref mut simp) => {
+                let res = simp.addClause(&mut self.core.search, ps);
+                if !res { self.core.ok = false; }
+                res
+            }
         }
     }
 
     fn preprocess(&mut self) -> bool {
-        self.eliminate(true)
+        if !self.core.simplify() {
+            return false;
+        }
+
+        let turn_off_elim = true;
+        let result =
+            if let Some(ref mut simp) = self.simp {
+                let result = simp.eliminate(&mut self.core.search, &self.core.budget, &mut self.elimclauses);
+                if !result { self.core.ok = false; }
+
+                if !turn_off_elim && self.core.search.db.ca.checkGarbage(self.core.search.settings.garbage_frac) {
+                    simp.garbageCollect(&mut self.core.search);
+                }
+                result
+            } else {
+                return true;
+            };
+
+        if turn_off_elim {
+            self.simpOff();
+        }
+
+        self.elimclauses.logSize();
+        result
     }
 
     fn solve(&mut self) -> TotalResult {
         self.core.budget.off();
         match self.solveLimited(&[], true, false) {
-                PartialResult::UnSAT          => { TotalResult::UnSAT }
-                PartialResult::SAT(model)     => { TotalResult::SAT(model) }
-                PartialResult::Interrupted(_) => { TotalResult::Interrupted }
-                // _                             => { panic!("Impossible happened") }
-            }
+            PartialResult::UnSAT          => { TotalResult::UnSAT }
+            PartialResult::SAT(model)     => { TotalResult::SAT(model) }
+            PartialResult::Interrupted(_) => { TotalResult::Interrupted }
+            // _                             => { panic!("Impossible happened") }
+        }
     }
 
     fn stats(&self) -> Stats {
@@ -83,8 +111,8 @@ impl Solver for SimpSolver {
 impl SimpSolver {
     pub fn new(settings : Settings) -> SimpSolver {
         let mut core = CoreSolver::new(settings.core);
-        core.db.ca.set_extra_clause_field(true);
-        core.db.settings.remove_satisfied = false;
+        core.search.db.ca.set_extra_clause_field(true);
+        core.search.db.settings.remove_satisfied = false;
         SimpSolver { core        : core
                    , elimclauses : ElimClauses::new(settings.extend_model)
                    , simp        : Some(Simplificator::new(settings.simp))
@@ -114,39 +142,15 @@ impl SimpSolver {
         result
     }
 
-    pub fn eliminate(&mut self, turn_off_elim : bool) -> bool {
-        if !self.core.simplify() {
-            return false;
-        }
-
-        let result =
-            if let Some(ref mut simp) = self.simp {
-                let result = simp.eliminate(&mut self.core, &mut self .elimclauses);
-                if !turn_off_elim && self.core.db.ca.checkGarbage(self.core.settings.garbage_frac) {
-                    simp.garbageCollect(&mut self.core);
-                }
-                result
-            } else {
-                return true;
-            };
-
-        if turn_off_elim {
-            self.simpOff();
-        }
-
-        self.elimclauses.logSize();
-        result
-    }
-
     fn simpOff(&mut self) {
         if let Some(_) = self.simp {
             self.simp = None;
-            self.core.db.settings.remove_satisfied = true;
-            self.core.db.ca.set_extra_clause_field(false);
+            self.core.search.db.settings.remove_satisfied = true;
+            self.core.search.db.ca.set_extra_clause_field(false);
 
             // Force full cleanup (this is safe and desirable since it only happens once):
-            self.core.heur.rebuildOrderHeap(&self.core.assigns);
-            self.core.garbageCollect();
+            self.core.search.heur.rebuildOrderHeap(&self.core.search.assigns);
+            self.core.search.garbageCollect();
         }
     }
 }
@@ -213,7 +217,7 @@ impl Simplificator {
         self.elim.initVar(v);
     }
 
-    fn addClause(&mut self, core : &mut CoreSolver, ps : &[Lit]) -> bool {
+    fn addClause(&mut self, core : &mut CoreSearcher, ps : &[Lit]) -> bool {
         //#ifndef NDEBUG
         for l in ps.iter() {
             assert!(self.var_status[&l.var()].eliminated == 0);
@@ -261,45 +265,45 @@ impl Simplificator {
         }
 
         let result =
-            if core.simplify() && self.eliminate(core, elimclauses) {
+            if core.simplify() && self.eliminate(&mut core.search, &core.budget, elimclauses) {
                 core.solveLimited(assumptions)
             } else {
                 info!("===============================================================================");
+                core.ok = false;
                 PartialResult::UnSAT
             };
 
         // Unfreeze the assumptions that were frozen:
         for &v in extra_frozen.iter() {
             self.var_status[&v].frozen = 0;
-            self.elim.updateElimHeap(v, &self.var_status, &core.assigns);
+            self.elim.updateElimHeap(v, &self.var_status, &core.search.assigns);
         }
 
         result
     }
 
-    fn eliminate(&mut self, core : &mut CoreSolver, elimclauses : &mut ElimClauses) -> bool {
+    fn eliminate(&mut self, core : &mut CoreSearcher, budget : &Budget, elimclauses : &mut ElimClauses) -> bool {
         // Main simplification loop:
-        'cleanup: while self.n_touched > 0 || self.subsumption_queue.assignsLeft(&core.assigns) > 0 || self.elim.len() > 0 {
+        while self.n_touched > 0 || self.subsumption_queue.assignsLeft(&core.assigns) > 0 || self.elim.len() > 0 {
             self.gatherTouchedClauses(&mut core.db.ca);
 
-            if !self.backwardSubsumptionCheck(core, true) {
-                core.ok = false;
-                break 'cleanup;
+            if !self.backwardSubsumptionCheck(core, budget, true) {
+                return false;
             }
 
             // Empty elim_heap and return immediately on user-interrupt:
-            if core.budget.interrupted() {
+            if budget.interrupted() {
                 assert!(self.subsumption_queue.assignsLeft(&core.assigns) == 0);
                 assert!(self.subsumption_queue.len() == 0);
                 assert!(self.n_touched == 0);
                 self.elim.clear();
-                break 'cleanup;
+                return true;
             }
 
             trace!("ELIM: vars = {}", self.elim.len());
             let mut cnt = 0;
             while let Some(elim) = self.elim.pop() {
-                if core.budget.interrupted() { break; }
+                if budget.interrupted() { break; }
                 if self.var_status[&elim].eliminated == 0 && core.assigns.isUndef(elim) {
                     if cnt % 100 == 0 {
                         trace!("elimination left: {:10}", self.elim.len());
@@ -309,18 +313,16 @@ impl Simplificator {
                         // Temporarily freeze variable. Otherwise, it would immediately end up on the queue again:
                         let was_frozen = self.var_status[&elim].frozen;
                         self.var_status[&elim].frozen = 1;
-                        if !self.asymmVar(core, elim) {
-                            core.ok = false;
-                            break 'cleanup;
+                        if !self.asymmVar(core, budget, elim) {
+                            return false;
                         }
                         self.var_status[&elim].frozen = was_frozen;
                     }
 
                     // At this point, the variable may have been set by assymetric branching, so check it
                     // again. Also, don't eliminate frozen variables:
-                    if self.settings.use_elim && core.assigns.isUndef(elim) && self.var_status[&elim].frozen == 0 && !self.eliminateVar(core, elimclauses, elim) {
-                        core.ok = false;
-                        break 'cleanup;
+                    if self.settings.use_elim && core.assigns.isUndef(elim) && self.var_status[&elim].frozen == 0 && !self.eliminateVar(core, budget, elimclauses, elim) {
+                        return false;
                     }
 
                     if core.db.ca.checkGarbage(self.settings.simp_garbage_frac) {
@@ -334,10 +336,10 @@ impl Simplificator {
             assert!(self.subsumption_queue.len() == 0);
         }
 
-        core.ok
+        true
     }
 
-    fn asymmVar(&mut self, core : &mut CoreSolver, v : Var) -> bool {
+    fn asymmVar(&mut self, core : &mut CoreSearcher, budget : &Budget, v : Var) -> bool {
         let cls = {
             let cls = self.occurs.lookup(&v, &core.db.ca);
             if !core.assigns.isUndef(v) || cls.len() == 0 {
@@ -361,10 +363,10 @@ impl Simplificator {
             }
         }
 
-        self.backwardSubsumptionCheck(core, false)
+        self.backwardSubsumptionCheck(core, budget, false)
     }
 
-    fn removeClause(&mut self, core : &mut CoreSolver, cr : ClauseRef) {
+    fn removeClause(&mut self, core : &mut CoreSearcher, cr : ClauseRef) {
         for lit in core.db.ca.view(cr).iter() {
             self.elim.bumpLitOcc(&lit, -1);
             self.elim.updateElimHeap(lit.var(), &self.var_status, &core.assigns);
@@ -375,7 +377,7 @@ impl Simplificator {
         core.db.removeClause(&mut core.assigns, cr);
     }
 
-    fn strengthenClause(&mut self, core : &mut CoreSolver, cr : ClauseRef, l : Lit) -> bool {
+    fn strengthenClause(&mut self, core : &mut CoreSearcher, cr : ClauseRef, l : Lit) -> bool {
         assert!(core.assigns.isGroundLevel());
 
         // FIX: this is too inefficient but would be nice to have (properly implemented)
@@ -399,7 +401,7 @@ impl Simplificator {
         }
     }
 
-    fn eliminateVar(&mut self, core : &mut CoreSolver, elimclauses : &mut ElimClauses, v : Var) -> bool {
+    fn eliminateVar(&mut self, core : &mut CoreSearcher, budget : &Budget, elimclauses : &mut ElimClauses, v : Var) -> bool {
         assert!({ let ref st = self.var_status[&v]; st.frozen == 0 && st.eliminated == 0 });
         assert!(core.assigns.isUndef(v));
 
@@ -470,11 +472,11 @@ impl Simplificator {
         // Free watchers lists for this variable, if possible:
         core.watches.tryClearVar(v);
 
-        self.backwardSubsumptionCheck(core, false)
+        self.backwardSubsumptionCheck(core, budget, false)
     }
 
     // Backward subsumption + backward subsumption resolution
-    fn backwardSubsumptionCheck(&mut self, core : &mut CoreSolver, verbose : bool) -> bool {
+    fn backwardSubsumptionCheck(&mut self, core : &mut CoreSearcher, budget : &Budget, verbose : bool) -> bool {
         assert!(core.assigns.isGroundLevel());
 
         if verbose {
@@ -488,7 +490,7 @@ impl Simplificator {
 
         while let Some(job) = self.subsumption_queue.pop(&core.db.ca, &core.assigns) {
             // Empty subsumption queue and return immediately on user-interrupt:
-            if core.budget.interrupted() {
+            if budget.interrupted() {
                 self.subsumption_queue.clear(&core.assigns);
                 break;
             }
@@ -587,20 +589,20 @@ impl Simplificator {
         self.n_touched = 0;
     }
 
-    fn garbageCollect(&mut self, core : &mut CoreSolver) {
+    fn garbageCollect(&mut self, core : &mut CoreSearcher) {
         let mut to = ClauseAllocator::newForGC(&core.db.ca);
-        self.relocAll(&mut core.db.ca, &mut to);
-        core.relocAll(to);
+        self.relocGC(&mut core.db.ca, &mut to);
+        core.relocGC(to);
     }
 
-    fn relocAll(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {
+    fn relocGC(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {
         self.occurs.relocGC(from, to);
         self.subsumption_queue.relocGC(from, to);
     }
 }
 
 
-fn asymmetricBranching(core : &mut CoreSolver, v : Var, cr : ClauseRef) -> Option<Lit> {
+fn asymmetricBranching(core : &mut CoreSearcher, v : Var, cr : ClauseRef) -> Option<Lit> {
     assert!(core.assigns.isGroundLevel());
 
     let l = {

@@ -17,7 +17,7 @@ pub struct DecisionHeuristicSettings {
 }
 
 impl Default for DecisionHeuristicSettings {
-    fn default() -> DecisionHeuristicSettings {
+    fn default() -> Self {
         DecisionHeuristicSettings { var_decay         : 0.95
                                   , random_seed       : 91648253.0
                                   , random_var_freq   : 0.0

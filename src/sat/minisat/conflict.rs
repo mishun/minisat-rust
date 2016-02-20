@@ -12,10 +12,16 @@ pub enum CCMinMode {
     Deep
 }
 
+impl Default for CCMinMode {
+    fn default() -> Self {
+        CCMinMode::Deep
+    }
+}
+
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 #[repr(u8)]
-pub enum Seen {
+enum Seen {
     Undef     = 0,
     Source    = 1,
     Removable = 2,
@@ -32,7 +38,7 @@ pub enum Conflict {
 
 pub struct AnalyzeContext {
     ccmin_mode       : CCMinMode,    // Controls conflict clause minimization
-    pub seen         : VarMap<Seen>,
+    seen             : VarMap<Seen>,
     analyze_toclear  : Vec<Lit>,
     pub max_literals : u64,
     pub tot_literals : u64

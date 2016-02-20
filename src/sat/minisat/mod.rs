@@ -1,11 +1,9 @@
-extern crate time;
-use std::default::Default;
 use sat::{self, PartialResult, TotalResult, Solver};
 use sat::formula::{Var, Lit, LitMap};
 use sat::formula::clause::*;
 use sat::formula::assignment::*;
 use self::clause_db::*;
-use self::conflict::{AnalyzeContext, Seen, Conflict};
+use self::conflict::{AnalyzeContext, Conflict};
 pub use self::conflict::CCMinMode;
 use self::decision_heuristic::{DecisionHeuristicSettings, DecisionHeuristic};
 pub use self::decision_heuristic::PhaseSaving;
@@ -19,25 +17,14 @@ mod util;
 mod watches;
 
 
+#[derive(Default)]
 pub struct Settings {
     pub heur       : DecisionHeuristicSettings,
     pub db         : ClauseDBSettings,
     pub ccmin_mode : CCMinMode,
     pub restart    : RestartStrategy,
     pub learnt     : LearningStrategySettings,
-    pub core       : CoreSettings
-}
-
-impl Default for Settings {
-    fn default() -> Settings {
-        Settings { heur       : Default::default()
-                 , db         : Default::default()
-                 , ccmin_mode : CCMinMode::Deep
-                 , restart    : Default::default()
-                 , learnt     : Default::default()
-                 , core       : Default::default()
-                 }
-    }
+    pub core       : SearcherSettings
 }
 
 
@@ -152,63 +139,27 @@ impl SimplifyGuard {
 }
 
 
-enum SearchResult { UnSAT, SAT, Interrupted(f64), AssumpsConfl(LitMap<()>) }
-
-
-pub struct CoreSettings {
-    pub garbage_frac : f64,  // The fraction of wasted memory allowed before a garbage collection is triggered.
-    pub use_rcheck   : bool, // Check if a clause is already implied. Prett costly, and subsumes subsumptions :)
-}
-
-impl Default for CoreSettings {
-    fn default() -> CoreSettings {
-        CoreSettings { garbage_frac : 0.20
-                     , use_rcheck   : false
-                     }
-    }
-}
-
-
-#[derive(Default)]
-struct Stats {
-    solves    : u64,
-    starts    : u64,
-    decisions : u64,
-    conflicts : u64
-}
 
 
 pub struct CoreSolver {
-    settings      : CoreSettings,
-    restart       : RestartStrategy,
-    stats         : Stats,                  // Statistics: (read-only member variable)
-    db            : ClauseDB,
-    assigns       : Assignment,             // The current assignments.
-    watches       : watches::Watches,       // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
-    heur          : DecisionHeuristic,
-    ok            : bool,                   // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
-    simp          : SimplifyGuard,
-    released_vars : Vec<Var>,
-    analyze       : AnalyzeContext,
-    learnt        : LearningStrategy,
-    budget        : budget::Budget
+    restart : RestartStrategy,
+    ok      : bool,                   // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
+    search  : CoreSearcher,
+    learnt  : LearningStrategy,
+    budget  : budget::Budget
 }
 
 impl Solver for CoreSolver {
     fn nVars(&self) -> usize {
-        self.assigns.numberOfVars()
+        self.search.assigns.numberOfVars()
     }
 
     fn nClauses(&self) -> usize {
-        self.db.num_clauses
+        self.search.db.num_clauses
     }
 
     fn newVar(&mut self, upol : Option<bool>, dvar : bool) -> Var {
-        let v = self.assigns.newVar();
-        self.watches.initVar(v);
-        self.heur.initVar(v, upol, dvar);
-        self.analyze.initVar(v);
-        v
+        self.search.newVar(upol, dvar)
     }
 
     fn addClause(&mut self, clause : &[Lit]) -> bool {
@@ -233,42 +184,174 @@ impl Solver for CoreSolver {
     }
 
     fn stats(&self) -> sat::Stats {
-        sat::Stats { solves        : self.stats.solves
-                   , restarts      : self.stats.starts
-                   , decisions     : self.stats.decisions
-                   , rnd_decisions : self.heur.rnd_decisions
-                   , conflicts     : self.stats.conflicts
-                   , propagations  : self.watches.propagations
-                   , tot_literals  : self.analyze.tot_literals
-                   , del_literals  : self.analyze.max_literals - self.analyze.tot_literals
+        sat::Stats { solves        : self.search.stats.solves
+                   , restarts      : self.search.stats.starts
+                   , decisions     : self.search.stats.decisions
+                   , rnd_decisions : self.search.heur.rnd_decisions
+                   , conflicts     : self.search.stats.conflicts
+                   , propagations  : self.search.watches.propagations
+                   , tot_literals  : self.search.analyze.tot_literals
+                   , del_literals  : self.search.analyze.max_literals - self.search.analyze.tot_literals
                    }
     }
 }
 
-enum AddClause { UnSAT, Consumed, Added(ClauseRef) }
 
 impl CoreSolver {
     pub fn new(settings : Settings) -> CoreSolver {
-        CoreSolver { settings      : settings.core
-                   , restart       : settings.restart
-                   , stats         : Stats::default()
-                   , db            : ClauseDB::new(settings.db)
-                   , assigns       : Assignment::new()
-                   , watches       : watches::Watches::new()
-                   , heur          : DecisionHeuristic::new(settings.heur)
-                   , simp          : SimplifyGuard::new()
-                   , ok            : true
-                   , released_vars : Vec::new()
-                   , analyze       : AnalyzeContext::new(settings.ccmin_mode)
-                   , learnt        : LearningStrategy::new(settings.learnt)
-                   , budget        : budget::Budget::new()
+        CoreSolver { restart : settings.restart
+                   , ok      : true
+                   , search  : CoreSearcher::new(settings.core, settings.db, settings.heur, settings.ccmin_mode)
+                   , learnt  : LearningStrategy::new(settings.learnt)
+                   , budget  : budget::Budget::new()
                    }
     }
 
     fn addClause_(&mut self, clause : &[Lit]) -> AddClause {
-        assert!(self.assigns.isGroundLevel());
-        if !self.ok { return AddClause::UnSAT; }
+        if self.ok {
+            let res = self.search.addClause_(clause);
+            if let AddClause::UnSAT = res { self.ok = false; }
+            res
+        } else {
+            return AddClause::UnSAT;
+        }
+    }
 
+    // Description:
+    //   Simplify the clause database according to the current top-level assigment. Currently, the only
+    //   thing done here is the removal of satisfied clauses, but more things can be put here.
+    pub fn simplify(&mut self) -> bool {
+        if !self.ok { return false; }
+
+        if let Some(_) = self.search.watches.propagate(&mut self.search.db.ca, &mut self.search.assigns) {
+            self.ok = false;
+            return false;
+        }
+
+        self.search.simplify();
+        true
+    }
+
+    pub fn solveLimited(&mut self, assumptions : &[Lit]) -> PartialResult {
+        if !self.ok { return PartialResult::UnSAT; }
+
+        self.search.stats.solves += 1;
+        self.learnt.reset(self.search.db.num_clauses);
+
+        info!("============================[ Search Statistics ]==============================");
+        info!("| Conflicts |          ORIGINAL         |          LEARNT          | Progress |");
+        info!("|           |    Vars  Clauses Literals |    Limit  Clauses Lit/Cl |          |");
+        info!("===============================================================================");
+
+        let result = self.searchLoop(assumptions);
+        self.search.cancelUntil(GroundLevel);
+
+        info!("===============================================================================");
+        result
+    }
+
+    fn searchLoop(&mut self, assumptions : &[Lit]) -> PartialResult {
+        let mut curr_restarts = 0;
+        loop {
+            let conflicts_to_go = self.restart.conflictsToGo(curr_restarts);
+            curr_restarts += 1;
+
+            match self.search.search(conflicts_to_go, &self.budget, &mut self.learnt, assumptions) {
+                SearchResult::SAT             => {
+                    return PartialResult::SAT(extractModel(&self.search.assigns));
+                }
+
+                SearchResult::UnSAT           => {
+                    self.ok = false;
+                    return PartialResult::UnSAT;
+                }
+
+                SearchResult::AssumpsConfl(_) => { // TODO: implement
+                    return PartialResult::UnSAT;
+                }
+
+                SearchResult::Interrupted(c)  => {
+                    if !self.budget.within(self.search.stats.conflicts, self.search.watches.propagations) {
+                        return PartialResult::Interrupted(c);
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+#[derive(Default)]
+struct Stats {
+    solves    : u64,
+    starts    : u64,
+    decisions : u64,
+    conflicts : u64
+}
+
+
+enum SearchResult {
+    UnSAT,
+    SAT,
+    Interrupted(f64),
+    AssumpsConfl(LitMap<()>)
+}
+
+
+enum AddClause {
+    UnSAT,
+    Consumed,
+    Added(ClauseRef)
+}
+
+
+pub struct SearcherSettings {
+    pub garbage_frac : f64,  // The fraction of wasted memory allowed before a garbage collection is triggered.
+    pub use_rcheck   : bool, // Check if a clause is already implied. Prett costly, and subsumes subsumptions :)
+}
+
+impl Default for SearcherSettings {
+    fn default() -> Self {
+        SearcherSettings { garbage_frac : 0.20
+                         , use_rcheck   : false
+                         }
+    }
+}
+
+
+struct CoreSearcher {
+    settings : SearcherSettings,
+    stats    : Stats,
+    db       : ClauseDB,
+    assigns  : Assignment,             // The current assignments.
+    watches  : watches::Watches,       // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
+    heur     : DecisionHeuristic,
+    analyze  : AnalyzeContext,
+    simp     : SimplifyGuard,
+}
+
+impl CoreSearcher {
+    pub fn new(settings : SearcherSettings, db_set : ClauseDBSettings, heur_set : DecisionHeuristicSettings, ccmin_mode : CCMinMode) -> CoreSearcher {
+        CoreSearcher { settings : settings
+                     , stats    : Stats::default()
+                     , db       : ClauseDB::new(db_set)
+                     , assigns  : Assignment::new()
+                     , watches  : watches::Watches::new()
+                     , heur     : DecisionHeuristic::new(heur_set)
+                     , analyze  : AnalyzeContext::new(ccmin_mode)
+                     , simp     : SimplifyGuard::new()
+                     }
+    }
+
+    fn newVar(&mut self, upol : Option<bool>, dvar : bool) -> Var {
+        let v = self.assigns.newVar();
+        self.watches.initVar(v);
+        self.heur.initVar(v, upol, dvar);
+        self.analyze.initVar(v);
+        v
+    }
+
+    fn addClause_(&mut self, clause : &[Lit]) -> AddClause {
         // TODO: it should be here to work identical to original MiniSat. Probably not the best place.
         if self.settings.use_rcheck && isImplied(self, &clause) {
             return AddClause::Consumed;
@@ -296,16 +379,13 @@ impl CoreSolver {
         };
 
         match ps.len() {
-            0 => {
-                self.ok = false;
-                AddClause::UnSAT
-            }
+            0 => { AddClause::UnSAT }
 
             1 => {
                 self.assigns.assignLit(ps[0], None);
                 match self.watches.propagate(&mut self.db.ca, &mut self.assigns) {
                     None    => { AddClause::Consumed }
-                    Some(_) => { self.ok = false; AddClause::UnSAT }
+                    Some(_) => { AddClause::UnSAT }
                 }
             }
 
@@ -318,56 +398,160 @@ impl CoreSolver {
     }
 
     // Description:
-    //   Simplify the clause database according to the current top-level assigment. Currently, the only
-    //   thing done here is the removal of satisfied clauses, but more things can be put here.
-    pub fn simplify(&mut self) -> bool {
-        assert!(self.assigns.isGroundLevel());
-        if !self.ok { return false; }
+    //   Search for a model the specified number of conflicts. 
+    //   NOTE! Use negative value for 'nof_conflicts' indicate infinity.
+    // 
+    // Output:
+    //   'l_True' if a partial assigment that is consistent with respect to the clauseset is found. If
+    //   all variables are decision variables, this means that the clause set is satisfiable. 'l_False'
+    //   if the clause set is unsatisfiable. 'l_Undef' if the bound on number of conflicts is reached.
+    pub fn search(&mut self, nof_conflicts : u64, budget : &budget::Budget, learnt : &mut LearningStrategy, assumptions : &[Lit]) -> SearchResult {
+        self.stats.starts += 1;
 
-        if let Some(_) = self.watches.propagate(&mut self.db.ca, &mut self.assigns) {
-            self.ok = false;
-            return false;
+        let confl_limit = self.stats.conflicts + nof_conflicts;
+        loop {
+            if !self.propagateLearnBacktrack(learnt) {
+                return SearchResult::UnSAT;
+            }
+
+            if self.stats.conflicts >= confl_limit || !budget.within(self.stats.conflicts, self.watches.propagations) {
+                // Reached bound on number of conflicts:
+                let progress_estimate = progressEstimate(&self.assigns);
+                self.cancelUntil(GroundLevel);
+                return SearchResult::Interrupted(progress_estimate);
+            }
+
+            // Simplify the set of problem clauses:
+            self.simplify();
+
+            if (self.db.learnts() as f64) >= learnt.border() + (self.assigns.numberOfAssigns() as f64) {
+                // Reduce the set of learnt clauses:
+                self.db.reduce(&mut self.assigns, &mut self.watches);
+
+                if self.db.ca.checkGarbage(self.settings.garbage_frac) {
+                    self.garbageCollect();
+                }
+            }
+
+            let next = {
+                let mut next = None;
+                while self.assigns.decisionLevel().offset() < assumptions.len() {
+                    // Perform user provided assumption:
+                    let p = assumptions[self.assigns.decisionLevel().offset()];
+                    match self.assigns.ofLit(p) {
+                        LitVal::True  => {
+                            // Dummy decision level:
+                            self.assigns.newDecisionLevel();
+                        }
+                        LitVal::False => {
+                            let conflict = self.analyze.analyzeFinal(&self.db.ca, &self.assigns, !p);
+                            return SearchResult::AssumpsConfl(conflict);
+                        }
+                        LitVal::Undef => {
+                            next = Some(p);
+                            break;
+                        }
+                    }
+                }
+
+                if let None = next {
+                    // New variable decision:
+                    self.stats.decisions += 1;
+                    match self.heur.pickBranchLit(&self.assigns) {
+                        Some(n) => { next = Some(n) }
+                        None    => { return SearchResult::SAT; } // Model found:
+                    };
+                }
+
+                next.unwrap()
+            };
+
+            // Increase decision level and enqueue 'next'
+            self.assigns.newDecisionLevel();
+            self.assigns.assignLit(next, None);
+        }
+    }
+
+    fn propagateLearnBacktrack(&mut self, learnt : &mut LearningStrategy) -> bool {
+        while let Some(confl) = self.watches.propagate(&mut self.db.ca, &mut self.assigns) {
+            self.stats.conflicts += 1;
+
+            match self.analyze.analyze(&mut self.db, &mut self.heur, &self.assigns, confl) {
+                Conflict::Ground => { return false; }
+
+                Conflict::Unit(level, unit) => {
+                    self.cancelUntil(level);
+                    self.assigns.assignLit(unit, None);
+                }
+
+                Conflict::Learned(level, lit, clause) => {
+                    self.cancelUntil(level);
+                    let (c, cr) = self.db.learnClause(clause);
+                    self.watches.watchClause(c, cr);
+                    self.assigns.assignLit(lit, Some(cr));
+                }
+            }
+
+            self.heur.decayActivity();
+            self.db.decayActivity();
+
+            if learnt.bump() {
+                info!("| {:9} | {:7} {:8} {:8} | {:8} {:8} {:6.0} | {:6.3} % |",
+                        self.stats.conflicts,
+                        self.heur.dec_vars - self.assigns.numberOfGroundAssigns(),
+                        self.db.num_clauses,
+                        self.db.clauses_literals,
+                        learnt.border() as u64,
+                        self.db.num_learnts,
+                        (self.db.learnts_literals as f64) / (self.db.num_learnts as f64),
+                        progressEstimate(&self.assigns) * 100.0
+                );
+            }
         }
 
-        if self.simp.skip(self.assigns.numberOfAssigns(), self.watches.propagations) {
-            return true;
+        true
+    }
+
+    // Description:
+    //   Simplify the clause database according to the current top-level assigment. Currently, the only
+    //   thing done here is the removal of satisfied clauses, but more things can be put here.
+    pub fn simplify(&mut self) {
+        if !self.assigns.isGroundLevel() || self.simp.skip(self.assigns.numberOfAssigns(), self.watches.propagations) {
+            return;
         }
 
         self.db.removeSatisfied(&mut self.assigns, &mut self.watches);
 
-        // TODO: why if?
-        if self.db.settings.remove_satisfied {
-            // Remove all released variables from the trail:
-            for v in self.released_vars.iter() {
-                assert!(self.analyze.seen[v] == Seen::Undef);
-                self.analyze.seen[v] = Seen::Source;
-            }
-
-            {
-                let seen = &self.analyze.seen;
-                self.assigns.retainAssignments(|l| { seen[&l.var()] == Seen::Undef });
-            }
-
-            for v in self.released_vars.iter() {
-                self.analyze.seen[v] = Seen::Undef;
-            }
-
-            // Released variables are now ready to be reused:
-            for &v in self.released_vars.iter() {
-                self.assigns.freeVar(v);
-            }
-            self.released_vars.clear();
-        }
+//        // TODO: why if?
+//        if self.db.settings.remove_satisfied {
+//            // Remove all released variables from the trail:
+//            for v in self.released_vars.iter() {
+//                assert!(self.analyze.seen[v] == Seen::Undef);
+//                self.analyze.seen[v] = Seen::Source;
+//            }
+//
+//            {
+//                let seen = &self.analyze.seen;
+//                self.assigns.retainAssignments(|l| { seen[&l.var()] == Seen::Undef });
+//            }
+//
+//            for v in self.released_vars.iter() {
+//                self.analyze.seen[v] = Seen::Undef;
+//            }
+//
+//            // Released variables are now ready to be reused:
+//            for &v in self.released_vars.iter() {
+//                self.assigns.freeVar(v);
+//            }
+//            self.released_vars.clear();
+//        }
 
         if self.db.ca.checkGarbage(self.settings.garbage_frac) {
             self.garbageCollect();
         }
 
         self.heur.rebuildOrderHeap(&self.assigns);
-
         self.simp.setNext(self.assigns.numberOfAssigns(), self.watches.propagations, self.db.clauses_literals + self.db.learnts_literals); // (shouldn't depend on stats really, but it will do for now)
-
-        true
     }
 
     // Revert to the state at given level (keeping all assignment at 'level' but not beyond).
@@ -377,174 +561,15 @@ impl CoreSolver {
         self.assigns.rewindUntilLevel(target_level, |level, lit| { heur.cancel(lit, level == top_level); });
     }
 
-    pub fn solveLimited(&mut self, assumptions : &[Lit]) -> PartialResult {
-        if !self.ok { return PartialResult::UnSAT; }
-
-        self.stats.solves += 1;
-        self.learnt.reset(self.db.num_clauses);
-
-        info!("============================[ Search Statistics ]==============================");
-        info!("| Conflicts |          ORIGINAL         |          LEARNT          | Progress |");
-        info!("|           |    Vars  Clauses Literals |    Limit  Clauses Lit/Cl |          |");
-        info!("===============================================================================");
-
-        let result = self.searchLoop(assumptions);
-        self.cancelUntil(GroundLevel);
-
-        info!("===============================================================================");
-        result
-    }
-
-    fn searchLoop(&mut self, assumptions : &[Lit]) -> PartialResult {
-        let mut curr_restarts = 0;
-        loop {
-            let conflicts_to_go = self.restart.conflictsToGo(curr_restarts);
-            curr_restarts += 1;
-
-            match self.search(conflicts_to_go, assumptions) {
-                SearchResult::SAT             => {
-                    return PartialResult::SAT(extractModel(&self.assigns));
-                }
-
-                SearchResult::UnSAT           => {
-                    self.ok = false;
-                    return PartialResult::UnSAT;
-                }
-
-                SearchResult::AssumpsConfl(_) => { // TODO: implement
-                    return PartialResult::UnSAT;
-                }
-
-                SearchResult::Interrupted(c)  => {
-                    if !self.budget.within(self.stats.conflicts, self.watches.propagations) {
-                        return PartialResult::Interrupted(c);
-                    }
-                }
-            }
-        }
-    }
-
-    // Description:
-    //   Search for a model the specified number of conflicts. 
-    //   NOTE! Use negative value for 'nof_conflicts' indicate infinity.
-    // 
-    // Output:
-    //   'l_True' if a partial assigment that is consistent with respect to the clauseset is found. If
-    //   all variables are decision variables, this means that the clause set is satisfiable. 'l_False'
-    //   if the clause set is unsatisfiable. 'l_Undef' if the bound on number of conflicts is reached.
-    fn search(&mut self, nof_conflicts : u64, assumptions : &[Lit]) -> SearchResult {
-        assert!(self.ok);
-        self.stats.starts += 1;
-
-        let mut conflictC = 0;
-        loop {
-            match self.watches.propagate(&mut self.db.ca, &mut self.assigns) {
-                Some(confl) => {
-                    self.stats.conflicts += 1;
-                    conflictC += 1;
-
-                    match self.analyze.analyze(&mut self.db, &mut self.heur, &self.assigns, confl) {
-                        Conflict::Ground => {
-                            return SearchResult::UnSAT;
-                        }
-
-                        Conflict::Unit(level, unit) => {
-                            self.cancelUntil(level);
-                            self.assigns.assignLit(unit, None);
-                        }
-
-                        Conflict::Learned(level, lit, clause) => {
-                            self.cancelUntil(level);
-                            let (c, cr) = self.db.learnClause(clause);
-                            self.watches.watchClause(c, cr);
-                            self.assigns.assignLit(lit, Some(cr));
-                        }
-                    }
-
-
-                    self.heur.decayActivity();
-                    self.db.decayActivity();
-
-                    if self.learnt.bump() {
-                        info!("| {:9} | {:7} {:8} {:8} | {:8} {:8} {:6.0} | {:6.3} % |",
-                               self.stats.conflicts,
-                               self.heur.dec_vars - self.assigns.numberOfGroundAssigns(),
-                               self.nClauses(),
-                               self.db.clauses_literals,
-                               self.learnt.border() as u64,
-                               self.db.num_learnts,
-                               (self.db.learnts_literals as f64) / (self.db.num_learnts as f64),
-                               progressEstimate(&self.assigns) * 100.0);
-                    }
-                }
-
-                None        => {
-                    if conflictC >= nof_conflicts || !self.budget.within(self.stats.conflicts, self.watches.propagations) {
-                        // Reached bound on number of conflicts:
-                        let progress_estimate = progressEstimate(&self.assigns);
-                        self.cancelUntil(GroundLevel);
-                        return SearchResult::Interrupted(progress_estimate);
-                    }
-
-                    // Simplify the set of problem clauses:
-                    if self.assigns.isGroundLevel() && !self.simplify() {
-                        return SearchResult::UnSAT;
-                    }
-
-                    if (self.db.learnts() as f64) >= self.learnt.border() + (self.assigns.numberOfAssigns() as f64) {
-                        // Reduce the set of learnt clauses:
-                        self.db.reduce(&mut self.assigns, &mut self.watches);
-                        if self.db.ca.checkGarbage(self.settings.garbage_frac) {
-                            self.garbageCollect();
-                        }
-                    }
-
-                    let mut next = None;
-                    while self.assigns.decisionLevel().offset() < assumptions.len() {
-                        // Perform user provided assumption:
-                        let p = assumptions[self.assigns.decisionLevel().offset()];
-                        match self.assigns.ofLit(p) {
-                            LitVal::True  => {
-                                // Dummy decision level:
-                                self.assigns.newDecisionLevel();
-                            }
-                            LitVal::False => {
-                                let conflict = self.analyze.analyzeFinal(&self.db.ca, &self.assigns, !p);
-                                return SearchResult::AssumpsConfl(conflict);
-                            }
-                            LitVal::Undef => {
-                                next = Some(p);
-                                break;
-                            }
-                        }
-                    }
-
-                    if let None = next {
-                        // New variable decision:
-                        self.stats.decisions += 1;
-                        match self.heur.pickBranchLit(&self.assigns) {
-                            Some(n) => { next = Some(n) }
-                            None    => { return SearchResult::SAT; } // Model found:
-                        };
-                    }
-
-                    // Increase decision level and enqueue 'next'
-                    self.assigns.newDecisionLevel();
-                    self.assigns.assignLit(next.unwrap(), None);
-                }
-            }
-        }
-    }
-
     fn garbageCollect(&mut self) {
         // Initialize the next region to a size corresponding to the estimated utilization degree. This
         // is not precise but should avoid some unnecessary reallocations for the new region:
 
         let to = ClauseAllocator::newForGC(&self.db.ca);
-        self.relocAll(to);
+        self.relocGC(to);
     }
 
-    fn relocAll(&mut self, mut to : ClauseAllocator) {
+    fn relocGC(&mut self, mut to : ClauseAllocator) {
         self.watches.relocGC(&mut self.db.ca, &mut to);
         self.assigns.relocGC(&mut self.db.ca, &mut to);
         self.db.relocGC(to);
@@ -552,7 +577,7 @@ impl CoreSolver {
 }
 
 
-fn isImplied(core : &mut CoreSolver, c : &[Lit]) -> bool {
+fn isImplied(core : &mut CoreSearcher, c : &[Lit]) -> bool {
     assert!(core.assigns.isGroundLevel());
 
     core.assigns.newDecisionLevel();
