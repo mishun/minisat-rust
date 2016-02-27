@@ -2,7 +2,7 @@ use sat::{self, PartialResult, TotalResult, Solver};
 use sat::formula::{Var, Lit, LitMap};
 use sat::formula::clause::*;
 use sat::formula::assignment::*;
-use self::clause_db::*;
+use self::clause_db::{ClauseDB, ClauseDBSettings};
 use self::conflict::{AnalyzeContext, Conflict};
 pub use self::conflict::CCMinMode;
 use self::decision_heuristic::{DecisionHeuristicSettings, DecisionHeuristic};
@@ -155,7 +155,7 @@ impl Solver for CoreSolver {
     }
 
     fn nClauses(&self) -> usize {
-        self.search.db.num_clauses
+        self.search.db.stats.num_clauses
     }
 
     fn newVar(&mut self, upol : Option<bool>, dvar : bool) -> Var {
@@ -196,7 +196,6 @@ impl Solver for CoreSolver {
     }
 }
 
-
 impl CoreSolver {
     pub fn new(settings : Settings) -> CoreSolver {
         CoreSolver { restart : settings.restart
@@ -213,7 +212,7 @@ impl CoreSolver {
             if let AddClause::UnSAT = res { self.ok = false; }
             res
         } else {
-            return AddClause::UnSAT;
+            AddClause::UnSAT
         }
     }
 
@@ -236,7 +235,7 @@ impl CoreSolver {
         if !self.ok { return PartialResult::UnSAT; }
 
         self.search.stats.solves += 1;
-        self.learnt.reset(self.search.db.num_clauses);
+        self.learnt.reset(self.search.db.stats.num_clauses);
 
         info!("============================[ Search Statistics ]==============================");
         info!("| Conflicts |          ORIGINAL         |          LEARNT          | Progress |");
@@ -298,10 +297,10 @@ enum SearchResult {
 }
 
 
-enum AddClause {
+enum AddClause<'c> {
     UnSAT,
     Consumed,
-    Added(ClauseRef)
+    Added(&'c Clause, ClauseRef)
 }
 
 
@@ -392,7 +391,7 @@ impl CoreSearcher {
             _ => {
                 let (c, cr) = self.db.addClause(ps);
                 self.watches.watchClause(c, cr);
-                AddClause::Added(cr)
+                AddClause::Added(c, cr)
             }
         }
     }
@@ -426,7 +425,10 @@ impl CoreSearcher {
 
             if (self.db.learnts() as f64) >= learnt.border() + (self.assigns.numberOfAssigns() as f64) {
                 // Reduce the set of learnt clauses:
-                self.db.reduce(&mut self.assigns, &mut self.watches);
+                {
+                    let watches = &mut self.watches;
+                    self.db.reduce(&mut self.assigns, move |c| { watches.unwatchClauseLazy(c); });
+                }
 
                 if self.db.ca.checkGarbage(self.settings.garbage_frac) {
                     self.garbageCollect();
@@ -499,11 +501,11 @@ impl CoreSearcher {
                 info!("| {:9} | {:7} {:8} {:8} | {:8} {:8} {:6.0} | {:6.3} % |",
                         self.stats.conflicts,
                         self.heur.dec_vars - self.assigns.numberOfGroundAssigns(),
-                        self.db.num_clauses,
-                        self.db.clauses_literals,
+                        self.db.stats.num_clauses,
+                        self.db.stats.clauses_literals,
                         learnt.border() as u64,
-                        self.db.num_learnts,
-                        (self.db.learnts_literals as f64) / (self.db.num_learnts as f64),
+                        self.db.stats.num_learnts,
+                        (self.db.stats.learnts_literals as f64) / (self.db.stats.num_learnts as f64),
                         progressEstimate(&self.assigns) * 100.0
                 );
             }
@@ -520,7 +522,10 @@ impl CoreSearcher {
             return;
         }
 
-        self.db.removeSatisfied(&mut self.assigns, &mut self.watches);
+        {
+            let watches = &mut self.watches;
+            self.db.removeSatisfied(&mut self.assigns, move |c| { watches.unwatchClauseLazy(c); });
+        }
 
 //        // TODO: why if?
 //        if self.db.settings.remove_satisfied {
@@ -551,7 +556,7 @@ impl CoreSearcher {
         }
 
         self.heur.rebuildOrderHeap(&self.assigns);
-        self.simp.setNext(self.assigns.numberOfAssigns(), self.watches.propagations, self.db.clauses_literals + self.db.learnts_literals); // (shouldn't depend on stats really, but it will do for now)
+        self.simp.setNext(self.assigns.numberOfAssigns(), self.watches.propagations, self.db.stats.clauses_literals + self.db.stats.learnts_literals); // (shouldn't depend on stats really, but it will do for now)
     }
 
     // Revert to the state at given level (keeping all assignment at 'level' but not beyond).

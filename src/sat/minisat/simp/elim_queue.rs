@@ -28,7 +28,7 @@ impl ElimQueue {
         self.n_occ.insert(&v.negLit(), 0);
 
         let ref n_occ = self.n_occ;
-        self.heap.insert(v, |a, b| { Self::before(n_occ, a, b) });
+        self.heap.insert(v, move |a, b| { Self::before(n_occ, a, b) });
     }
 
     #[inline]
@@ -46,9 +46,9 @@ impl ElimQueue {
     pub fn updateElimHeap(&mut self, v : Var, var_status : &VarMap<VarStatus>, assigns : &Assignment) {
         let ref n_occ = self.n_occ;
         if self.heap.contains(&v) {
-            self.heap.update(&v, |a, b| { Self::before(n_occ, a, b) });
+            self.heap.update(&v, move |a, b| { Self::before(n_occ, a, b) });
         } else if var_status[&v].frozen == 0 && var_status[&v].eliminated == 0 && assigns.isUndef(v) {
-            self.heap.insert(v, |a, b| { Self::before(n_occ, a, b) });
+            self.heap.insert(v, move |a, b| { Self::before(n_occ, a, b) });
         }
     }
 
@@ -60,13 +60,13 @@ impl ElimQueue {
         self.n_occ[lit] += delta;
 
         let ref n_occ = self.n_occ;
-        self.heap.update(&lit.var(), |a, b| { Self::before(n_occ, a, b) });
+        self.heap.update(&lit.var(), move |a, b| { Self::before(n_occ, a, b) });
     }
 
     pub fn pop(&mut self) -> Option<Var>
     {
         let ref n_occ = self.n_occ;
-        self.heap.pop(|a, b| { Self::before(n_occ, a, b) })
+        self.heap.pop(move |a, b| { Self::before(n_occ, a, b) })
     }
 }
 
@@ -111,8 +111,8 @@ impl OccLists {
         &ol.occs
     }
 
-    pub fn getDirty(&self, v : &Var) -> &Vec<ClauseRef> {
-        &self.occs[v].occs
+    pub fn occsDirty(&self, v : Var) -> usize {
+        self.occs[&v].occs.len()
     }
 
     pub fn smudge(&mut self, v : &Var) {

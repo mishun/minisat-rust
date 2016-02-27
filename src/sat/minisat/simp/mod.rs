@@ -225,9 +225,9 @@ impl Simplificator {
         //#endif
 
         match core.addClause_(ps) {
-            super::AddClause::UnSAT     => { false }
-            super::AddClause::Consumed  => { true }
-            super::AddClause::Added(cr) => {
+            super::AddClause::UnSAT        => { false }
+            super::AddClause::Consumed     => { true }
+            super::AddClause::Added(c, cr) => {
                 // NOTE: the clause is added to the queue immediately and then
                 // again during 'gatherTouchedClauses()'. If nothing happens
                 // in between, it will only be checked once. Otherwise, it may
@@ -236,7 +236,7 @@ impl Simplificator {
                 // forward subsumption.
                 self.subsumption_queue.push(cr);
 
-                for lit in core.db.ca.view(cr).iter() {
+                for lit in c.iter() {
                     self.occurs.pushOcc(&lit.var(), cr);
                     self.touched[&lit.var()] = 1;
                     self.n_touched += 1;
@@ -530,7 +530,7 @@ impl Simplificator {
                         let mut best = c.head().var();
                         for lit in c.iterFrom(1) {
                             // TODO: why not use n_occ?
-                            if self.occurs.getDirty(&lit.var()).len() < self.occurs.getDirty(&best).len() {
+                            if self.occurs.occsDirty(lit.var()) < self.occurs.occsDirty(best) {
                                 best = lit.var();
                             }
                         }

@@ -4,7 +4,7 @@ use super::clause;
 use super::index_map::VarMap;
 
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
 pub struct DecisionLevel(usize);
 
 pub const GroundLevel : DecisionLevel = DecisionLevel(0);
