@@ -197,6 +197,7 @@ impl ClauseDB {
         } else if satisfiedWith(self.ca.view(cr), assigns) {
             notify(self.ca.view(cr));
             self.stats.del(self.ca.view(cr));
+            assigns.forgetReason(&self.ca, cr); // TODO: do we really need this?
             self.ca.free(cr);
             false
         } else {
