@@ -1,8 +1,8 @@
 use sat::formula::{Var, Lit, VarMap, LitMap};
 use sat::formula::clause::*;
 use sat::formula::assignment::*;
-use sat::minisat::clause_db::*;
-use sat::minisat::decision_heuristic::*;
+use super::clause_db::*;
+use super::decision_heuristic::*;
 
 
 #[derive(PartialEq, Eq)]

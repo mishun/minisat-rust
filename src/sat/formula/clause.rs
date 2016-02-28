@@ -328,6 +328,7 @@ impl ClauseAllocator {
         (self.wasted as f64) > (self.size as f64) * gf
     }
 
+    #[inline]
     pub fn isDeleted(&self, ClauseRef(index) : ClauseRef) -> bool {
         self.clauses[index].is_deleted()
     }

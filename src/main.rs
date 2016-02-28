@@ -79,7 +79,7 @@ fn main() {
 
     let solver = {
         let core_options = {
-            let mut s = minisat::Settings::default();
+            let mut s = minisat::CoreSettings::default();
 
             for &x in matches.value_of("var-decay").and_then(|s| s.parse().ok()).iter() {
                 if 0.0 < x && x < 1.0 { s.heur.var_decay = x; }
@@ -118,15 +118,15 @@ fn main() {
             if matches.is_present("rnd-init") { s.heur.rnd_init_act = true; }
             if matches.is_present("no-rnd-init") { s.heur.rnd_init_act = false; }
 
-            if matches.is_present("luby") { s.restart.luby_restart = true; }
-            if matches.is_present("no-luby") { s.restart.luby_restart = false; }
+            if matches.is_present("luby") { s.search.restart.luby_restart = true; }
+            if matches.is_present("no-luby") { s.search.restart.luby_restart = false; }
 
             for &x in matches.value_of("rfirst").and_then(|s| s.parse().ok()).iter() {
-                if 0.0 < x { s.restart.restart_first = x; }
+                if 0.0 < x { s.search.restart.restart_first = x; }
             }
 
             for &x in matches.value_of("rinc").and_then(|s| s.parse().ok()).iter() {
-                if 1.0 < x { s.restart.restart_inc = x; }
+                if 1.0 < x { s.search.restart.restart_inc = x; }
             }
 
             for &x in matches.value_of("gc-frac").and_then(|s| s.parse().ok()).iter() {
@@ -134,7 +134,7 @@ fn main() {
             }
 
             for &x in matches.value_of("min-learnts").and_then(|s| s.parse().ok()).iter() {
-                if 0 <= x { s.learnt.min_learnts_lim = x; }
+                if 0 <= x { s.search.learn.min_learnts_lim = x; }
             }
 
             if matches.is_present("rcheck") { s.core.use_rcheck = true; }
@@ -147,7 +147,7 @@ fn main() {
             minisat_rust::SolverOptions::Core(core_options)
         } else {
             let simp_options = {
-                let mut s = minisat::simp::Settings::default();
+                let mut s = minisat::SimpSettings::default();
                 s.core = core_options;
 
                 if matches.is_present("asymm") { s.simp.use_asymm = true; }

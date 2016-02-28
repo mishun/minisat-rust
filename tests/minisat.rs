@@ -55,7 +55,7 @@ fn test_file(path : &path::Path) -> io::Result<()> {
     };
 
     let opts = Default::default();
-    let mut solver = minisat::simp::SimpSolver::new(opts);
+    let mut solver = minisat::SimpSolver::new(opts);
 
     let backward_subst =
         match dimacs::parseFile(path, &mut solver, false) {

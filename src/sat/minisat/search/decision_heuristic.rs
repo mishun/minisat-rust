@@ -4,7 +4,11 @@ use super::util;
 
 
 #[derive(PartialEq, Eq)]
-pub enum PhaseSaving { None, Limited, Full }
+pub enum PhaseSaving {
+    None,
+    Limited,
+    Full
+}
 
 
 pub struct DecisionHeuristicSettings {
@@ -18,12 +22,12 @@ pub struct DecisionHeuristicSettings {
 
 impl Default for DecisionHeuristicSettings {
     fn default() -> Self {
-        DecisionHeuristicSettings { var_decay         : 0.95
-                                  , random_seed       : 91648253.0
-                                  , random_var_freq   : 0.0
-                                  , phase_saving      : PhaseSaving::Full
-                                  , rnd_pol           : false
-                                  , rnd_init_act      : false
+        DecisionHeuristicSettings { var_decay       : 0.95
+                                  , random_seed     : 91648253.0
+                                  , random_var_freq : 0.0
+                                  , phase_saving    : PhaseSaving::Full
+                                  , rnd_pol         : false
+                                  , rnd_init_act    : false
                                   }
     }
 }

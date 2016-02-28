@@ -13,8 +13,8 @@ pub mod sat;
 
 
 pub enum SolverOptions {
-    Core(minisat::Settings),
-    Simp(minisat::simp::Settings)
+    Core(minisat::CoreSettings),
+    Simp(minisat::SimpSettings)
 }
 
 pub struct MainOptions {
@@ -35,7 +35,7 @@ pub fn solve(main_opts : MainOptions, solver_opts : SolverOptions) -> io::Result
         }
 
         SolverOptions::Simp(opts) => {
-            let mut solver = minisat::simp::SimpSolver::new(opts);
+            let mut solver = minisat::SimpSolver::new(opts);
             if !main_opts.pre { solver.preprocess(); }
             solveWith(solver, main_opts)
         }

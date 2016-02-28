@@ -23,7 +23,7 @@ pub struct Watches {
 }
 
 impl Watches {
-    pub fn new() -> Watches {
+    pub fn new() -> Self {
         Watches { watches      : LitMap::new()
                 , propagations : 0
                 }
@@ -35,10 +35,7 @@ impl Watches {
     }
 
     fn initLit(&mut self, lit : Lit) {
-        self.watches.insert(&lit, WatchesLine {
-            watchers : Vec::new(),
-            dirty    : false,
-        });
+        self.watches.insert(&lit, WatchesLine { watchers : Vec::new(), dirty : false });
     }
 
     pub fn tryClearVar(&mut self, var : Var) {
@@ -58,15 +55,13 @@ impl Watches {
         self.watches[&!c1].watchers.push(Watcher { cref : cr, blocker : c0 });
     }
 
-    pub fn unwatchClauseStrict(&mut self, c : &Clause, cr : ClauseRef)
-    {
+    pub fn unwatchClauseStrict(&mut self, c : &Clause, cr : ClauseRef) {
         let (c0, c1) = c.headPair();
         self.watches[&!c0].watchers.retain(|w| w.cref != cr);
         self.watches[&!c1].watchers.retain(|w| w.cref != cr);
     }
 
-    pub fn unwatchClauseLazy(&mut self, c : &Clause)
-    {
+    pub fn unwatchClauseLazy(&mut self, c : &Clause) {
         let (c0, c1) = c.headPair();
         self.watches[&!c0].dirty = true;
         self.watches[&!c1].dirty = true;
