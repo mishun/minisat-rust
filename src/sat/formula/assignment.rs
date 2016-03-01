@@ -1,7 +1,6 @@
 use std::{cmp, fmt};
 use super::{Var, Lit};
 use super::clause;
-use super::index_map::VarMap;
 
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
@@ -131,6 +130,13 @@ impl Assignment {
         line.vd.level  = DecisionLevel(self.lim.len());
         line.vd.reason = reason;
         self.trail.push(Lit(p));
+    }
+
+    #[inline]
+    pub fn rewriteLit(&mut self, Lit(p) : Lit) {
+        let ref mut line = self.assignment[p >> 1];
+        line.assign[p & 1]       = LitVal::True;
+        line.assign[(p & 1) ^ 1] = LitVal::False;
     }
 
     #[inline]
@@ -297,13 +303,14 @@ pub fn progressEstimate(assigns : &Assignment) -> f64 {
 }
 
 
-pub fn extractModel(assigns : &Assignment) -> VarMap<bool> {
-    let mut model = VarMap::new();
+pub fn extractModel(assigns : &Assignment) -> Vec<Lit> {
+    let mut model = Vec::new();
     for i in 0 .. assigns.assignment.len() {
+        let v = Var(i);
         match assigns.assignment[i].assign[0] {
             LitVal::Undef => {}
-            LitVal::False => { model.insert(&Var(i), false); }
-            LitVal::True  => { model.insert(&Var(i), true); }
+            LitVal::False => { model.push(v.negLit()); }
+            LitVal::True  => { model.push(v.posLit()); }
         }
     }
     model

@@ -1,4 +1,4 @@
-use sat::{self, PartialResult};
+use sat;
 use sat::formula::{Var, Lit, LitMap};
 use sat::formula::clause::*;
 use sat::formula::assignment::*;
@@ -151,6 +151,13 @@ pub enum AddClauseRes<'c> {
 }
 
 
+pub enum SearchRes {
+    UnSAT(sat::Stats),
+    SAT(Assignment, sat::Stats),
+    Interrupted(Searcher, f64, sat::Stats)
+}
+
+
 pub struct SearcherSettings {
     pub garbage_frac : f64,  // The fraction of wasted memory allowed before a garbage collection is triggered.
     pub use_rcheck   : bool, // Check if a clause is already implied. Prett costly, and subsumes subsumptions :)
@@ -260,18 +267,6 @@ impl Searcher {
         }
     }
 
-    pub fn stats(&self) -> sat::Stats {
-        sat::Stats { solves        : self.stats.solves
-                   , restarts      : self.stats.starts
-                   , decisions     : self.stats.decisions
-                   , rnd_decisions : self.heur.rnd_decisions
-                   , conflicts     : self.stats.conflicts
-                   , propagations  : self.watches.propagations
-                   , tot_literals  : self.analyze.tot_literals
-                   , del_literals  : self.analyze.max_literals - self.analyze.tot_literals
-                   }
-    }
-
     pub fn preprocess(&mut self) -> bool {
         if let None = self.watches.propagate(&mut self.db.ca, &mut self.assigns) {
             self.simplify();
@@ -281,7 +276,7 @@ impl Searcher {
         }
     }
 
-    pub fn search(&mut self, ss : &SearchSettings, budget : &budget::Budget, assumptions : &[Lit]) -> PartialResult {
+    pub fn search(mut self, ss : &SearchSettings, budget : &budget::Budget, assumptions : &[Lit]) -> SearchRes {
         info!("============================[ Search Statistics ]==============================");
         info!("| Conflicts |          ORIGINAL         |          LEARNT          | Progress |");
         info!("|           |    Vars  Clauses Literals |    Limit  Clauses Lit/Cl |          |");
@@ -294,31 +289,33 @@ impl Searcher {
         let mut curr_restarts = 0;
         loop {
             let conflicts_to_go = ss.restart.conflictsToGo(curr_restarts);
-            curr_restarts += 1;
-
             match self.searchLoop(conflicts_to_go, budget, &mut learnt, assumptions) {
                 LoopRes::Restart         => {
+                    curr_restarts += 1;
                 }
 
                 LoopRes::SAT             => {
-                    let model = extractModel(&self.assigns);
-                    self.cancelUntil(GroundLevel);
-                    return PartialResult::SAT(model);
+                    info!("===============================================================================");
+                    let stats = self.stats();
+                    return SearchRes::SAT(self.assigns, stats);
                 }
 
                 LoopRes::UnSAT           => {
-                    self.cancelUntil(GroundLevel);
-                    return PartialResult::UnSAT;
+                    info!("===============================================================================");
+                    return SearchRes::UnSAT(self.stats());
                 }
 
-                LoopRes::AssumpsConfl(_) => { // TODO: implement
-                    self.cancelUntil(GroundLevel);
-                    return PartialResult::UnSAT;
+                LoopRes::AssumpsConfl(_) => { // TODO: implement properly
+                    //self.cancelUntil(GroundLevel);
+                    info!("===============================================================================");
+                    return SearchRes::UnSAT(self.stats());
                 }
 
                 LoopRes::Interrupted(c)  => {
                     self.cancelUntil(GroundLevel);
-                    return PartialResult::Interrupted(c);
+                    info!("===============================================================================");
+                    let stats = self.stats();
+                    return SearchRes::Interrupted(self, c, stats);
                 }
             }
         }
@@ -510,6 +507,18 @@ impl Searcher {
         self.watches.relocGC(&mut self.db.ca, &mut to);
         self.assigns.relocGC(&mut self.db.ca, &mut to);
         self.db.relocGC(to);
+    }
+
+    pub fn stats(&self) -> sat::Stats {
+        sat::Stats { solves        : self.stats.solves
+                   , restarts      : self.stats.starts
+                   , decisions     : self.stats.decisions
+                   , rnd_decisions : self.heur.rnd_decisions
+                   , conflicts     : self.stats.conflicts
+                   , propagations  : self.watches.propagations
+                   , tot_literals  : self.analyze.tot_literals
+                   , del_literals  : self.analyze.max_literals - self.analyze.tot_literals
+                   }
     }
 }
 

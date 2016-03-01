@@ -7,7 +7,7 @@ extern crate vec_map;
 extern crate flate2;
 
 use std::{io, fs, path};
-use sat::{minisat, dimacs, TotalResult, Solver};
+use sat::*;
 
 pub mod sat;
 
@@ -69,61 +69,40 @@ pub fn solveWith<S : Solver>(mut solver : S, options : MainOptions) -> io::Resul
         if !elim_res {
             info!("===============================================================================");
             info!("Solved by simplification");
-            TotalResult::UnSAT
+            SolveRes::UnSAT(Stats::default())
         } else {
             let result =
                 if options.solve {
-                    solver.solve()
+                    solver.solveLimited(&[])
                 } else {
                     info!("===============================================================================");
-                    TotalResult::Interrupted
+                    SolveRes::Interrupted(0.0, Stats::default())
                 };
 
-            if let TotalResult::Interrupted = result {
-                if let Some(path) = options.dimacs_path {
-                    let mut out = try!(fs::File::create(path));
-                    try!(dimacs::write(&mut out, &solver));
-                }
-            }
+//            if let TotalResult::Interrupted = result {
+//                if let Some(path) = options.dimacs_path {
+//                    let mut out = try!(fs::File::create(path));
+//                    try!(dimacs::write(&mut out, &solver));
+//                }
+//            }
 
             result
         };
 
-    {
-        let cpu_time = time::precise_time_s() - initial_time;
-        let stats = solver.stats();
-
-        info!("restarts              : {:<12}", stats.restarts);
-        info!("conflicts             : {:<12}   ({:.0} /sec)", stats.conflicts, (stats.conflicts as f64) / cpu_time);
-
-        info!("decisions             : {:<12}   ({:4.2} % random) ({:.0} /sec)",
-            stats.decisions,
-            (stats.rnd_decisions as f64) * 100.0 / (stats.decisions as f64),
-            (stats.decisions as f64) / cpu_time
-        );
-
-        info!("propagations          : {:<12}   ({:.0} /sec)",  stats.propagations, (stats.propagations as f64) / cpu_time);
-
-        info!("conflict literals     : {:<12}   ({:4.2} % deleted)",
-            stats.tot_literals,
-            (stats.del_literals as f64) * 100.0 / (stats.tot_literals as f64)
-        );
-
-        info!("Memory used           : {:.2} MB", 0.0);
-        info!("CPU time              : {} s", cpu_time);
-        info!("");
-    }
-
+    let cpu_time = time::precise_time_s() - initial_time;
     match result {
-        TotalResult::UnSAT       => {
+        SolveRes::UnSAT(ref stats)           => {
+            printStats(stats, cpu_time);
             println!("UNSATISFIABLE");
         }
 
-        TotalResult::Interrupted => {
+        SolveRes::Interrupted(_, ref stats)  => {
+            printStats(stats, cpu_time);
             println!("INDETERMINATE");
         }
 
-        TotalResult::SAT(ref model)  => {
+        SolveRes::SAT(ref model, ref stats)  => {
+            printStats(stats, cpu_time);
             println!("SATISFIABLE");
             assert!(try!(dimacs::validateModelFile(&options.in_path, &backward_subst, &model)), "SELF-CHECK FAILED");
         }
@@ -134,4 +113,26 @@ pub fn solveWith<S : Solver>(mut solver : S, options : MainOptions) -> io::Resul
     }
 
     Ok(())
+}
+
+fn printStats(stats : &Stats, cpu_time : f64) {
+    info!("restarts              : {:<12}", stats.restarts);
+    info!("conflicts             : {:<12}   ({:.0} /sec)", stats.conflicts, (stats.conflicts as f64) / cpu_time);
+
+    info!("decisions             : {:<12}   ({:4.2} % random) ({:.0} /sec)",
+        stats.decisions,
+        (stats.rnd_decisions as f64) * 100.0 / (stats.decisions as f64),
+        (stats.decisions as f64) / cpu_time
+    );
+
+    info!("propagations          : {:<12}   ({:.0} /sec)",  stats.propagations, (stats.propagations as f64) / cpu_time);
+
+    info!("conflict literals     : {:<12}   ({:4.2} % deleted)",
+        stats.tot_literals,
+        (stats.del_literals as f64) * 100.0 / (stats.tot_literals as f64)
+    );
+
+    info!("Memory used           : {:.2} MB", 0.0);
+    info!("CPU time              : {} s", cpu_time);
+    info!("");
 }

@@ -1,24 +1,11 @@
-use sat::formula::{Var, Lit, VarMap};
+use sat::formula::{Var, Lit};
 
 pub mod dimacs;
 pub mod formula;
 pub mod minisat;
 
 
-pub enum PartialResult {
-    UnSAT,
-    SAT(VarMap<bool>),
-    Interrupted(f64)
-}
-
-
-pub enum TotalResult {
-    UnSAT,
-    SAT(VarMap<bool>),
-    Interrupted
-}
-
-
+#[derive(Default)]
 pub struct Stats {
     pub solves        : u64,
     pub restarts      : u64,
@@ -31,12 +18,18 @@ pub struct Stats {
 }
 
 
+pub enum SolveRes {
+    UnSAT(Stats),
+    SAT(Vec<Lit>, Stats),
+    Interrupted(f64, Stats)
+}
+
+
 pub trait Solver {
     fn nVars(&self) -> usize;
     fn nClauses(&self) -> usize;
     fn newVar(&mut self, upol : Option<bool>, dvar : bool) -> Var;
     fn addClause(&mut self, clause : &[Lit]) -> bool;
     fn preprocess(&mut self) -> bool;
-    fn solve(&mut self) -> TotalResult;
-    fn stats(&self) -> Stats;
+    fn solveLimited(self, &[Lit]) -> SolveRes;
 }

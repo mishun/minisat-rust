@@ -1,9 +1,8 @@
-use sat;
 use sat::formula::{Var, Lit, VarMap};
 use sat::formula::assignment::*;
 use sat::formula::clause::*;
 use sat::formula::util::*;
-use super::{Searcher, SearchSettings};
+use super::{Searcher, SearchSettings, SearchRes};
 use super::super::budget::Budget;
 use self::subsumption_queue::*;
 
@@ -104,7 +103,7 @@ impl Simplificator {
         }
     }
 
-    pub fn solveLimited(&mut self, search : &mut Searcher, ss : &SearchSettings, budget : &Budget, elimclauses : &mut elim_clauses::ElimClauses, assumptions : &[Lit]) -> sat::PartialResult {
+    pub fn solveLimited(&mut self, mut search : Searcher, ss : &SearchSettings, budget : &Budget, elimclauses : &mut elim_clauses::ElimClauses, assumptions : &[Lit]) -> SearchRes {
         let mut extra_frozen : Vec<Var> = Vec::new();
 
         // Assumptions must be temporarily frozen to run variable elimination:
@@ -120,21 +119,24 @@ impl Simplificator {
             }
         }
 
-        let result =
-            if search.preprocess() && self.eliminate(search, budget, elimclauses) {
-                search.search(ss, budget, assumptions)
-            } else {
-                sat::PartialResult::UnSAT
-            };
+        if search.preprocess() && self.eliminate(&mut search, budget, elimclauses) {
+            match search.search(ss, budget, assumptions) {
+                SearchRes::Interrupted(ns, prog, stats) => {
 
-        // Unfreeze the assumptions that were frozen:
-        for &v in extra_frozen.iter() {
-            self.var_status[&v].frozen = 0;
-            self.elim.updateElimHeap(v, &self.var_status, &search.assigns);
+                    // Unfreeze the assumptions that were frozen:
+                    for &v in extra_frozen.iter() {
+                        self.var_status[&v].frozen = 0;
+                        self.elim.updateElimHeap(v, &self.var_status, &ns.assigns);
+                    }
+
+                    SearchRes::Interrupted(ns, prog, stats)
+                }
+
+                other => { other }
+            }
+        } else {
+            SearchRes::UnSAT(search.stats())
         }
-
-        info!("===============================================================================");
-        result
     }
 
     pub fn eliminate(&mut self, search : &mut Searcher, budget : &Budget, elimclauses : &mut elim_clauses::ElimClauses) -> bool {

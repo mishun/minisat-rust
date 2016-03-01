@@ -4,7 +4,7 @@ use std::io::{Seek, SeekFrom};
 use std::collections::{HashSet, HashMap};
 use flate2::read::GzDecoder;
 use sat::formula::{Var, Lit, VarMap};
-use sat::{TotalResult, Solver};
+use sat::{Solver, SolveRes};
 
 
 pub fn write<W : io::Write, S : Solver>(_ : W, _ : &S) -> io::Result<()> {
@@ -31,21 +31,21 @@ pub fn parse<R : io::Read, S : Solver>(reader : R, solver : &mut S, validate : b
 }
 
 
-pub fn writeResult<W : io::Write>(mut writer : W, result : TotalResult, backward_subst : &VarMap<i32>) -> io::Result<()> {
+pub fn writeResult<W : io::Write>(mut writer : W, result : SolveRes, backward_subst : &VarMap<i32>) -> io::Result<()> {
     match result {
-        TotalResult::UnSAT       => {
+        SolveRes::UnSAT(_)          => {
             try!(writeln!(writer, "UNSAT"));
         }
 
-        TotalResult::Interrupted => {
+        SolveRes::Interrupted(_, _) => {
             try!(writeln!(writer, "INDET"));
         }
 
-        TotalResult::SAT(model)  => {
+        SolveRes::SAT(model, _)     => {
             try!(writeln!(writer, "SAT"));
-            for (var, &val) in model.iter() {
-                let var_id = backward_subst[&var];
-                try!(write!(writer, "{} ", if val { var_id } else { -var_id }));
+            for lit in model.iter() {
+                let var_id = backward_subst[&lit.var()];
+                try!(write!(writer, "{} ", if lit.sign() { -var_id } else { var_id }));
             }
             try!(writeln!(writer, "0"));
         }
@@ -54,7 +54,7 @@ pub fn writeResult<W : io::Write>(mut writer : W, result : TotalResult, backward
 }
 
 
-pub fn validateModelFile<P : AsRef<path::Path>>(path : P, backward_subst : &VarMap<i32>, model : &VarMap<bool>) -> io::Result<bool> {
+pub fn validateModelFile<P : AsRef<path::Path>>(path : P, backward_subst : &VarMap<i32>, model : &Vec<Lit>) -> io::Result<bool> {
     let mut reader = io::BufReader::new(try!(fs::File::open(path)));
     if let Ok(gz) = GzDecoder::new(&mut reader) {
         return validateModel(gz, backward_subst, model);
@@ -64,12 +64,12 @@ pub fn validateModelFile<P : AsRef<path::Path>>(path : P, backward_subst : &VarM
     validateModel(reader, backward_subst, model)
 }
 
-pub fn validateModel<R : io::Read>(reader : R, backward_subst : &VarMap<i32>, model : &VarMap<bool>) -> io::Result<bool> {
+pub fn validateModel<R : io::Read>(reader : R, backward_subst : &VarMap<i32>, model : &Vec<Lit>) -> io::Result<bool> {
     let mut lits = HashSet::new();
-    for (var, &value) in model.iter() {
+    for lit in model.iter() {
         let lit_id = {
-            let var_id = backward_subst[&var];
-            if value { var_id } else { -var_id }
+            let var_id = backward_subst[&lit.var()];
+            if lit.sign() { -var_id } else { var_id }
         };
 
         lits.insert(lit_id);

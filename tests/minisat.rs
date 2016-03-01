@@ -3,7 +3,7 @@ extern crate minisat_rust;
 
 use std::{io, fs, path, process};
 use std::io::{Read, Seek};
-use minisat_rust::sat::{dimacs, minisat, Solver, TotalResult};
+use minisat_rust::sat::{dimacs, minisat, Solver, SolveRes, Stats};
 
 
 #[test]
@@ -49,7 +49,6 @@ fn test_file(path : &path::Path) -> io::Result<()> {
 
         let len = stdout.len();
         assert!(len > 10);
-        assert!(stdout[len - 1] == "UNSATISFIABLE" || stdout[len - 1] == "SATISFIABLE");
 
         (output, stdout)
     };
@@ -66,20 +65,28 @@ fn test_file(path : &path::Path) -> io::Result<()> {
     let mut output = try!(tempfile::tempfile());
     let res =
         if !solver.preprocess() {
-            TotalResult::UnSAT
+            SolveRes::UnSAT(Default::default())
         } else {
-            solver.solve()
+            solver.solveLimited(&[])
         };
+
+    match res {
+        SolveRes::SAT(_, ref stats) => {
+            assert!(stdout.last().unwrap() == "SATISFIABLE");
+            test_stats(path, stats, &stdout);
+        }
+
+        SolveRes::UnSAT(ref stats)  => {
+            assert!(stdout.last().unwrap() == "UNSATISFIABLE");
+            test_stats(path, stats, &stdout);
+        }
+
+        _                           => {
+            assert!(false, "Unexpected result");
+        }
+    }
+
     try!(dimacs::writeResult(&mut output, res, &backward_subst));
-
-    let stats = solver.stats();
-    let base = stdout.len() - 9;
-    assert!(stats.restarts     == parse_stats(&stdout[base + 0], &["restarts"]), "Number of restarts on {}", path.display());
-    assert!(stats.conflicts    == parse_stats(&stdout[base + 1], &["conflicts"]), "Number of conflicts on {}", path.display());
-    assert!(stats.decisions    == parse_stats(&stdout[base + 2], &["decisions"]), "Number of decisions on {}", path.display());
-    assert!(stats.propagations == parse_stats(&stdout[base + 3], &["propagations"]), "Number of propagations on {}", path.display());
-    assert!(stats.tot_literals == parse_stats(&stdout[base + 4], &["conflict", "literals"]), "Number of conflict literals on {}", path.display());
-
     let result = {
         try!(output.seek(io::SeekFrom::Start(0)));
         let mut buf = String::new();
@@ -91,6 +98,15 @@ fn test_file(path : &path::Path) -> io::Result<()> {
     Ok(())
 }
 
+
+fn test_stats(path : &path::Path, stats : &Stats, stdout : &Vec<String>) {
+    let base = stdout.len() - 9;
+    assert!(stats.restarts     == parse_stats(&stdout[base + 0], &["restarts"]), "Number of restarts on {}", path.display());
+    assert!(stats.conflicts    == parse_stats(&stdout[base + 1], &["conflicts"]), "Number of conflicts on {}", path.display());
+    assert!(stats.decisions    == parse_stats(&stdout[base + 2], &["decisions"]), "Number of decisions on {}", path.display());
+    assert!(stats.propagations == parse_stats(&stdout[base + 3], &["propagations"]), "Number of propagations on {}", path.display());
+    assert!(stats.tot_literals == parse_stats(&stdout[base + 4], &["conflict", "literals"]), "Number of conflict literals on {}", path.display());
+}
 
 fn parse_stats(line : &String, header : &[&str]) -> u64 {
     let mut it = line.split(' ').filter(|s| !s.is_empty());

@@ -1,5 +1,6 @@
 use std::mem;
-use sat::formula::{Var, Lit, VarMap};
+use sat::formula::{Var, Lit};
+use sat::formula::assignment::*;
 use sat::formula::clause::Clause;
 
 
@@ -47,7 +48,7 @@ impl ElimClauses {
         self.sizes.push(c.len());
     }
 
-    pub fn extendModel(&self, model : &mut VarMap<bool>) {
+    pub fn extend(&self, assigns : &mut Assignment) {
         if !self.extend_model { return; }
 
         let mut i = self.literals.len();
@@ -60,10 +61,9 @@ impl ElimClauses {
             i -= 1;
             let mut skip = false;
             while j > 1 {
-                let x = self.literals[i];
-                match model.get(&x.var()) {
-                    Some(&s) if s == x.sign() => {}
-                    _                         => { skip = true; break; }
+                if assigns.isSat(self.literals[i]) {
+                    skip = true;
+                    break;
                 }
 
                 j -= 1;
@@ -71,8 +71,7 @@ impl ElimClauses {
             }
 
             if !skip {
-                let x = self.literals[i];
-                model.insert(&x.var(), !x.sign());
+                assigns.rewriteLit(self.literals[i]);
             }
 
             if i > j - 1 {
