@@ -8,6 +8,7 @@ extern crate flate2;
 
 use std::{io, fs, path};
 use sat::*;
+use sat::minisat::budget::Budget;
 
 pub mod sat;
 
@@ -36,7 +37,7 @@ pub fn solve(main_opts : MainOptions, solver_opts : SolverOptions) -> io::Result
 
         SolverOptions::Simp(opts) => {
             let mut solver = minisat::SimpSolver::new(opts);
-            if !main_opts.pre { solver.preprocess(); }
+            if !main_opts.pre { solver.preprocess(&Budget::new()); }
             solveWith(solver, main_opts)
         }
     }
@@ -57,7 +58,10 @@ pub fn solveWith<S : Solver>(mut solver : S, options : MainOptions) -> io::Resul
     let parsed_time = time::precise_time_s();
     info!("|  Parse time:           {:12.2} s                                       |", parsed_time - initial_time);
 
-    let elim_res = solver.preprocess();
+    let mut budget = Budget::new();
+    budget.off();
+
+    let elim_res = solver.preprocess(&budget);
     {
         let simplified_time = time::precise_time_s();
         info!("|  Simplification time:  {:12.2} s                                       |", simplified_time - parsed_time);
@@ -73,10 +77,10 @@ pub fn solveWith<S : Solver>(mut solver : S, options : MainOptions) -> io::Resul
         } else {
             let result =
                 if options.solve {
-                    solver.solveLimited(&[])
+                    solver.solveLimited(&budget, &[])
                 } else {
                     info!("===============================================================================");
-                    SolveRes::Interrupted(0.0, Stats::default())
+                    SolveRes::Interrupted(0.0, solver)
                 };
 
 //            if let TotalResult::Interrupted = result {
@@ -91,17 +95,17 @@ pub fn solveWith<S : Solver>(mut solver : S, options : MainOptions) -> io::Resul
 
     let cpu_time = time::precise_time_s() - initial_time;
     match result {
-        SolveRes::UnSAT(ref stats)           => {
+        SolveRes::UnSAT(ref stats)          => {
             printStats(stats, cpu_time);
             println!("UNSATISFIABLE");
         }
 
-        SolveRes::Interrupted(_, ref stats)  => {
-            printStats(stats, cpu_time);
+        SolveRes::Interrupted(_, ref s)     => {
+            printStats(&s.stats(), cpu_time);
             println!("INDETERMINATE");
         }
 
-        SolveRes::SAT(ref model, ref stats)  => {
+        SolveRes::SAT(ref model, ref stats) => {
             printStats(stats, cpu_time);
             println!("SATISFIABLE");
             assert!(try!(dimacs::validateModelFile(&options.in_path, &backward_subst, &model)), "SELF-CHECK FAILED");

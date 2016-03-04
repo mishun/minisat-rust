@@ -1,4 +1,4 @@
-use sat::{Solver, SolveRes};
+use sat::{Solver, SolveRes, Stats};
 use sat::formula::{Var, Lit};
 use sat::formula::assignment::*;
 use self::search::clause_db::ClauseDBSettings;
@@ -8,6 +8,7 @@ pub use self::search::decision_heuristic::PhaseSaving;
 use self::search::*;
 use self::search::simplify::elim_clauses::*;
 use self::search::simplify::*;
+use self::budget::Budget;
 
 pub mod budget;
 mod search;
@@ -26,8 +27,7 @@ pub struct CoreSettings {
 pub struct CoreSolver {
     ok     : bool,             // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
     ss     : SearchSettings,
-    search : Searcher,
-    budget : budget::Budget
+    search : Searcher
 }
 
 impl Solver for CoreSolver {
@@ -52,42 +52,41 @@ impl Solver for CoreSolver {
         self.ok
     }
 
-    fn preprocess(&mut self) -> bool {
+    fn preprocess(&mut self, _ : &Budget) -> bool {
         if self.ok {
             self.ok = self.search.preprocess();
         }
         self.ok
     }
 
-//    fn solve(mut self) -> TotalResult {
-//        self.budget.off();
-//        match self.solveLimited(&[]) {
-//            PartialResult::UnSAT          => { TotalResult::UnSAT }
-//            PartialResult::SAT(model)     => { TotalResult::SAT(model) }
-//            PartialResult::Interrupted(_) => { TotalResult::Interrupted }
-//            // _                             => { panic!("Impossible happened") }
-//        }
-//    }
-
-    fn solveLimited(mut self, assumptions : &[Lit]) -> SolveRes {
+    fn solveLimited(self, budget : &Budget, assumptions : &[Lit]) -> SolveRes<Self> {
         if self.ok {
-            match self.search.search(&self.ss, &self.budget, assumptions) {
-                SearchRes::UnSAT(stats)             => { self.ok = false; SolveRes::UnSAT(stats) }
-                SearchRes::SAT(assigns, stats)      => { SolveRes::SAT(extractModel(&assigns), stats) }
-                SearchRes::Interrupted(_, c, stats) => { SolveRes::Interrupted(c, stats) }
+            match self.search.search(&self.ss, budget, assumptions) {
+                SearchRes::UnSAT(stats)        => { SolveRes::UnSAT(stats) }
+                SearchRes::SAT(assigns, stats) => { SolveRes::SAT(extractModel(&assigns), stats) }
+                SearchRes::Interrupted(c, s)   => {
+                    SolveRes::Interrupted(c,
+                        CoreSolver { ok     : true
+                                   , ss     : self.ss
+                                   , search : s
+                                   })
+                }
             }
         } else {
             SolveRes::UnSAT(self.search.stats())
         }
     }
+
+    fn stats(&self) -> Stats {
+        self.search.stats()
+    }
 }
 
 impl CoreSolver {
     pub fn new(settings : CoreSettings) -> Self {
-        CoreSolver { ok      : true
-                   , ss      : settings.search
-                   , search  : Searcher::new(settings.core, settings.db, settings.heur, settings.ccmin_mode)
-                   , budget  : budget::Budget::new()
+        CoreSolver { ok     : true
+                   , ss     : settings.search
+                   , search : Searcher::new(settings.core, settings.db, settings.heur, settings.ccmin_mode)
                    }
     }
 }
@@ -143,15 +142,15 @@ impl Solver for SimpSolver {
         }
     }
 
-    fn preprocess(&mut self) -> bool {
-        if !self.core.preprocess() {
+    fn preprocess(&mut self, budget : &Budget) -> bool {
+        if !self.core.preprocess(budget) {
             return false;
         }
 
         let turn_off_elim = true;
         let result =
             if let Some(ref mut simp) = self.simp {
-                let result = simp.eliminate(&mut self.core.search, &self.core.budget, &mut self.elimclauses);
+                let result = simp.eliminate(&mut self.core.search, budget, &mut self.elimclauses);
                 if !result { self.core.ok = false; }
 // TODO:
 //                if !turn_off_elim && self.core.search.db.ca.checkGarbage(self.core.search.settings.garbage_frac) {
@@ -170,39 +169,58 @@ impl Solver for SimpSolver {
         result
     }
 
-    fn solveLimited(mut self, assumptions : &[Lit]) -> SolveRes {
+    fn solveLimited(mut self, budget : &Budget, assumptions : &[Lit]) -> SolveRes<Self> {
         match self.simp {
-            Some(ref mut simp) => {
-                match simp.solveLimited(self.core.search, &self.core.ss, &mut self.core.budget, &mut self.elimclauses, assumptions) {
-                    SearchRes::UnSAT(stats)             => {
-                        self.core.ok = false;
+            Some(mut simp) => {
+                match simp.solveLimited(self.core.search, &self.core.ss, budget, &mut self.elimclauses, assumptions) {
+                    SearchRes::UnSAT(stats)            => {
                         SolveRes::UnSAT(stats)
                     }
 
-                    SearchRes::SAT(mut assigns, stats)  => {
+                    SearchRes::SAT(mut assigns, stats) => {
                         self.elimclauses.extend(&mut assigns);
                         SolveRes::SAT(extractModel(&assigns), stats)
                     }
 
-                    SearchRes::Interrupted(_, c, stats) => {
+                    SearchRes::Interrupted(c, s)       => {
                 // TODO:
                 //        if turn_off_simp {
                 //            self.simpOff();
                 //        }
-                        SolveRes::Interrupted(c, stats)
+                        SolveRes::Interrupted(c,
+                            SimpSolver { core        : CoreSolver { ok : true, ss : self.core.ss, search : s }
+                                       , elimclauses : self.elimclauses
+                                       , simp        : Some(simp)
+                                       })
                     }
                 }
             }
 
             _ => {
-                match self.core.search.search(&self.core.ss, &self.core.budget, assumptions) {
-                    SearchRes::UnSAT(stats)             => { self.core.ok = false; SolveRes::UnSAT(stats) }
-                    SearchRes::SAT(mut assigns, stats)      => { self.elimclauses.extend(&mut assigns); SolveRes::SAT(extractModel(&assigns), stats) }
-                    SearchRes::Interrupted(_, c, stats) => { SolveRes::Interrupted(c, stats) }
+                match self.core.search.search(&self.core.ss, budget, assumptions) {
+                    SearchRes::UnSAT(stats)            => {
+                        SolveRes::UnSAT(stats)
+                    }
+
+                    SearchRes::SAT(mut assigns, stats) => {
+                        self.elimclauses.extend(&mut assigns);
+                        SolveRes::SAT(extractModel(&assigns), stats)
+                    }
+
+                    SearchRes::Interrupted(c, s)       => {
+                        SolveRes::Interrupted(c,
+                            SimpSolver { core        : CoreSolver { ok : true, ss : self.core.ss, search : s }
+                                       , elimclauses : self.elimclauses
+                                       , simp        : None
+                                       })
+                    }
                 }
-                //self.core.solveLimited(assumptions)
             }
         }
+    }
+
+    fn stats(&self) -> Stats {
+        self.core.search.stats()
     }
 }
 

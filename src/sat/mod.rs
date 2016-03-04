@@ -18,18 +18,19 @@ pub struct Stats {
 }
 
 
-pub enum SolveRes {
+pub enum SolveRes<Solver> {
     UnSAT(Stats),
     SAT(Vec<Lit>, Stats),
-    Interrupted(f64, Stats)
+    Interrupted(f64, Solver)
 }
 
 
-pub trait Solver {
+pub trait Solver : Sized {
     fn nVars(&self) -> usize;
     fn nClauses(&self) -> usize;
     fn newVar(&mut self, upol : Option<bool>, dvar : bool) -> Var;
     fn addClause(&mut self, clause : &[Lit]) -> bool;
-    fn preprocess(&mut self) -> bool;
-    fn solveLimited(self, &[Lit]) -> SolveRes;
+    fn preprocess(&mut self, &minisat::budget::Budget) -> bool;
+    fn solveLimited(self, &minisat::budget::Budget, &[Lit]) -> SolveRes<Self>;
+    fn stats(&self) -> Stats;
 }

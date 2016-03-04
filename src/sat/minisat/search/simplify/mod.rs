@@ -121,7 +121,7 @@ impl Simplificator {
 
         if search.preprocess() && self.eliminate(&mut search, budget, elimclauses) {
             match search.search(ss, budget, assumptions) {
-                SearchRes::Interrupted(ns, prog, stats) => {
+                SearchRes::Interrupted(prog, ns) => {
 
                     // Unfreeze the assumptions that were frozen:
                     for &v in extra_frozen.iter() {
@@ -129,7 +129,7 @@ impl Simplificator {
                         self.elim.updateElimHeap(v, &self.var_status, &ns.assigns);
                     }
 
-                    SearchRes::Interrupted(ns, prog, stats)
+                    SearchRes::Interrupted(prog, ns)
                 }
 
                 other => { other }

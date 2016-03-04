@@ -31,7 +31,7 @@ pub fn parse<R : io::Read, S : Solver>(reader : R, solver : &mut S, validate : b
 }
 
 
-pub fn writeResult<W : io::Write>(mut writer : W, result : SolveRes, backward_subst : &VarMap<i32>) -> io::Result<()> {
+pub fn writeResult<W : io::Write, S>(mut writer : W, result : SolveRes<S>, backward_subst : &VarMap<i32>) -> io::Result<()> {
     match result {
         SolveRes::UnSAT(_)          => {
             try!(writeln!(writer, "UNSAT"));

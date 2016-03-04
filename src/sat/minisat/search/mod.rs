@@ -154,7 +154,7 @@ pub enum AddClauseRes<'c> {
 pub enum SearchRes {
     UnSAT(sat::Stats),
     SAT(Assignment, sat::Stats),
-    Interrupted(Searcher, f64, sat::Stats)
+    Interrupted(f64, Searcher)
 }
 
 
@@ -306,7 +306,7 @@ impl Searcher {
                 }
 
                 LoopRes::AssumpsConfl(_) => { // TODO: implement properly
-                    //self.cancelUntil(GroundLevel);
+                    self.cancelUntil(GroundLevel);
                     info!("===============================================================================");
                     return SearchRes::UnSAT(self.stats());
                 }
@@ -314,8 +314,7 @@ impl Searcher {
                 LoopRes::Interrupted(c)  => {
                     self.cancelUntil(GroundLevel);
                     info!("===============================================================================");
-                    let stats = self.stats();
-                    return SearchRes::Interrupted(self, c, stats);
+                    return SearchRes::Interrupted(c, self);
                 }
             }
         }

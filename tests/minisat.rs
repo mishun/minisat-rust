@@ -4,6 +4,7 @@ extern crate minisat_rust;
 use std::{io, fs, path, process};
 use std::io::{Read, Seek};
 use minisat_rust::sat::{dimacs, minisat, Solver, SolveRes, Stats};
+use minisat_rust::sat::minisat::budget::Budget;
 
 
 #[test]
@@ -62,13 +63,15 @@ fn test_file(path : &path::Path) -> io::Result<()> {
             Err(e) => { panic!("Error parsing {}: {}", path.display(), e) }
         };
 
-    let mut output = try!(tempfile::tempfile());
-    let res =
-        if !solver.preprocess() {
+    let res = {
+        let mut budget = Budget::new();
+        budget.off();
+        if !solver.preprocess(&budget) {
             SolveRes::UnSAT(Default::default())
         } else {
-            solver.solveLimited(&[])
-        };
+            solver.solveLimited(&budget, &[])
+        }
+    };
 
     match res {
         SolveRes::SAT(_, ref stats) => {
@@ -86,8 +89,9 @@ fn test_file(path : &path::Path) -> io::Result<()> {
         }
     }
 
-    try!(dimacs::writeResult(&mut output, res, &backward_subst));
     let result = {
+        let mut output = try!(tempfile::tempfile());
+        try!(dimacs::writeResult(&mut output, res, &backward_subst));
         try!(output.seek(io::SeekFrom::Start(0)));
         let mut buf = String::new();
         try!(output.read_to_string(&mut buf));
