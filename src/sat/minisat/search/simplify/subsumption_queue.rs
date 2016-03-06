@@ -60,11 +60,11 @@ impl SubsumptionQueue {
         self.bwdsub_assigns = assigns.numberOfGroundAssigns();
     }
 
-    pub fn remarkQueued(&mut self, ca : &mut ClauseAllocator, src : u32, dst : u32) {
+    pub fn remarkTouched(&mut self, ca : &mut ClauseAllocator, src : bool) {
         for &cr in self.subsumption_queue.iter() {
             let c = ca.edit(cr);
-            if c.mark() == src {
-                c.setMark(dst);
+            if c.touched() == src {
+                c.setTouched(!src);
             }
         }
     }

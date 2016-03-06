@@ -87,12 +87,8 @@ impl ClauseDB {
         (ca.view(cr), cr)
     }
 
-    pub fn removeClause(&mut self, ca : &mut ClauseAllocator, assigns : &mut Assignment, cr : ClauseRef) {
+    pub fn removeClause(&mut self, ca : &mut ClauseAllocator, cr : ClauseRef) {
         self.stats.del(ca.view(cr));
-
-        // TODO: do we really need this?
-        assigns.forgetReason(ca, cr);
-
         ca.free(cr);
     }
 
@@ -191,7 +187,6 @@ impl ClauseDB {
         } else if satisfiedWith(ca.view(cr), assigns) {
             notify(ca.view(cr));
             stats.del(ca.view(cr));
-            assigns.forgetReason(&ca, cr); // TODO: do we really need this?
             ca.free(cr);
             false
         } else {

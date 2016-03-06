@@ -4,7 +4,6 @@ use super::Lit;
 
 #[derive(Clone, Copy)]
 struct ClauseHeader {
-    size      : usize,
     mark      : u32,
     learnt    : bool,
     reloced   : bool,
@@ -16,23 +15,24 @@ struct ClauseHeader {
 
 pub struct Clause {
     header : ClauseHeader,
+    len    : usize,
     data   : Box<[Lit]>
 }
 
 impl Clause {
     #[inline]
     pub fn len(&self) -> usize {
-        self.header.size
+        self.len
     }
 
     #[inline]
-    pub fn mark(&self) -> u32 {
-        self.header.mark
+    pub fn is_deleted(&self) -> bool {
+        (self.header.mark & 1) != 0
     }
 
     #[inline]
-    fn is_deleted(&self) -> bool {
-        self.header.mark == 1
+    pub fn touched(&self) -> bool {
+        (self.header.mark & 2) != 0
     }
 
     #[inline]
@@ -58,8 +58,12 @@ impl Clause {
     }
 
     #[inline]
-    pub fn setMark(&mut self, m : u32) {
-        self.header.mark = m
+    pub fn setTouched(&mut self, b : bool) {
+        if b {
+            self.header.mark |= 2;
+        } else {
+            self.header.mark &= !2;
+        }
     }
 
     #[inline]
@@ -74,7 +78,7 @@ impl Clause {
 
     #[inline]
     pub fn headPair(&self) -> (Lit, Lit) {
-        assert!(self.header.size > 1);
+        assert!(self.len > 1);
         (self.data[0], self.data[1])
     }
 
@@ -83,7 +87,7 @@ impl Clause {
         unsafe {
             let p = self.data.as_mut_ptr();
             let src = p.offset(place as isize);
-            let end = p.offset(self.header.size as isize);
+            let end = p.offset(self.len as isize);
 
             let mut ptr = src.offset(1);
             while ptr < end {
@@ -103,7 +107,7 @@ impl Clause {
         unsafe {
             let p = self.data.as_ptr();
             ClauseIter { ptr : p
-                       , end : p.offset(self.header.size as isize)
+                       , end : p.offset(self.len as isize)
                        , ph  : marker::PhantomData
                        }
         }
@@ -114,7 +118,7 @@ impl Clause {
         unsafe {
             let p = self.data.as_ptr();
             ClauseIter { ptr : p.offset(start as isize)
-                       , end : p.offset(self.header.size as isize)
+                       , end : p.offset(self.len as isize)
                        , ph  : marker::PhantomData
                        }
         }
@@ -123,23 +127,23 @@ impl Clause {
     #[inline]
     pub fn retainSuffix<F : Fn(&Lit) -> bool>(&mut self, base : usize, f : F) {
         let mut i = base;
-        while i < self.header.size {
+        while i < self.len {
             if f(&self.data[i]) {
                 i += 1
             } else {
-                self.header.size -= 1;
-                self.data[i] = self.data[self.header.size];
+                self.len -= 1;
+                self.data[i] = self.data[self.len];
             }
         }
     }
 
     pub fn strengthen(&mut self, p : Lit) {
-        for i in 0 .. self.header.size {
+        for i in 0 .. self.len {
             if self.data[i] == p {
-                for j in i + 1 .. self.header.size {
+                for j in i + 1 .. self.len {
                     self.data[j - 1] = self.data[j];
                 }
-                self.header.size -= 1;
+                self.len -= 1;
                 self.calcAbstraction();
                 return;
             }
@@ -166,7 +170,7 @@ impl ops::Index<usize> for Clause {
 
     #[inline]
     fn index<'a>(&'a self, index : usize) -> &'a Lit {
-        assert!(index < self.header.size);
+        assert!(index < self.len);
         self.data.index(index)
     }
 }
@@ -252,8 +256,7 @@ impl ClauseAllocator {
         let len = ps.len();
 
         let mut c = Clause {
-            header : ClauseHeader { size      : len
-                                  , mark      : 0
+            header : ClauseHeader { mark      : 0
                                   , learnt    : learnt
                                   , reloced   : false
                                   , has_extra : use_extra
@@ -261,6 +264,7 @@ impl ClauseAllocator {
                                   , data_abs  : 0
                                   , data_rel  : None
                                   },
+            len    : len,
             data   : ps
         };
 
@@ -281,10 +285,11 @@ impl ClauseAllocator {
 
     fn reloc(&mut self, src : &Clause) -> ClauseRef {
         let use_extra = src.header.learnt | self.extra_clause_field;
-        let len = src.header.size;
+        let len = src.len;
 
         let mut c = Clause {
             header : src.header,
+            len    : src.len,
             data   : src.data.clone()
         };
         c.header.has_extra = use_extra;
@@ -299,8 +304,8 @@ impl ClauseAllocator {
     pub fn free(&mut self, ClauseRef(cr) : ClauseRef) {
         let ref mut c = self.clauses[cr];
         assert!(!c.is_deleted());
-        c.header.mark = 1;
-        self.wasted += ClauseAllocator::clauseSize(c.header.size, c.header.has_extra);
+        c.header.mark |= 1;
+        self.wasted += ClauseAllocator::clauseSize(c.len, c.header.has_extra);
     }
 
     pub fn relocTo(&mut self, to : &mut ClauseAllocator, src : ClauseRef) -> ClauseRef {

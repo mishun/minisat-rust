@@ -231,7 +231,7 @@ impl Simplificator {
         }
 
         search.watches.unwatchClauseLazy(search.ca.view(cr));
-        search.db.removeClause(&mut search.ca, &mut search.assigns, cr);
+        search.db.removeClause(&mut search.ca, cr);
     }
 
     fn strengthenClause(&mut self, search : &mut Searcher, cr : ClauseRef, l : Lit) -> bool {
@@ -361,7 +361,7 @@ impl Simplificator {
             match job {
                 SubsumptionJob::Assign(unit) => {
                     for &cj in self.occurs.lookup(&unit.var(), &search.ca).clone().iter() {
-                        if { let c = search.ca.view(cj); c.mark() == 0 && (self.settings.subsumption_lim == -1 || (c.len() as i32) < self.settings.subsumption_lim) } {
+                        if { let c = search.ca.view(cj); !c.is_deleted() && (self.settings.subsumption_lim == -1 || (c.len() as i32) < self.settings.subsumption_lim) } {
                             match unitSubsumes(unit, search.ca.view(cj)) {
                                 Subsumes::Different  => {}
 
@@ -399,7 +399,7 @@ impl Simplificator {
                             break;
                         }
 
-                        if cj != cr && { let c = search.ca.view(cj); c.mark() == 0 && (self.settings.subsumption_lim == -1 || (c.len() as i32) < self.settings.subsumption_lim) } {
+                        if cj != cr && { let c = search.ca.view(cj); !c.is_deleted() && (self.settings.subsumption_lim == -1 || (c.len() as i32) < self.settings.subsumption_lim) } {
                             match subsumes(search.ca.view(cr), search.ca.view(cj)) {
                                 Subsumes::Different  => {}
 
@@ -427,22 +427,22 @@ impl Simplificator {
     fn gatherTouchedClauses(&mut self, ca : &mut ClauseAllocator) {
         if self.n_touched == 0 { return; }
 
-        self.subsumption_queue.remarkQueued(ca, 0, 2);
+        self.subsumption_queue.remarkTouched(ca, false);
 
         for (v, touched) in self.touched.iter_mut() {
             if *touched != 0 && self.var_status[&v].eliminated == 0 {
                 for &cr in self.occurs.lookup(&v, ca) {
                     let c = ca.edit(cr);
-                    if c.mark() == 0 {
+                    if !c.touched() {
                         self.subsumption_queue.push(cr);
-                        c.setMark(2);
+                        c.setTouched(true);
                     }
                 }
                 *touched = 0;
             }
         }
 
-        self.subsumption_queue.remarkQueued(ca, 2, 0);
+        self.subsumption_queue.remarkTouched(ca, true);
         self.n_touched = 0;
     }
 
@@ -479,7 +479,7 @@ fn asymmetricBranching(search : &mut Searcher, v : Var, cr : ClauseRef) -> Optio
 
     let l = {
         let c = search.ca.view(cr);
-        if c.mark() != 0 || satisfiedWith(c, &search.assigns) {
+        if c.is_deleted() || satisfiedWith(c, &search.assigns) {
             return None;
         }
 

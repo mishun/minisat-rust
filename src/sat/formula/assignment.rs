@@ -235,19 +235,13 @@ impl Assignment {
 
 
     pub fn relocGC(&mut self, from : &mut clause::ClauseAllocator, to : &mut clause::ClauseAllocator) {
-        for l in self.trail.iter() {
-            let Var(v) = l.var();
-
-            // Note: it is not safe to call 'locked()' on a relocated clause. This is why we keep
-            // 'dangling' reasons here. It is safe and does not hurt.
-            match self.assignment[v].vd.reason {
-                Some(cr) if from.view(cr).reloced() || self.isLocked(from, cr) => {
-                    assert!(!from.isDeleted(cr));
-                    self.assignment[v].vd.reason = Some(from.relocTo(to, cr));
-                }
-
-                _ => {}
-            }
+        for &Lit(p) in self.trail.iter() {
+            let ref mut reason = self.assignment[p >> 1].vd.reason;
+            *reason =
+                match *reason {
+                    Some(cr) if !from.isDeleted(cr) => { Some(from.relocTo(to, cr)) }
+                    _                               => { None }
+                };
         }
     }
 
@@ -257,14 +251,6 @@ impl Assignment {
         match self.vardata(lit.var()).reason {
             Some(r) if cr == r => { true }
             _                  => { false }
-        }
-    }
-
-    pub fn forgetReason(&mut self, ca : &clause::ClauseAllocator, cr : clause::ClauseRef) {
-        // Don't leave pointers to free'd memory!
-        if self.isLocked(ca, cr) {
-            let Var(v) = ca.view(cr).head().var();
-            self.assignment[v].vd.reason = None;
         }
     }
 }
