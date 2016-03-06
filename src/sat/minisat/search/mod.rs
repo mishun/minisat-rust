@@ -184,6 +184,7 @@ enum LoopRes {
 pub struct Searcher {
     settings : SearcherSettings,
     stats    : Stats,
+    ca       : ClauseAllocator,
     db       : clause_db::ClauseDB,
     assigns  : Assignment,             // The current assignments.
     watches  : watches::Watches,       // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
@@ -196,6 +197,7 @@ impl Searcher {
     pub fn new(settings : SearcherSettings, db_set : clause_db::ClauseDBSettings, heur_set : DecisionHeuristicSettings, ccmin_mode : CCMinMode) -> Self {
         Searcher { settings : settings
                  , stats    : Stats::default()
+                 , ca       : ClauseAllocator::newEmpty()
                  , db       : clause_db::ClauseDB::new(db_set)
                  , assigns  : Assignment::new()
                  , watches  : watches::Watches::new()
@@ -253,14 +255,14 @@ impl Searcher {
 
             1 => {
                 self.assigns.assignLit(ps[0], None);
-                match self.watches.propagate(&mut self.db.ca, &mut self.assigns) {
+                match self.watches.propagate(&mut self.ca, &mut self.assigns) {
                     None    => { AddClauseRes::Consumed }
                     Some(_) => { AddClauseRes::UnSAT }
                 }
             }
 
             _ => {
-                let (c, cr) = self.db.addClause(ps);
+                let (c, cr) = self.db.addClause(&mut self.ca, ps);
                 self.watches.watchClause(c, cr);
                 AddClauseRes::Added(c, cr)
             }
@@ -268,7 +270,7 @@ impl Searcher {
     }
 
     pub fn preprocess(&mut self) -> bool {
-        if let None = self.watches.propagate(&mut self.db.ca, &mut self.assigns) {
+        if let None = self.watches.propagate(&mut self.ca, &mut self.assigns) {
             self.simplify();
             true
         } else {
@@ -355,10 +357,10 @@ impl Searcher {
                 // Reduce the set of learnt clauses:
                 {
                     let watches = &mut self.watches;
-                    self.db.reduce(&mut self.assigns, move |c| { watches.unwatchClauseLazy(c); });
+                    self.db.reduce(&mut self.ca, &mut self.assigns, move |c| { watches.unwatchClauseLazy(c); });
                 }
 
-                if self.db.ca.checkGarbage(self.settings.garbage_frac) {
+                if self.ca.checkGarbage(self.settings.garbage_frac) {
                     self.garbageCollect();
                 }
             }
@@ -374,7 +376,7 @@ impl Searcher {
                             self.assigns.newDecisionLevel();
                         }
                         LitVal::False => {
-                            let conflict = self.analyze.analyzeFinal(&self.db.ca, &self.assigns, !p);
+                            let conflict = self.analyze.analyzeFinal(&self.ca, &self.assigns, !p);
                             return LoopRes::AssumpsConfl(conflict);
                         }
                         LitVal::Undef => {
@@ -403,10 +405,12 @@ impl Searcher {
     }
 
     fn propagateLearnBacktrack(&mut self, learnt : &mut LearningGuard) -> bool {
-        while let Some(confl) = self.watches.propagate(&mut self.db.ca, &mut self.assigns) {
+        while let Some(confl) = self.watches.propagate(&mut self.ca, &mut self.assigns) {
             self.stats.conflicts += 1;
 
-            match self.analyze.analyze(&mut self.db, &mut self.heur, &self.assigns, confl) {
+            match self.analyze.analyze(&self.assigns, &mut self.ca, confl
+                        , { let heur = &mut self.heur; move |v| heur.bumpActivity(&v) }
+                        , { let db = &mut self.db; move |ca, c| db.bumpActivity(ca, c) }) {
                 Conflict::Ground => { return false; }
 
                 Conflict::Unit(level, unit) => {
@@ -416,7 +420,7 @@ impl Searcher {
 
                 Conflict::Learned(level, lit, clause) => {
                     self.cancelUntil(level);
-                    let (c, cr) = self.db.learnClause(clause);
+                    let (c, cr) = self.db.learnClause(&mut self.ca, clause);
                     self.watches.watchClause(c, cr);
                     self.assigns.assignLit(lit, Some(cr));
                 }
@@ -452,7 +456,7 @@ impl Searcher {
 
         {
             let watches = &mut self.watches;
-            self.db.removeSatisfied(&mut self.assigns, move |c| { watches.unwatchClauseLazy(c); });
+            self.db.removeSatisfied(&mut self.ca, &mut self.assigns, move |c| { watches.unwatchClauseLazy(c); });
         }
 
 //        // TODO: why if?
@@ -479,7 +483,7 @@ impl Searcher {
 //            self.released_vars.clear();
 //        }
 
-        if self.db.ca.checkGarbage(self.settings.garbage_frac) {
+        if self.ca.checkGarbage(self.settings.garbage_frac) {
             self.garbageCollect();
         }
 
@@ -498,14 +502,17 @@ impl Searcher {
         // Initialize the next region to a size corresponding to the estimated utilization degree. This
         // is not precise but should avoid some unnecessary reallocations for the new region:
 
-        let to = ClauseAllocator::newForGC(&self.db.ca);
+        let to = ClauseAllocator::newForGC(&self.ca);
         self.relocGC(to);
     }
 
     fn relocGC(&mut self, mut to : ClauseAllocator) {
-        self.watches.relocGC(&mut self.db.ca, &mut to);
-        self.assigns.relocGC(&mut self.db.ca, &mut to);
-        self.db.relocGC(to);
+        self.watches.relocGC(&mut self.ca, &mut to);
+        self.assigns.relocGC(&mut self.ca, &mut to);
+        self.db.relocGC(&mut self.ca, &mut to);
+
+        debug!("|  Garbage collection:   {:12} bytes => {:12} bytes             |", self.ca.size(), to.size());
+        self.ca = to;
     }
 
     pub fn stats(&self) -> sat::Stats {
@@ -534,7 +541,7 @@ fn isImplied(search : &mut Searcher, c : &[Lit]) -> bool {
         }
     }
 
-    let result = search.watches.propagate(&mut search.db.ca, &mut search.assigns).is_some();
+    let result = search.watches.propagate(&mut search.ca, &mut search.assigns).is_some();
     search.cancelUntil(GroundLevel);
     return result;
 }

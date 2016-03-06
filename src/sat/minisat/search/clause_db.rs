@@ -53,7 +53,6 @@ impl Stats {
 pub struct ClauseDB {
     pub settings : ClauseDBSettings,
     cla_inc      : f64,              // Amount to bump next clause with.
-    pub ca       : ClauseAllocator,
     clauses      : Vec<ClauseRef>,   // List of problem clauses.
     learnts      : Vec<ClauseRef>,   // List of learnt clauses.
     pub stats    : Stats
@@ -63,51 +62,50 @@ impl ClauseDB {
     pub fn new(settings : ClauseDBSettings) -> ClauseDB {
         ClauseDB { settings : settings
                  , cla_inc  : 1.0
-                 , ca       : ClauseAllocator::newEmpty()
                  , clauses  : Vec::new()
                  , learnts  : Vec::new()
                  , stats    : Stats::default()
                  }
     }
 
-    pub fn addClause(&mut self, ps : Box<[Lit]>) -> (&Clause, ClauseRef) {
-        let (c, cr) = self.ca.alloc(ps, false);
+    pub fn addClause<'c>(&mut self, ca : &'c mut ClauseAllocator, ps : Box<[Lit]>) -> (&'c Clause, ClauseRef) {
+        let (c, cr) = ca.alloc(ps, false);
         self.stats.add(c);
         self.clauses.push(cr);
         (c, cr)
     }
 
-    pub fn learnClause(&mut self, ps : Box<[Lit]>) -> (&Clause, ClauseRef) {
+    pub fn learnClause<'c>(&mut self, ca : &'c mut ClauseAllocator, ps : Box<[Lit]>) -> (&'c Clause, ClauseRef) {
         let cr = {
-            let (c, cr) = self.ca.alloc(ps, true);
+            let (c, cr) = ca.alloc(ps, true);
             self.stats.add(c);
             cr
         };
 
         self.learnts.push(cr);
-        self.bumpActivity(cr);
-        (self.ca.view(cr), cr)
+        self.bumpActivity(ca, cr);
+        (ca.view(cr), cr)
     }
 
-    pub fn removeClause(&mut self, assigns : &mut Assignment, cr : ClauseRef) {
-        self.stats.del(self.ca.view(cr));
+    pub fn removeClause(&mut self, ca : &mut ClauseAllocator, assigns : &mut Assignment, cr : ClauseRef) {
+        self.stats.del(ca.view(cr));
 
         // TODO: do we really need this?
-        assigns.forgetReason(&self.ca, cr);
+        assigns.forgetReason(ca, cr);
 
-        self.ca.free(cr);
+        ca.free(cr);
     }
 
-    pub fn editClause<F : FnOnce(&mut Clause) -> ()>(&mut self, cr : ClauseRef, f : F) {
-        let c = self.ca.edit(cr);
+    pub fn editClause<F : FnOnce(&mut Clause) -> ()>(&mut self, ca : &mut ClauseAllocator, cr : ClauseRef, f : F) {
+        let c = ca.edit(cr);
         self.stats.del(c);
         f(c);
         self.stats.add(c);
     }
 
-    pub fn bumpActivity(&mut self, cr : ClauseRef) {
+    pub fn bumpActivity(&mut self, ca : &mut ClauseAllocator, cr : ClauseRef) {
         let new = {
-            let c = self.ca.edit(cr);
+            let c = ca.edit(cr);
             if !c.is_learnt() { return; }
 
             let new = c.activity() + self.cla_inc;
@@ -118,7 +116,7 @@ impl ClauseDB {
         if new > 1e20 {
             self.cla_inc *= 1e-20;
             for &cri in self.learnts.iter() {
-                let c = self.ca.edit(cri);
+                let c = ca.edit(cri);
                 let scaled = c.activity() * 1e-20;
                 c.setActivity(scaled);
             }
@@ -136,24 +134,21 @@ impl ClauseDB {
     // Description:
     //   Remove half of the learnt clauses, minus the clauses locked by the current assignment. Locked
     //   clauses are clauses that are reason to some assignment. Binary clauses are never removed.
-    pub fn reduce<F : FnMut(&Clause) -> ()>(&mut self, assigns : &mut Assignment, mut notify : F) {
-        {
-            let ca = &self.ca;
-            self.learnts.sort_by(|&rx, &ry| {
-                let x = ca.view(rx);
-                let y = ca.view(ry);
+    pub fn reduce<F : FnMut(&Clause) -> ()>(&mut self, ca : &mut ClauseAllocator, assigns : &mut Assignment, mut notify : F) {
+        self.learnts.sort_by(|&rx, &ry| {
+            let x = ca.view(rx);
+            let y = ca.view(ry);
 
-                if x.len() == 2 && y.len() == 2 {
-                    Ordering::Equal
-                } else if x.len() == 2 {
-                    Ordering::Greater
-                } else if y.len() == 2 {
-                    Ordering::Less
-                } else {
-                    x.activity().partial_cmp(&y.activity()).unwrap()
-                }
-            });
-        }
+            if x.len() == 2 && y.len() == 2 {
+                Ordering::Equal
+            } else if x.len() == 2 {
+                Ordering::Greater
+            } else if y.len() == 2 {
+                Ordering::Less
+            } else {
+                x.activity().partial_cmp(&y.activity()).unwrap()
+            }
+        });
 
         // Don't delete binary or locked clauses. From the rest, delete clauses from the first half
         // and clauses with activity smaller than 'extra_lim':
@@ -161,7 +156,6 @@ impl ClauseDB {
             let index_lim = self.learnts.len() / 2;
             let extra_lim = self.cla_inc / self.learnts.len() as f64; // Remove any clause below this activity
             let stats = &mut self.stats;
-            let ca = &mut self.ca;
 
             let mut i = 0;
             self.learnts.retain(move |&cr| {
@@ -191,58 +185,41 @@ impl ClauseDB {
         }
     }
 
-    fn retainClause<F : FnMut(&Clause) -> ()>(&mut self, assigns : &mut Assignment, notify : &mut F, cr : ClauseRef) -> bool {
-        if self.ca.isDeleted(cr) {
+    fn retainClause<F : FnMut(&Clause) -> ()>(stats : &mut Stats, ca : &mut ClauseAllocator, assigns : &mut Assignment, notify : &mut F, cr : ClauseRef) -> bool {
+        if ca.isDeleted(cr) {
             false
-        } else if satisfiedWith(self.ca.view(cr), assigns) {
-            notify(self.ca.view(cr));
-            self.stats.del(self.ca.view(cr));
-            assigns.forgetReason(&self.ca, cr); // TODO: do we really need this?
-            self.ca.free(cr);
+        } else if satisfiedWith(ca.view(cr), assigns) {
+            notify(ca.view(cr));
+            stats.del(ca.view(cr));
+            assigns.forgetReason(&ca, cr); // TODO: do we really need this?
+            ca.free(cr);
             false
         } else {
-            let c = self.ca.edit(cr);
+            let c = ca.edit(cr);
             assert!({ let (c0, c1) = c.headPair(); assigns.isUndef(c0.var()) && assigns.isUndef(c1.var()) });
             c.retainSuffix(2, |&lit| !assigns.isUnsat(lit));
             true
         }
     }
 
-    pub fn removeSatisfied<F : FnMut(&Clause) -> ()>(&mut self, assigns : &mut Assignment, mut notify : F) {
+    pub fn removeSatisfied<F : FnMut(&Clause) -> ()>(&mut self, ca : &mut ClauseAllocator, assigns : &mut Assignment, mut notify : F) {
         // Remove satisfied clauses:
-        {
-            let mut j = 0;
-            for i in 0 .. self.learnts.len() {
-                let cr = self.learnts[i];
-                if self.retainClause(assigns, &mut notify, cr) {
-                    self.learnts[j] = cr;
-                    j += 1;
-                }
-            }
-            self.learnts.truncate(j);
-        }
+        let stats = &mut self.stats;
+        self.learnts.retain(|&cr| { Self::retainClause(stats, ca, assigns, &mut notify, cr) });
 
         // TODO: what todo in if 'remove_satisfied' is false?
         if self.settings.remove_satisfied {       // Can be turned off.
-            let mut j = 0;
-            for i in 0 .. self.clauses.len() {
-                let cr = self.clauses[i];
-                if self.retainClause(assigns, &mut notify, cr) {
-                    self.clauses[j] = cr;
-                    j += 1;
-                }
-            }
-            self.clauses.truncate(j);
+            self.clauses.retain(|&cr| { Self::retainClause(stats, ca, assigns, &mut notify, cr) });
         }
     }
 
-    pub fn relocGC(&mut self, mut to : ClauseAllocator) {
+    pub fn relocGC(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {
         // All learnt:
         {
             let mut j = 0;
             for i in 0 .. self.learnts.len() {
-                if !self.ca.isDeleted(self.learnts[i]) {
-                    self.learnts[j] = self.ca.relocTo(&mut to, self.learnts[i]);
+                if !from.isDeleted(self.learnts[i]) {
+                    self.learnts[j] = from.relocTo(to, self.learnts[i]);
                     j += 1;
                 }
             }
@@ -253,15 +230,13 @@ impl ClauseDB {
         {
             let mut j = 0;
             for i in 0 .. self.clauses.len() {
-                if !self.ca.isDeleted(self.clauses[i]) {
-                    self.clauses[j] = self.ca.relocTo(&mut to, self.clauses[i]);
+                if !from.isDeleted(self.clauses[i]) {
+                    self.clauses[j] = from.relocTo(to, self.clauses[i]);
                     j += 1;
                 }
             }
             self.clauses.truncate(j);
         }
 
-        debug!("|  Garbage collection:   {:12} bytes => {:12} bytes             |", self.ca.size(), to.size());
-        self.ca = to;
     }
 }

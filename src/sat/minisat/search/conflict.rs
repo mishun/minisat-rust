@@ -1,8 +1,6 @@
 use sat::formula::{Var, Lit, VarMap, LitMap};
 use sat::formula::clause::*;
 use sat::formula::assignment::*;
-use super::clause_db::*;
-use super::decision_heuristic::*;
 
 
 #[derive(PartialEq, Eq)]
@@ -70,7 +68,8 @@ impl AnalyzeContext {
     //     * If out_learnt.size() > 1 then 'out_learnt[1]' has the greatest decision level of the
     //       rest of literals. There may be others from the same level though.
     //
-    pub fn analyze(&mut self, db : &mut ClauseDB, heur : &mut DecisionHeuristic, assigns : &Assignment, confl0 : ClauseRef) -> Conflict {
+    pub fn analyze<BV, BC>(&mut self, assigns : &Assignment, ca : &mut ClauseAllocator, confl0 : ClauseRef, mut bumpVar : BV, mut bumpCla : BC) -> Conflict
+        where BV : FnMut(Var) -> (), BC : FnMut(&mut ClauseAllocator, ClauseRef) -> () {
         if assigns.isGroundLevel() {
             return Conflict::Ground;
         }
@@ -83,13 +82,13 @@ impl AnalyzeContext {
             let mut pathC = 0;
             let mut index = assigns.numberOfAssigns();
             loop {
-                db.bumpActivity(confl);
+                bumpCla(ca, confl);
 
-                for q in db.ca.view(confl).iterFrom(if confl == confl0 { 0 } else { 1 }) {
+                for q in ca.view(confl).iterFrom(if confl == confl0 { 0 } else { 1 }) {
                     let v = q.var();
                     if self.seen[&v] == Seen::Undef && assigns.vardata(v).level > GroundLevel {
                         self.seen[&v] = Seen::Source;
-                        heur.bumpActivity(&v);
+                        bumpVar(v);
                         if assigns.vardata(v).level >= assigns.decisionLevel() {
                             pathC += 1;
                         } else {
@@ -128,8 +127,8 @@ impl AnalyzeContext {
         self.analyze_toclear = out_learnt.clone();
         self.max_literals += out_learnt.len() as u64;
         match self.ccmin_mode {
-            CCMinMode::Deep  => { out_learnt.retain(|&l| { !self.litRedundant(&db.ca, assigns, l) }); }
-            CCMinMode::Basic => { out_learnt.retain(|&l| { !self.litRedundantBasic(&db.ca, assigns, l) }); }
+            CCMinMode::Deep  => { out_learnt.retain(|&l| { !self.litRedundant(ca, assigns, l) }); }
+            CCMinMode::Basic => { out_learnt.retain(|&l| { !self.litRedundantBasic(ca, assigns, l) }); }
             CCMinMode::None  => {}
         }
         self.tot_literals += out_learnt.len() as u64;
