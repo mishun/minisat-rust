@@ -159,26 +159,29 @@ impl Simplificator {
 
             trace!("ELIM: vars = {}", self.elim.len());
             let mut cnt = 0;
-            while let Some(elim) = self.elim.pop() {
+            while let Some(var) = self.elim.pop() {
                 if budget.interrupted() { break; }
-                if self.var_status[&elim].eliminated == 0 && search.assigns.isUndef(elim) {
+                if self.var_status[&var].eliminated == 0 && search.assigns.isUndef(var) {
                     if cnt % 100 == 0 {
                         trace!("elimination left: {:10}", self.elim.len());
                     }
 
                     if self.settings.use_asymm {
                         // Temporarily freeze variable. Otherwise, it would immediately end up on the queue again:
-                        let was_frozen = self.var_status[&elim].frozen;
-                        self.var_status[&elim].frozen = 1;
-                        if !self.asymmVar(search, budget, elim) {
+                        let was_frozen = self.var_status[&var].frozen;
+                        self.var_status[&var].frozen = 1;
+                        if !self.asymmVar(search, budget, var) {
                             return false;
                         }
-                        self.var_status[&elim].frozen = was_frozen;
+                        self.var_status[&var].frozen = was_frozen;
                     }
 
                     // At this point, the variable may have been set by assymetric branching, so check it
                     // again. Also, don't eliminate frozen variables:
-                    if self.settings.use_elim && search.assigns.isUndef(elim) && self.var_status[&elim].frozen == 0 && !self.eliminateVar(search, budget, elimclauses, elim) {
+                    if self.settings.use_elim
+                        && search.assigns.isUndef(var)
+                        && self.var_status[&var].frozen == 0
+                        && !self.eliminateVar(search, budget, elimclauses, var) {
                         return false;
                     }
 
