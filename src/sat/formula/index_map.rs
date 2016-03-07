@@ -1,10 +1,12 @@
-use std::{marker, ops};
+use std::{marker, ops, slice};
 use vec_map;
 use super::{Var, Lit};
 
 
 pub type VarMap<V> = IdxMap<Var, V>;
 pub type LitMap<V> = IdxMap<Lit, V>;
+pub type VarVec<V> = IdxVec<Var, V>;
+pub type LitVec<V> = IdxVec<Lit, V>;
 pub type VarHeap = IdxHeap<Var>;
 
 
@@ -44,8 +46,10 @@ pub struct IdxMap<K : Idx, V> {
 }
 
 impl<K : Idx, V> IdxMap<K, V> {
-    pub fn new() -> IdxMap<K, V> {
-        IdxMap { map : vec_map::VecMap::new(), ph : marker::PhantomData }
+    pub fn new() -> Self {
+        IdxMap { map : vec_map::VecMap::new()
+               , ph  : marker::PhantomData
+               }
     }
 
     #[inline]
@@ -117,6 +121,53 @@ impl<'a, K : Idx, V : 'a> Iterator for IterMut<'a, K, V> {
     #[inline]
     fn next(&mut self) -> Option<(K, &'a mut V)> {
         self.it.next().map(|(idx, v)| (Idx::unidx(idx), v))
+    }
+}
+
+
+pub struct IdxVec<K : Idx, V> {
+    vec : Vec<V>,
+    ph  : marker::PhantomData<K>
+}
+
+impl<K : Idx, V : Default> IdxVec<K, V> {
+    pub fn new() -> Self {
+        IdxVec { vec : Vec::new()
+               , ph  : marker::PhantomData
+               }
+    }
+
+    #[inline]
+    pub fn init(&mut self, k : K) {
+        while self.vec.len() <= k.idx() {
+            self.vec.push(V::default());
+        }
+    }
+
+    #[inline]
+    pub fn iter(&self) -> slice::Iter<V> {
+        self.vec.iter()
+    }
+
+    #[inline]
+    pub fn iter_mut(&mut self) -> slice::IterMut<V> {
+        self.vec.iter_mut()
+    }
+}
+
+impl<K : Idx, V> ops::Index<K> for IdxVec<K, V> {
+    type Output = V;
+
+    #[inline]
+    fn index(&self, k : K) -> &V {
+        &self.vec[k.idx()]
+    }
+}
+
+impl<K : Idx, V> ops::IndexMut<K> for IdxVec<K, V> {
+    #[inline]
+    fn index_mut(&mut self, k : K) -> &mut V {
+        &mut self.vec[k.idx()]
     }
 }
 
