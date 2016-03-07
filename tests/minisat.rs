@@ -15,20 +15,30 @@ fn compare_with_minisat() {
 
 
 fn walk() -> io::Result<()> {
+    let mut sat = 0;
+    let mut unsat = 0;
+
     for _entry in try!(fs::read_dir("./tests/cnf")) {
         let entry = try!(_entry);
         if try!(entry.file_type()).is_file() {
             let ref path = entry.path();
-            try!(test_file(path.as_path()));
-            println!("ok: {}", path.display());
+            let outcome = try!(test_file(path.as_path()));
+
+            println!("ok: {} ({})", path.display(), if outcome { "SAT" } else { "UNSAT" });
+            if outcome {
+                sat += 1;
+            } else {
+                unsat += 1;
+            }
         }
     }
 
+    println!("Done ({} sat, {} unsat)", sat, unsat);
     Ok(())
 }
 
 
-fn test_file(path : &path::Path) -> io::Result<()> {
+fn test_file(path : &path::Path) -> io::Result<bool> {
     let (minisat_result, stdout) = {
         let out_file = try!(tempfile::NamedTempFile::new());
         let out = try!(process::Command::new("minisat").arg(path).arg(out_file.path()).output());
@@ -73,21 +83,24 @@ fn test_file(path : &path::Path) -> io::Result<()> {
         }
     };
 
-    match res {
-        SolveRes::SAT(_, ref stats) => {
-            assert!(stdout.last().unwrap() == "SATISFIABLE");
-            test_stats(path, stats, &stdout);
-        }
+    let outcome =
+        match res {
+            SolveRes::SAT(_, ref stats) => {
+                assert!(stdout.last().unwrap() == "SATISFIABLE", "Different outcomes");
+                test_stats(path, stats, &stdout);
+                true
+            }
 
-        SolveRes::UnSAT(ref stats)  => {
-            assert!(stdout.last().unwrap() == "UNSATISFIABLE");
-            test_stats(path, stats, &stdout);
-        }
+            SolveRes::UnSAT(ref stats)  => {
+                assert!(stdout.last().unwrap() == "UNSATISFIABLE", "Different outcomes");
+                test_stats(path, stats, &stdout);
+                false
+            }
 
-        _                           => {
-            assert!(false, "Unexpected result");
-        }
-    }
+            _                           => {
+                panic!("Unexpected result")
+            }
+        };
 
     let result = {
         let mut output = try!(tempfile::tempfile());
@@ -99,17 +112,17 @@ fn test_file(path : &path::Path) -> io::Result<()> {
     };
 
     assert!(minisat_result == result, "Result difference on {}", path.display());
-    Ok(())
+    Ok(outcome)
 }
 
 
 fn test_stats(path : &path::Path, stats : &Stats, stdout : &Vec<String>) {
     let base = stdout.len() - 9;
-    assert!(stats.restarts     == parse_stats(&stdout[base + 0], &["restarts"]), "Number of restarts on {}", path.display());
-    assert!(stats.conflicts    == parse_stats(&stdout[base + 1], &["conflicts"]), "Number of conflicts on {}", path.display());
-    assert!(stats.decisions    == parse_stats(&stdout[base + 2], &["decisions"]), "Number of decisions on {}", path.display());
-    assert!(stats.propagations == parse_stats(&stdout[base + 3], &["propagations"]), "Number of propagations on {}", path.display());
-    assert!(stats.tot_literals == parse_stats(&stdout[base + 4], &["conflict", "literals"]), "Number of conflict literals on {}", path.display());
+    assert!(stats.restarts     == parse_stats(&stdout[base + 0], &["restarts"]), "Number of restarts on {}\n{:?}", path.display(), stats);
+    assert!(stats.conflicts    == parse_stats(&stdout[base + 1], &["conflicts"]), "Number of conflicts on {}\n{:?}", path.display(), stats);
+    assert!(stats.decisions    == parse_stats(&stdout[base + 2], &["decisions"]), "Number of decisions on {}\n{:?}", path.display(), stats);
+    assert!(stats.propagations == parse_stats(&stdout[base + 3], &["propagations"]), "Number of propagations on {}\n{:?}", path.display(), stats);
+    assert!(stats.tot_literals == parse_stats(&stdout[base + 4], &["conflict", "literals"]), "Number of conflict literals on {}\n{:?}", path.display(), stats);
 }
 
 fn parse_stats(line : &String, header : &[&str]) -> u64 {

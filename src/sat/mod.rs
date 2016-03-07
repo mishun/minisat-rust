@@ -5,7 +5,7 @@ pub mod formula;
 pub mod minisat;
 
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Stats {
     pub solves        : u64,
     pub restarts      : u64,
