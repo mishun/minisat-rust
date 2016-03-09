@@ -123,7 +123,8 @@ impl Assignment {
 
     #[inline]
     pub fn assignLit(&mut self, Lit(p) : Lit, reason : Option<clause::ClauseRef>) {
-        let ref mut line = self.assignment[p >> 1];
+        let line = unsafe { self.assignment.get_unchecked_mut(p >> 1) };
+
         assert!(line.assign[0].isUndef());
         line.assign[p & 1]       = LitVal::True;
         line.assign[(p & 1) ^ 1] = LitVal::False;
@@ -222,13 +223,12 @@ impl Assignment {
 
     #[inline]
     pub fn ofLit(&self, Lit(p) : Lit) -> LitVal {
-        let ref line = self.assignment[p >> 1];
-        line.assign[p & 1]
+        unsafe { *self.assignment.get_unchecked(p >> 1).assign.get_unchecked(p & 1) }
     }
 
     #[inline]
     pub fn vardata(&self, Var(v) : Var) -> &VarData {
-        let ref line = self.assignment[v];
+        let ref line = unsafe { self.assignment.get_unchecked(v) };
         assert!(!line.assign[0].isUndef());
         &line.vd
     }
