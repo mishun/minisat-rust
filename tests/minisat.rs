@@ -1,4 +1,5 @@
 extern crate tempfile;
+extern crate time;
 extern crate minisat_rust;
 
 use std::{io, fs, path, process};
@@ -23,8 +24,6 @@ fn walk() -> io::Result<()> {
         if try!(entry.file_type()).is_file() {
             let ref path = entry.path();
             let outcome = try!(test_file(path.as_path()));
-
-            println!("ok: {} ({})", path.display(), if outcome { "SAT" } else { "UNSAT" });
             if outcome {
                 sat += 1;
             } else {
@@ -39,9 +38,11 @@ fn walk() -> io::Result<()> {
 
 
 fn test_file(path : &path::Path) -> io::Result<bool> {
-    let (minisat_result, stdout) = {
+    let (minisat_result, stdout, minisat_time) = {
         let out_file = try!(tempfile::NamedTempFile::new());
+        let start_time = time::precise_time_s();
         let out = try!(process::Command::new("minisat").arg(path).arg(out_file.path()).output());
+        let end_time = time::precise_time_s();
         assert!(out.status.code() == Some(10) || out.status.code() == Some(20), "minisat error code on {}", path.display());
 
         let output = {
@@ -61,11 +62,11 @@ fn test_file(path : &path::Path) -> io::Result<bool> {
         let len = stdout.len();
         assert!(len > 10);
 
-        (output, stdout)
+        (output, stdout, end_time - start_time)
     };
 
-    let opts = Default::default();
-    let mut solver = minisat::SimpSolver::new(opts);
+    let start_time = time::precise_time_s();
+    let mut solver = minisat::SimpSolver::new(Default::default());
 
     let backward_subst =
         match dimacs::parseFile(path, &mut solver, false) {
@@ -82,6 +83,8 @@ fn test_file(path : &path::Path) -> io::Result<bool> {
             solver.solveLimited(&budget, &[])
         }
     };
+
+    let my_time = time::precise_time_s() - start_time;
 
     let outcome =
         match res {
@@ -112,6 +115,14 @@ fn test_file(path : &path::Path) -> io::Result<bool> {
     };
 
     assert!(minisat_result == result, "Result difference on {}", path.display());
+
+    println!("ok ({:>5}):\t{:40}\t{:3.5}\t{:3.5}\t{:.2}"
+                                   , if outcome { "SAT" } else { "UNSAT" }
+                                   , path.display()
+                                   , minisat_time
+                                   , my_time
+                                   , my_time / minisat_time
+                                   );
     Ok(outcome)
 }
 
