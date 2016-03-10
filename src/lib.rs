@@ -133,7 +133,7 @@ fn printStats(stats : &Stats, cpu_time : f64) {
 
     info!("conflict literals     : {:<12}   ({:4.2} % deleted)",
         stats.tot_literals,
-        (stats.del_literals as f64) * 100.0 / (stats.tot_literals as f64)
+        (stats.del_literals as f64) * 100.0 / ((stats.del_literals + stats.tot_literals) as f64)
     );
 
     info!("Memory used           : {:.2} MB", 0.0);
