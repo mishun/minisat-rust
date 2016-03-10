@@ -1,5 +1,4 @@
 # minisat-rust
-==============
 
 [![Build Status](https://travis-ci.org/mishun/minisat-rust.svg?branch=master)](https://travis-ci.org/mishun/minisat-rust)
 
@@ -13,15 +12,14 @@ Original minisat links:
 
 Pretty much identical to original minisat. The only difference is using pair of dashes
 before each argument instead of just one.
-
 So, instead of something like:
-    ```sh
-    $ minisat -verb=2 -rsync input.cnf
-    ```
+```sh
+$ minisat -verb=2 -rsync input.cnf
+```
 we have:
-    ```sh
-    $ minisat-rust --verb=2 --rsync input.cnf
-    ```
+```sh
+$ minisat-rust --verb=2 --rsync input.cnf
+```
 
 This is because I am too lazy to reimplement minisat's custom argument parsing and used
 existing library instead :)
