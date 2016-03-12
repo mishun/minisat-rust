@@ -15,7 +15,7 @@ impl DecisionLevel {
 }
 
 
-#[derive(Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 #[repr(u8)]
 pub enum LitVal { Undef, False, True }
 
@@ -163,8 +163,8 @@ impl Assignment {
     #[inline]
     pub fn inspectUntilLevel<F : FnMut(Lit) -> ()>(&self, DecisionLevel(target_level) : DecisionLevel, mut f : F) {
         if self.lim.len() > target_level {
-            for i in (self.lim[target_level] .. self.trail.len()).rev() {
-                f(self.trail[i]);
+            for &lit in self.trail[self.lim[target_level] ..].iter().rev() {
+                f(lit);
             }
         }
     }
@@ -227,9 +227,9 @@ impl Assignment {
     }
 
     #[inline]
-    pub fn vardata(&self, Var(v) : Var) -> &VarData {
-        let ref line = unsafe { self.assignment.get_unchecked(v) };
-        assert!(!line.assign[0].isUndef());
+    pub fn vardata(&self, Lit(p) : Lit) -> &VarData {
+        let ref line = unsafe { self.assignment.get_unchecked(p >> 1) };
+        assert!(line.assign[p & 1] == LitVal::False);
         &line.vd
     }
 
@@ -246,11 +246,13 @@ impl Assignment {
     }
 
     pub fn isLocked(&self, ca : &clause::ClauseAllocator, cr : clause::ClauseRef) -> bool {
-        let lit = ca.view(cr).head();
-        if !self.isSat(lit) { return false; }
-        match self.vardata(lit.var()).reason {
-            Some(r) if cr == r => { true }
-            _                  => { false }
+        let Lit(p) = ca.view(cr).head();
+        let ref line = unsafe { self.assignment.get_unchecked(p >> 1) };
+
+        if let LitVal::True = line.assign[p & 1] {
+            line.vd.reason == Some(cr)
+        } else {
+            false
         }
     }
 }
@@ -263,8 +265,8 @@ impl fmt::Debug for Assignment {
 
             if r > l {
                 try!(write!(f, "[{}:", level));
-                for i in l .. r {
-                    try!(write!(f, " {:?}", self.trail[i]));
+                for lit in self.trail[l .. r].iter() {
+                    try!(write!(f, " {:?}", lit));
                 }
                 try!(write!(f, " ]"));
             }

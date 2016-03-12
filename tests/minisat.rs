@@ -116,7 +116,7 @@ fn test_file(path : &path::Path) -> io::Result<bool> {
 
     assert!(minisat_result == result, "Result difference on {}", path.display());
 
-    println!("ok ({:>5}):\t{:40}\t{:3.5}\t{:3.5}\t{:.2}"
+    println!("ok ({:>5}):\t{:40}\t{:8.5}\t{:8.5}\t{:.2}"
                                    , if outcome { "SAT" } else { "UNSAT" }
                                    , path.display()
                                    , minisat_time

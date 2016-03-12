@@ -86,13 +86,16 @@ impl AnalyzeContext {
 
                 for q in ca.view(confl).iterFrom(if confl == confl0 { 0 } else { 1 }) {
                     let v = q.var();
-                    if self.seen[&v] == Seen::Undef && assigns.vardata(v).level > GroundLevel {
-                        self.seen[&v] = Seen::Source;
-                        bumpVar(v);
-                        if assigns.vardata(v).level >= assigns.decisionLevel() {
-                            pathC += 1;
-                        } else {
-                            out_learnt.push(q);
+                    if self.seen[&q.var()] == Seen::Undef {
+                        let level = assigns.vardata(q).level;
+                        if level > GroundLevel {
+                            self.seen[&v] = Seen::Source;
+                            bumpVar(v);
+                            if level >= assigns.decisionLevel() {
+                                pathC += 1;
+                            } else {
+                                out_learnt.push(q);
+                            }
                         }
                     }
                 }
@@ -114,11 +117,7 @@ impl AnalyzeContext {
                     break;
                 }
 
-                confl = {
-                    let reason = assigns.vardata(pl.var()).reason;
-                    assert!(reason.is_some()); // (otherwise should be UIP)
-                    reason.unwrap()
-                };
+                confl = assigns.vardata(!pl).reason.unwrap();
             }
         }
 
@@ -143,9 +142,9 @@ impl AnalyzeContext {
         } else {
             // Find the first literal assigned at the next-highest level:
             let mut max_i = 1;
-            let mut max_level = assigns.vardata(out_learnt[1].var()).level;
+            let mut max_level = assigns.vardata(out_learnt[1]).level;
             for i in 2 .. out_learnt.len() {
-                let level = assigns.vardata(out_learnt[i].var()).level;
+                let level = assigns.vardata(out_learnt[i]).level;
                 if level > max_level {
                     max_i = i;
                     max_level = level;
@@ -159,12 +158,11 @@ impl AnalyzeContext {
     }
 
     fn litRedundantBasic(&self, ca : &ClauseAllocator, assigns : &Assignment, literal : Lit) -> bool {
-        match assigns.vardata(literal.var()).reason {
+        match assigns.vardata(literal).reason {
             None     => { false }
             Some(cr) => {
                 for lit in ca.view(cr).iterFrom(1) {
-                    let y = lit.var();
-                    if self.seen[&y] == Seen::Undef && assigns.vardata(y).level > GroundLevel {
+                    if self.seen[&lit.var()] == Seen::Undef && assigns.vardata(lit).level > GroundLevel {
                         return false;
                     }
                 }
@@ -178,7 +176,7 @@ impl AnalyzeContext {
         assert!({ let s = self.seen[&literal.var()]; s == Seen::Undef || s == Seen::Source });
 
         let mut analyze_stack =
-            match assigns.vardata(literal.var()).reason {
+            match assigns.vardata(literal).reason {
                 None     => { return false; }
                 Some(cr) => { vec![(literal, ca.view(cr).iterFrom(1))] }
             };
@@ -187,7 +185,7 @@ impl AnalyzeContext {
             match it.next() {
                 Some(l) => {
                     analyze_stack.push((p, it));
-                    let ref vd = assigns.vardata(l.var());
+                    let ref vd = assigns.vardata(l);
                     let seen = self.seen[&l.var()];
 
                     // Variable at level 0 or previously removable:
@@ -236,19 +234,17 @@ impl AnalyzeContext {
         out_conflict.insert(&p, ());
 
         assigns.inspectUntilLevel(GroundLevel, |lit| {
-            let x = lit.var();
-            if self.seen[&x] != Seen::Undef {
-                match assigns.vardata(x).reason {
+            if self.seen[&lit.var()] != Seen::Undef {
+                match assigns.vardata(lit).reason {
                     None     => {
-                        assert!(assigns.vardata(x).level > GroundLevel);
+                        assert!(assigns.vardata(lit).level > GroundLevel);
                         out_conflict.insert(&!lit, ());
                     }
 
                     Some(cr) => {
                         for lit in ca.view(cr).iterFrom(1) {
-                            let v = lit.var();
-                            if assigns.vardata(v).level > GroundLevel {
-                                self.seen[&v] = Seen::Source;
+                            if assigns.vardata(lit).level > GroundLevel {
+                                self.seen[&lit.var()] = Seen::Source;
                             }
                         }
                     }

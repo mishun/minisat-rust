@@ -7,7 +7,7 @@ mod index_map;
 pub mod util;
 
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Hash)]
 pub struct Var(usize);
 
 impl Var {
@@ -34,7 +34,7 @@ impl fmt::Debug for Var {
 }
 
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Hash)]
 pub struct Lit(usize);
 
 impl Lit {

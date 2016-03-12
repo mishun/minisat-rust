@@ -31,12 +31,12 @@ that solves bunch of cnf files and compares output to minisat.
 
 ## What is not working yet?
 
-  - Reading (gzipped) CNF from stding.
+  - Reading (gzipped) CNF from stdin.
   - Proper allocation/reallocation of clauses (GC log messages are fake to test output
     against minisat). Probably need to wait Rust allocation features stabilization
     before implementing it.
   - Proper Ctrl-C handling.
-  - Writting DIMACS when solving is interrupted.
+  - Writing DIMACS when solving is interrupted.
 
 ## Why?
 
