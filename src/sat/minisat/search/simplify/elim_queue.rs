@@ -63,8 +63,7 @@ impl ElimQueue {
         self.heap.update(&lit.var(), move |a, b| { Self::before(n_occ, a, b) });
     }
 
-    pub fn pop(&mut self) -> Option<Var>
-    {
+    pub fn pop(&mut self) -> Option<Var> {
         let ref n_occ = self.n_occ;
         self.heap.pop(move |a, b| { Self::before(n_occ, a, b) })
     }
