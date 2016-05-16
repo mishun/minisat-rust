@@ -1,12 +1,12 @@
 sudo: false
 language: rust
 
+cache: cargo
+
 install:
-  - git clone https://github.com/niklasso/minisat.git minisat
-  - cd minisat
-  - make
-  - cd ..
-  - export PATH=./minisat/build/release/bin:$PATH
+  - git clone https://github.com/niklasso/minisat.git $HOME/minisat
+  - make -C $HOME/minisat
+  - export PATH=$HOME/minisat/build/release/bin:$PATH
 
 rust:
   - nightly
