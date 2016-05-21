@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
+#![feature(alloc, heap_api)]
 
+extern crate alloc;
 extern crate time;
 extern crate vec_map;
 #[macro_use] extern crate log;

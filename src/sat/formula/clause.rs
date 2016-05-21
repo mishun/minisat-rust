@@ -1,4 +1,5 @@
-use std::{fmt, marker, ops, ptr};
+use std::{fmt, marker, mem, ops, ptr};
+use alloc::heap;
 use super::Lit;
 
 
@@ -221,7 +222,7 @@ pub struct ClauseRef(usize);
 
 
 pub struct ClauseAllocator {
-    clauses            : Vec<Clause>,
+    clauses            : Vec<*mut Clause>,
     lc                 : LegacyCounter,
     extra_clause_field : bool
 }
@@ -244,18 +245,24 @@ impl ClauseAllocator {
 
     pub fn alloc(&mut self, ps : Box<[Lit]>, learnt : bool) -> (&Clause, ClauseRef) {
         assert!(ps.len() > 1);
-        let mut c = Clause {
-            header : ClauseHeader { mark      : 0
-                                  , learnt    : learnt
-                                  , reloced   : false
-                                  , has_extra : learnt | self.extra_clause_field
-                                  , data_act  : 0.0
-                                  , data_abs  : 0
-                                  , data_rel  : None
-                                  },
-            len    : ps.len(),
-            data   : ps
+
+        let index = self.clauses.len();
+        let c = unsafe {
+            let p = heap::allocate(mem::size_of::<Clause>(), mem::align_of::<Clause>()) as *mut Clause;
+            self.clauses.push(p);
+            p.as_mut().unwrap()
         };
+
+        c.header = ClauseHeader { mark      : 0
+                                , learnt    : learnt
+                                , reloced   : false
+                                , has_extra : learnt | self.extra_clause_field
+                                , data_act  : 0.0
+                                , data_abs  : 0
+                                , data_rel  : None
+                                };
+        c.len = ps.len();
+        c.data = ps;
 
         if c.header.has_extra {
             if c.header.learnt {
@@ -265,29 +272,30 @@ impl ClauseAllocator {
             };
         }
 
-        self.lc.add(&c);
-
-        let index = self.clauses.len();
-        self.clauses.push(c);
-        (&self.clauses[index], ClauseRef(index))
+        self.lc.add(c);
+        (c, ClauseRef(index))
     }
 
     fn reloc(&mut self, src : &Clause) -> ClauseRef {
-        let mut c = Clause {
-            header : src.header,
-            len    : src.len,
-            data   : src.data.clone()
-        };
-        c.header.has_extra |= self.extra_clause_field;
-        self.lc.add(&c);
-
         let index = self.clauses.len();
-        self.clauses.push(c);
+        let c = unsafe {
+            let p = heap::allocate(mem::size_of::<Clause>(), mem::align_of::<Clause>()) as *mut Clause;
+            self.clauses.push(p);
+            p.as_mut().unwrap()
+        };
+
+        c.header = src.header;
+        c.header.has_extra |= self.extra_clause_field;
+        c.len = src.len;
+        c.data = src.data.clone();
+
+        self.lc.add(c);
         ClauseRef(index)
     }
 
     pub fn free(&mut self, ClauseRef(cr) : ClauseRef) {
-        let ref mut c = self.clauses[cr];
+        let c = unsafe { self.clauses[cr].as_mut().unwrap() };
+
         assert!(!c.is_deleted());
         c.header.mark |= 1;
         self.lc.sub(c);
@@ -319,20 +327,22 @@ impl ClauseAllocator {
     }
 
     #[inline]
-    pub fn isDeleted(&self, ClauseRef(index) : ClauseRef) -> bool {
-        self.clauses[index].is_deleted()
+    pub fn isDeleted(&self, cr : ClauseRef) -> bool {
+        self.view(cr).is_deleted()
     }
 
     #[inline]
     pub fn view<'a>(&'a self, ClauseRef(index) : ClauseRef) -> &'a Clause {
-        assert!(index < self.clauses.len());
-        &self.clauses[index]
+        unsafe {
+            self.clauses[index].as_ref().unwrap()
+        }
     }
 
     #[inline]
     pub fn edit<'a>(&'a mut self, ClauseRef(index) : ClauseRef) -> &'a mut Clause {
-        assert!(index < self.clauses.len());
-        &mut self.clauses[index]
+        unsafe {
+            self.clauses[index].as_mut().unwrap()
+        }
     }
 }
 
