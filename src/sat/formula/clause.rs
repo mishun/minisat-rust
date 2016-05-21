@@ -222,16 +222,14 @@ pub struct ClauseRef(usize);
 
 pub struct ClauseAllocator {
     clauses            : Vec<Clause>,
-    size               : usize,
-    wasted             : usize,
+    lc                 : LegacyCounter,
     extra_clause_field : bool
 }
 
 impl ClauseAllocator {
     pub fn newEmpty() -> ClauseAllocator {
         ClauseAllocator { clauses            : Vec::new()
-                        , size               : 0
-                        , wasted             : 0
+                        , lc                 : LegacyCounter::new()
                         , extra_clause_field : false
                         }
     }
@@ -239,32 +237,23 @@ impl ClauseAllocator {
     pub fn newForGC(old : &ClauseAllocator) -> ClauseAllocator {
         // old.size - old.wasted
         ClauseAllocator { clauses            : Vec::new()
-                        , size               : 0
-                        , wasted             : 0
+                        , lc                 : LegacyCounter::new()
                         , extra_clause_field : old.extra_clause_field
                         }
     }
 
-    fn clauseSize(size : usize, has_extra : bool) -> usize {
-        4 * (1 + size + (has_extra as usize))
-    }
-
     pub fn alloc(&mut self, ps : Box<[Lit]>, learnt : bool) -> (&Clause, ClauseRef) {
         assert!(ps.len() > 1);
-
-        let use_extra = learnt | self.extra_clause_field;
-        let len = ps.len();
-
         let mut c = Clause {
             header : ClauseHeader { mark      : 0
                                   , learnt    : learnt
                                   , reloced   : false
-                                  , has_extra : use_extra
+                                  , has_extra : learnt | self.extra_clause_field
                                   , data_act  : 0.0
                                   , data_abs  : 0
                                   , data_rel  : None
                                   },
-            len    : len,
+            len    : ps.len(),
             data   : ps
         };
 
@@ -276,28 +265,24 @@ impl ClauseAllocator {
             };
         }
 
+        self.lc.add(&c);
+
         let index = self.clauses.len();
         self.clauses.push(c);
-        self.size += ClauseAllocator::clauseSize(len, use_extra);
-
         (&self.clauses[index], ClauseRef(index))
     }
 
     fn reloc(&mut self, src : &Clause) -> ClauseRef {
-        let use_extra = src.header.learnt | self.extra_clause_field;
-        let len = src.len;
-
         let mut c = Clause {
             header : src.header,
             len    : src.len,
             data   : src.data.clone()
         };
-        c.header.has_extra = use_extra;
+        c.header.has_extra |= self.extra_clause_field;
+        self.lc.add(&c);
 
         let index = self.clauses.len();
         self.clauses.push(c);
-        self.size += ClauseAllocator::clauseSize(len, use_extra);
-
         ClauseRef(index)
     }
 
@@ -305,7 +290,7 @@ impl ClauseAllocator {
         let ref mut c = self.clauses[cr];
         assert!(!c.is_deleted());
         c.header.mark |= 1;
-        self.wasted += ClauseAllocator::clauseSize(c.len, c.header.has_extra);
+        self.lc.sub(c);
     }
 
     pub fn relocTo(&mut self, to : &mut ClauseAllocator, src : ClauseRef) -> ClauseRef {
@@ -322,15 +307,15 @@ impl ClauseAllocator {
     }
 
     pub fn size(&self) -> usize {
-        self.size
+        self.lc.size
+    }
+
+    pub fn checkGarbage(&mut self, gf : f64) -> bool {
+        (self.lc.wasted as f64) > (self.lc.size as f64) * gf
     }
 
     pub fn set_extra_clause_field(&mut self, new_value : bool) {
         self.extra_clause_field = new_value;
-    }
-
-    pub fn checkGarbage(&mut self, gf : f64) -> bool {
-        (self.wasted as f64) > (self.size as f64) * gf
     }
 
     #[inline]
@@ -348,5 +333,31 @@ impl ClauseAllocator {
     pub fn edit<'a>(&'a mut self, ClauseRef(index) : ClauseRef) -> &'a mut Clause {
         assert!(index < self.clauses.len());
         &mut self.clauses[index]
+    }
+}
+
+
+struct LegacyCounter {
+    size   : usize,
+    wasted : usize
+}
+
+impl LegacyCounter {
+    fn clauseSize(size : usize, has_extra : bool) -> usize {
+        4 * (1 + size + (has_extra as usize))
+    }
+
+    pub fn new() -> LegacyCounter {
+        LegacyCounter { size   : 0
+                      , wasted : 0
+                      }
+    }
+
+    pub fn add(&mut self, c : &Clause) {
+        self.size += Self::clauseSize(c.len, c.header.has_extra);
+    }
+
+    pub fn sub(&mut self, c : &Clause) {
+        self.wasted += Self::clauseSize(c.len, c.header.has_extra);
     }
 }
