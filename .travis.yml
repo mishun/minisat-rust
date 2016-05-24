@@ -8,12 +8,18 @@ install:
   - make -C $HOME/minisat
   - export PATH=$HOME/minisat/build/release/bin:$PATH
 
-rust:
-  - nightly
-  - beta
-  - stable
-
 matrix:
+  include:
+    - rust: stable
+      branches:
+        only: [master]
+
+    - rust: beta
+      branches:
+        only: [master]
+
+    - rust: nightly
+
   allow_failures:
     - rust: nightly
 
