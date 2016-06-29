@@ -1,7 +1,4 @@
-# minisat-rust
-
-[![Build Status](https://travis-ci.org/mishun/minisat-rust.svg?branch=master)](https://travis-ci.org/mishun/minisat-rust)
-[![Clippy Linting Result](https://clippy.bashy.io/github/mishun/minisat-rust/master/badge.svg)](https://clippy.bashy.io/github/mishun/minisat-rust/master/log)
+# minisat-rust [![Build Status](https://travis-ci.org/mishun/minisat-rust.svg?branch=master)](https://travis-ci.org/mishun/minisat-rust)
 
 Note that this is reimplementation, not bindings.
 
