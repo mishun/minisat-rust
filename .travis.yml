@@ -10,17 +10,6 @@ install:
 
 matrix:
   include:
-    - rust: stable
-      branches:
-        only: [master]
-
-    - rust: beta
-      branches:
-        only: [master]
-
-    - rust: nightly
-
-  allow_failures:
     - rust: nightly
 
 script:
