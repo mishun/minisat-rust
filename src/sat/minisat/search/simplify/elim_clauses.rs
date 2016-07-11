@@ -30,7 +30,7 @@ impl ElimClauses {
         // variable 'v' occurs:
         let mut v_pos = first;
         let mut v_found = false;
-        for lit in c.iter() {
+        for &lit in c.lits() {
             self.literals.push(lit);
             if lit.var() == v {
                 v_found = true;
@@ -61,7 +61,7 @@ impl ElimClauses {
             i -= 1;
             let mut skip = false;
             while j > 1 {
-                if assigns.isSat(self.literals[i]) {
+                if assigns.isAssignedPos(self.literals[i]) {
                     skip = true;
                     break;
                 }

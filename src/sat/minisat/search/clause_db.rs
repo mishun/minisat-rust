@@ -192,7 +192,7 @@ impl ClauseDB {
         } else {
             let c = ca.edit(cr);
             assert!({ let (c0, c1) = c.headPair(); assigns.isUndef(c0.var()) && assigns.isUndef(c1.var()) });
-            c.retainSuffix(2, |&lit| !assigns.isUnsat(lit));
+            c.retainSuffix(2, |&lit| !assigns.isAssignedNeg(lit));
             true
         }
     }

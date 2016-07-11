@@ -84,9 +84,9 @@ impl AnalyzeContext {
             loop {
                 bumpCla(ca, confl);
 
-                for q in ca.view(confl).iterFrom(if confl == confl0 { 0 } else { 1 }) {
+                for &q in ca.view(confl).litsFrom(if confl == confl0 { 0 } else { 1 }) {
                     let v = q.var();
-                    if self.seen[&q.var()] == Seen::Undef {
+                    if self.seen[&v] == Seen::Undef {
                         let level = assigns.vardata(q).level;
                         if level > GroundLevel {
                             self.seen[&v] = Seen::Source;
@@ -161,7 +161,7 @@ impl AnalyzeContext {
         match assigns.vardata(literal).reason {
             None     => { false }
             Some(cr) => {
-                for lit in ca.view(cr).iterFrom(1) {
+                for &lit in ca.view(cr).litsFrom(1) {
                     if self.seen[&lit.var()] == Seen::Undef && assigns.vardata(lit).level > GroundLevel {
                         return false;
                     }
@@ -178,13 +178,13 @@ impl AnalyzeContext {
         let mut analyze_stack =
             match assigns.vardata(literal).reason {
                 None     => { return false; }
-                Some(cr) => { vec![(literal, ca.view(cr).iterFrom(1))] }
+                Some(cr) => { vec![(literal, ca.view(cr).litsFrom(1))] }
             };
 
-        while let Some((p, mut it)) = analyze_stack.pop() {
-            match it.next() {
-                Some(l) => {
-                    analyze_stack.push((p, it));
+        while let Some((p, lits)) = analyze_stack.pop() {
+            match lits.split_first() {
+                Some((&l, tail)) => {
+                    analyze_stack.push((p, tail));
                     let ref vd = assigns.vardata(l);
                     let seen = self.seen[&l.var()];
 
@@ -196,7 +196,7 @@ impl AnalyzeContext {
                     match vd.reason {
                         // Recursively check 'l':
                         Some(cr) if seen == Seen::Undef => {
-                            analyze_stack.push((l, ca.view(cr).iterFrom(1)));
+                            analyze_stack.push((l, ca.view(cr).litsFrom(1)));
                         }
 
                         // Check variable can not be removed for some local reason:
@@ -212,7 +212,7 @@ impl AnalyzeContext {
                     }
                 }
 
-                None    => {
+                None             => {
                     // Finished with current element 'p' and reason 'c':
                     if self.seen[&p.var()] == Seen::Undef {
                         self.seen[&p.var()] = Seen::Removable;
@@ -242,7 +242,7 @@ impl AnalyzeContext {
                     }
 
                     Some(cr) => {
-                        for lit in ca.view(cr).iterFrom(1) {
+                        for &lit in ca.view(cr).litsFrom(1) {
                             if assigns.vardata(lit).level > GroundLevel {
                                 self.seen[&lit.var()] = Seen::Source;
                             }

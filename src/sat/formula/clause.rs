@@ -1,4 +1,4 @@
-use std::{fmt, marker, ops, ptr};
+use std::{fmt, ptr, slice};
 use super::Lit;
 
 
@@ -31,19 +31,10 @@ impl Clause {
     }
 
     #[inline]
-    pub fn touched(&self) -> bool {
-        (self.header.mark & 2) != 0
-    }
-
-    #[inline]
     pub fn is_learnt(&self) -> bool {
         self.header.learnt
     }
 
-    #[inline]
-    pub fn reloced(&self) -> bool {
-        self.header.reloced
-    }
 
     #[inline]
     pub fn activity(&self) -> f64 {
@@ -57,6 +48,12 @@ impl Clause {
         self.header.data_act = act as f32;
     }
 
+
+    #[inline]
+    pub fn touched(&self) -> bool {
+        (self.header.mark & 2) != 0
+    }
+
     #[inline]
     pub fn setTouched(&mut self, b : bool) {
         if b {
@@ -66,20 +63,45 @@ impl Clause {
         }
     }
 
-    #[inline]
-    pub fn swap(&mut self, i : usize, j : usize) {
-        self.data.swap(i, j);
-    }
 
     #[inline]
     pub fn head(&self) -> Lit {
-        self.data[0]
+        unsafe { *self.data.get_unchecked(0) }
     }
 
     #[inline]
     pub fn headPair(&self) -> (Lit, Lit) {
         assert!(self.len > 1);
         (self.data[0], self.data[1])
+    }
+
+    #[inline]
+    pub fn lits<'c>(&'c self) -> &'c [Lit] {
+        unsafe { slice::from_raw_parts(self.data.as_ptr(), self.len) }
+    }
+
+    #[inline]
+    pub fn litsFrom<'c>(&'c self, start : usize) -> &'c [Lit] {
+        &self.lits()[start ..]
+    }
+
+
+    #[inline]
+    pub fn swap(&mut self, i : usize, j : usize) {
+        self.data.swap(i, j);
+    }
+
+    #[inline]
+    pub fn retainSuffix<F : Fn(&Lit) -> bool>(&mut self, base : usize, f : F) {
+        let mut i = base;
+        while i < self.len {
+            if f(&self.data[i]) {
+                i += 1
+            } else {
+                self.len -= 1;
+                self.data[i] = self.data[self.len];
+            }
+        }
     }
 
     #[inline]
@@ -102,40 +124,6 @@ impl Clause {
         }
     }
 
-    #[inline]
-    pub fn iter<'c>(&'c self) -> ClauseIter<'c> {
-        unsafe {
-            let p = self.data.as_ptr();
-            ClauseIter { ptr : p
-                       , end : p.offset(self.len as isize)
-                       , ph  : marker::PhantomData
-                       }
-        }
-    }
-
-    #[inline]
-    pub fn iterFrom<'c>(&'c self, start : usize) -> ClauseIter<'c> {
-        unsafe {
-            let p = self.data.as_ptr();
-            ClauseIter { ptr : p.offset(start as isize)
-                       , end : p.offset(self.len as isize)
-                       , ph  : marker::PhantomData
-                       }
-        }
-    }
-
-    #[inline]
-    pub fn retainSuffix<F : Fn(&Lit) -> bool>(&mut self, base : usize, f : F) {
-        let mut i = base;
-        while i < self.len {
-            if f(&self.data[i]) {
-                i += 1
-            } else {
-                self.len -= 1;
-                self.data[i] = self.data[self.len];
-            }
-        }
-    }
 
     pub fn strengthen(&mut self, p : Lit) {
         for i in 0 .. self.len {
@@ -150,28 +138,18 @@ impl Clause {
         }
     }
 
-    pub fn calcAbstraction(&mut self) {
-        assert!(self.header.has_extra);
-        let mut abstraction : u32 = 0;
-        for lit in self.iter() {
-            abstraction |= lit.abstraction();
-        }
-        self.header.data_abs = abstraction; //data[header.size].abs = abstraction;
-    }
-
-    pub fn abstraction(&self) -> u32 {
+    fn abstraction(&self) -> u32 {
         assert!(self.header.has_extra);
         self.header.data_abs
     }
-}
 
-impl ops::Index<usize> for Clause {
-    type Output = Lit;
-
-    #[inline]
-    fn index<'a>(&'a self, index : usize) -> &'a Lit {
-        assert!(index < self.len);
-        self.data.index(index)
+    fn calcAbstraction(&mut self) {
+        assert!(self.header.has_extra);
+        let mut abstraction : u32 = 0;
+        for lit in self.lits() {
+            abstraction |= lit.abstraction();
+        }
+        self.header.data_abs = abstraction; //data[header.size].abs = abstraction;
     }
 }
 
@@ -182,7 +160,7 @@ impl fmt::Debug for Clause {
         }
         try!(write!(f, "("));
         let mut first = true;
-        for lit in self.iter() {
+        for lit in self.lits() {
             if !first { try!(write!(f, " ∨ ")); }
             first = false;
             try!(write!(f, "{:?}", lit));
@@ -192,27 +170,64 @@ impl fmt::Debug for Clause {
 }
 
 
-pub struct ClauseIter<'c> {
-    ptr : *const Lit,
-    end : *const Lit,
-    ph  : marker::PhantomData<&'c Lit>
+pub enum Subsumes {
+    Different,
+    Exact,
+    LitSign(Lit)
 }
 
-impl<'c> Iterator for ClauseIter<'c> {
-    type Item = Lit;
+pub fn subsumes(this : &Clause, other : &Clause) -> Subsumes {
+    assert!(!this.is_learnt());
+    assert!(!other.is_learnt());
 
-    #[inline]
-    fn next(&mut self) -> Option<Lit> {
-        unsafe {
-            if self.ptr >= self.end {
-                None
-            } else {
-                let lit = *self.ptr;
-                self.ptr = self.ptr.offset(1);
-                Some(lit)
+    if other.len() < this.len() || (this.abstraction() & !other.abstraction()) != 0 {
+        return Subsumes::Different;
+    }
+
+    let mut ret = Subsumes::Exact;
+    for &lit in this.lits() {
+        // search for lit or ¬lit
+        let mut found = false;
+        for &cur in other.lits() {
+            if lit == cur {
+                found = true;
+                break;
+            } else if lit == !cur {
+                if let Subsumes::Exact = ret {
+                    ret = Subsumes::LitSign(lit);
+                    found = true;
+                    break;
+                } else {
+                    return Subsumes::Different;
+                }
             }
         }
+
+        // did not find it
+        if !found {
+            return Subsumes::Different;
+        }
     }
+
+    return ret;
+}
+
+pub fn unitSubsumes(unit : Lit, c : &Clause) -> Subsumes {
+    assert!(!c.is_learnt());
+
+    if unit.abstraction() & !c.abstraction() != 0 {
+        return Subsumes::Different;
+    }
+
+    for &cur in c.lits() {
+        if unit == cur {
+            return Subsumes::Exact;
+        } else if unit == !cur {
+            return Subsumes::LitSign(unit);
+        }
+    }
+
+    return Subsumes::Different;
 }
 
 

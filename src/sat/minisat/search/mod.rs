@@ -235,12 +235,12 @@ impl Searcher {
             // Check if clause is satisfied and remove false/duplicate literals:
             ps.sort();
             ps.dedup();
-            ps.retain(|&lit| { !self.assigns.isUnsat(lit) });
+            ps.retain(|&lit| { !self.assigns.isAssignedNeg(lit) });
 
             {
                 let mut prev = None;
                 for &lit in ps.iter() {
-                    if self.assigns.isSat(lit) || prev == Some(!lit) {
+                    if self.assigns.isAssignedPos(lit) || prev == Some(!lit) {
                         return AddClauseRes::Consumed;
                     }
                     prev = Some(lit);

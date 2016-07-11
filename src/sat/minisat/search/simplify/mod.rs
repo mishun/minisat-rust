@@ -91,7 +91,7 @@ impl Simplificator {
                 // forward subsumption.
                 self.subsumption_queue.push(cr);
 
-                for lit in c.iter() {
+                for &lit in c.lits() {
                     self.occurs.pushOcc(&lit.var(), cr);
                     self.touched[&lit.var()] = 1;
                     self.n_touched += 1;
@@ -227,7 +227,7 @@ impl Simplificator {
     }
 
     fn removeClause(&mut self, search : &mut Searcher, cr : ClauseRef) {
-        for lit in search.ca.view(cr).iter() {
+        for &lit in search.ca.view(cr).lits() {
             self.elim.bumpLitOcc(&lit, -1);
             self.elim.updateElimHeap(lit.var(), &self.var_status, &search.assigns);
             self.occurs.smudge(&lit.var());
@@ -270,7 +270,7 @@ impl Simplificator {
         let mut pos = Vec::new();
         let mut neg = Vec::new();
         for &cr in cls.iter() {
-            for l in search.ca.view(cr).iter() {
+            for l in search.ca.view(cr).lits() {
                 if l.var() == v {
                     if l.sign() { neg.push(cr); } else { pos.push(cr); }
                     break;
@@ -388,7 +388,7 @@ impl Simplificator {
                     let best = {
                         let c = search.ca.view(cr);
                         let mut best = c.head().var();
-                        for lit in c.iterFrom(1) {
+                        for &lit in c.litsFrom(1) {
                             // TODO: why not use n_occ?
                             if self.occurs.occsDirty(lit.var()) < self.occurs.occsDirty(best) {
                                 best = lit.var();
@@ -489,7 +489,7 @@ fn asymmetricBranching(search : &mut Searcher, v : Var, cr : ClauseRef) -> Optio
         search.assigns.newDecisionLevel();
 
         let mut vl = None;
-        for lit in c.iter() {
+        for &lit in c.lits() {
             if v == lit.var() {
                 vl = Some(lit);
             } else if search.assigns.isUndef(lit.var()) {

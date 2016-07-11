@@ -88,7 +88,7 @@ impl Watches {
                     let pwi = *head;
                     head = head.offset(1);
 
-                    if assigns.isSat(pwi.blocker) {
+                    if assigns.isAssignedPos(pwi.blocker) {
                         *tail = pwi;
                         tail = tail.offset(1);
                         continue;
@@ -98,18 +98,18 @@ impl Watches {
                     if c.head() == false_lit {
                         c.swap(0, 1);
                     }
-                    assert!(c[1] == false_lit);
+                    //assert!(c[1] == false_lit);
 
                     // If 0th watch is true, then clause is already satisfied.
                     let cw = Watcher { cref : pwi.cref, blocker : c.head() };
-                    if cw.blocker != pwi.blocker && assigns.isSat(cw.blocker) {
+                    if cw.blocker != pwi.blocker && assigns.isAssignedPos(cw.blocker) {
                         *tail = cw;
                         tail = tail.offset(1);
                         continue;
                     }
 
                     // Look for new watch:
-                    match c.pullLiteral(1, |lit| { !assigns.isUnsat(lit) }) {
+                    match c.pullLiteral(1, |lit| { !assigns.isAssignedNeg(lit) }) {
                         Some(lit) => {
                             self.watches[!lit].watchers.push(cw);
                         }
@@ -119,7 +119,7 @@ impl Watches {
                             *tail = cw;
                             tail = tail.offset(1);
 
-                            if assigns.isUnsat(cw.blocker) {
+                            if assigns.isAssignedNeg(cw.blocker) {
                                 assigns.dequeueAll();
 
                                 // Copy the remaining watches:

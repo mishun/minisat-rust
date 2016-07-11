@@ -206,7 +206,7 @@ impl Assignment {
     }
 
     #[inline]
-    pub fn isSat(&self, p : Lit) -> bool {
+    pub fn isAssignedPos(&self, p : Lit) -> bool {
         match self.ofLit(p) {
             LitVal::True => { true }
             _            => { false }
@@ -214,7 +214,7 @@ impl Assignment {
     }
 
     #[inline]
-    pub fn isUnsat(&self, p : Lit) -> bool {
+    pub fn isAssignedNeg(&self, p : Lit) -> bool {
         match self.ofLit(p) {
             LitVal::False => { true }
             _             => { false }
