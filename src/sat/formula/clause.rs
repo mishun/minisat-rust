@@ -6,11 +6,10 @@ use super::Lit;
 struct ClauseHeader {
     mark      : u32,
     learnt    : bool,
-    reloced   : bool,
     has_extra : bool,
     data_act  : f32,
     data_abs  : u32,
-    data_rel  : Option<ClauseRef>
+    reloced   : Option<ClauseRef>
 }
 
 pub struct Clause {
@@ -262,11 +261,10 @@ impl ClauseAllocator {
         let mut c = Clause {
             header : ClauseHeader { mark      : 0
                                   , learnt    : learnt
-                                  , reloced   : false
                                   , has_extra : learnt | self.extra_clause_field
                                   , data_act  : 0.0
                                   , data_abs  : 0
-                                  , data_rel  : None
+                                  , reloced   : None
                                   },
             len    : ps.len(),
             data   : ps
@@ -308,16 +306,20 @@ impl ClauseAllocator {
         self.lc.sub(c);
     }
 
-    pub fn relocTo(&mut self, to : &mut ClauseAllocator, src : ClauseRef) -> ClauseRef {
+    #[inline]
+    pub fn isDeleted(&self, ClauseRef(index) : ClauseRef) -> bool {
+        self.clauses[index].is_deleted()
+    }
+
+    pub fn relocTo(&mut self, to : &mut ClauseAllocator, src : ClauseRef) -> Option<ClauseRef> {
         let c = self.edit(src);
-        assert!(!c.is_deleted());
-        if c.header.reloced {
-            c.header.data_rel.unwrap()
+        if c.is_deleted() {
+            None
         } else {
-            let dst = to.reloc(c);
-            c.header.reloced = true;
-            c.header.data_rel = Some(dst);
-            dst
+            if let None = c.header.reloced {
+                c.header.reloced = Some(to.reloc(c));
+            }
+            c.header.reloced
         }
     }
 
@@ -331,11 +333,6 @@ impl ClauseAllocator {
 
     pub fn set_extra_clause_field(&mut self, new_value : bool) {
         self.extra_clause_field = new_value;
-    }
-
-    #[inline]
-    pub fn isDeleted(&self, ClauseRef(index) : ClauseRef) -> bool {
-        self.clauses[index].is_deleted()
     }
 
     #[inline]

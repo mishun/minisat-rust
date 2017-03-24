@@ -149,7 +149,7 @@ impl Watches {
             line.dirty = false;
             line.watchers.retain(|w| { !from.isDeleted(w.cref) });
             for w in line.watchers.iter_mut() {
-                w.cref = from.relocTo(to, w.cref);
+                w.cref = from.relocTo(to, w.cref).unwrap();
             }
         }
     }

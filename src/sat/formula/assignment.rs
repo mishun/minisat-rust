@@ -237,11 +237,7 @@ impl Assignment {
     pub fn relocGC(&mut self, from : &mut clause::ClauseAllocator, to : &mut clause::ClauseAllocator) {
         for &Lit(p) in self.trail.iter() {
             let ref mut reason = self.assignment[p >> 1].vd.reason;
-            *reason =
-                match *reason {
-                    Some(cr) if !from.isDeleted(cr) => { Some(from.relocTo(to, cr)) }
-                    _                               => { None }
-                };
+            *reason = reason.and_then(|cr| from.relocTo(to, cr));
         }
     }
 

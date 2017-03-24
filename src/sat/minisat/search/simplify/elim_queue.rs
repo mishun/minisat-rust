@@ -129,7 +129,7 @@ impl OccLists {
             }
 
             for occ in ol.occs.iter_mut() {
-                *occ = from.relocTo(to, *occ);
+                *occ = from.relocTo(to, *occ).unwrap();
             }
         }
     }

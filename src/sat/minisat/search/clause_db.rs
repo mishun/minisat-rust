@@ -213,8 +213,8 @@ impl ClauseDB {
         {
             let mut j = 0;
             for i in 0 .. self.learnts.len() {
-                if !from.isDeleted(self.learnts[i]) {
-                    self.learnts[j] = from.relocTo(to, self.learnts[i]);
+                if let Some(cr) = from.relocTo(to, self.learnts[i]) {
+                    self.learnts[j] = cr;
                     j += 1;
                 }
             }
@@ -225,8 +225,8 @@ impl ClauseDB {
         {
             let mut j = 0;
             for i in 0 .. self.clauses.len() {
-                if !from.isDeleted(self.clauses[i]) {
-                    self.clauses[j] = from.relocTo(to, self.clauses[i]);
+                if let Some(cr) = from.relocTo(to, self.clauses[i]) {
+                    self.clauses[j] = cr;
                     j += 1;
                 }
             }
