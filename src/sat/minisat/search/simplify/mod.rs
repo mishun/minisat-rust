@@ -151,7 +151,7 @@ impl Simplificator {
             // Empty elim_heap and return immediately on user-interrupt:
             if budget.interrupted() {
                 assert!(self.subsumption_queue.assignsLeft(&search.assigns) == 0);
-                assert!(self.subsumption_queue.len() == 0);
+                assert!(self.subsumption_queue.is_empty());
                 assert!(self.n_touched == 0);
                 self.elim.clear();
                 return true;
@@ -176,7 +176,7 @@ impl Simplificator {
                         self.var_status[&var].frozen = was_frozen;
                     }
 
-                    // At this point, the variable may have been set by assymetric branching, so check it
+                    // At this point, the variable may have been set by asymmetric branching, so check it
                     // again. Also, don't eliminate frozen variables:
                     if self.settings.use_elim
                         && search.assigns.isUndef(var)
@@ -193,7 +193,7 @@ impl Simplificator {
                 cnt += 1;
             }
 
-            assert!(self.subsumption_queue.len() == 0);
+            assert!(self.subsumption_queue.is_empty());
         }
 
         true

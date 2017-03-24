@@ -51,6 +51,10 @@ impl SubsumptionQueue {
         self.subsumption_queue.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.subsumption_queue.is_empty()
+    }
+
     pub fn assignsLeft(&self, assigns : &Assignment) -> usize {
         assigns.numberOfGroundAssigns() - self.bwdsub_assigns
     }
