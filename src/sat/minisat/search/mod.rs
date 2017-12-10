@@ -76,7 +76,7 @@ struct LearningGuard {
 impl LearningGuard {
     pub fn new(settings: LearningStrategy) -> Self {
         LearningGuard {
-            settings: settings,
+            settings,
             max_learnts: 0.0,
             size_adjust_confl: 0.0,
             size_adjust_cnt: 0,
@@ -206,7 +206,7 @@ impl Searcher {
         ccmin_mode: CCMinMode,
     ) -> Self {
         Searcher {
-            settings: settings,
+            settings,
             stats: Stats::default(),
             ca: ClauseAllocator::new_empty(),
             db: clause_db::ClauseDB::new(db_set),

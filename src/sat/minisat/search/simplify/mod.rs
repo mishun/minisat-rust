@@ -56,7 +56,7 @@ pub struct Simplificator {
 impl Simplificator {
     pub fn new(settings: SimplificatorSettings) -> Self {
         Simplificator {
-            settings: settings,
+            settings,
             stats: Stats::default(),
             var_status: VarMap::new(),
             occurs: elim_queue::OccLists::new(),

@@ -252,7 +252,7 @@ impl SimpSolver {
         let mut core = CoreSolver::new(settings.core);
         Simplificator::on(&mut core.search);
         SimpSolver {
-            core: core,
+            core,
             elimclauses: ElimClauses::new(settings.extend_model),
             simp: Some(Simplificator::new(settings.simp)),
         }

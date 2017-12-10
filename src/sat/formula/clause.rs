@@ -265,7 +265,7 @@ impl ClauseAllocator {
         let mut c = Clause {
             header: ClauseHeader {
                 mark: 0,
-                learnt: learnt,
+                learnt,
                 has_extra: learnt | self.extra_clause_field,
                 data_act: 0.0,
                 data_abs: 0,

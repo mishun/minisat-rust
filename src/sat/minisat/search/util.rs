@@ -4,7 +4,7 @@ pub struct Random {
 
 impl Random {
     pub fn new(seed: f64) -> Random {
-        Random { seed: seed }
+        Random { seed }
     }
 
     // Returns a random float 0 <= x < 1. Seed must never be 0.

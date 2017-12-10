@@ -13,7 +13,7 @@ pub struct ElimClauses {
 impl ElimClauses {
     pub fn new(extend_model: bool) -> ElimClauses {
         ElimClauses {
-            extend_model: extend_model,
+            extend_model,
             literals: Vec::new(),
             sizes: Vec::new(),
         }

@@ -57,7 +57,7 @@ impl DecisionHeuristic {
     pub fn new(settings: DecisionHeuristicSettings) -> DecisionHeuristic {
         let seed = settings.random_seed;
         DecisionHeuristic {
-            settings: settings,
+            settings,
             var_inc: 1.0,
             rand: util::Random::new(seed),
             var: VarMap::new(),
