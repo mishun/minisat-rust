@@ -15,8 +15,12 @@ pub fn write<W : io::Write, S : Solver>(_ : W, _ : &S) -> io::Result<()> {
 
 pub fn parseFile<P : AsRef<path::Path>, S : Solver>(path : P, solver : &mut S, validate : bool) -> io::Result<VarMap<i32>> {
     let mut reader = io::BufReader::new(try!(fs::File::open(path)));
-    if let Ok(gz) = GzDecoder::new(&mut reader) {
-        return parse(gz, solver, validate);
+    {
+        let gz = GzDecoder::new(&mut reader);
+
+        if gz.header().is_some() {
+            return parse(gz, solver, validate);
+        }
     }
 
     try!(reader.seek(SeekFrom::Start(0)));
@@ -56,8 +60,11 @@ pub fn writeResult<W : io::Write, S>(mut writer : W, result : SolveRes<S>, backw
 
 pub fn validateModelFile<P : AsRef<path::Path>>(path : P, backward_subst : &VarMap<i32>, model : &Vec<Lit>) -> io::Result<bool> {
     let mut reader = io::BufReader::new(try!(fs::File::open(path)));
-    if let Ok(gz) = GzDecoder::new(&mut reader) {
-        return validateModel(gz, backward_subst, model);
+    {
+        let gz = GzDecoder::new(&mut reader);
+        if gz.header().is_some() {
+            return validateModel(gz, backward_subst, model);
+        }
     }
 
     try!(reader.seek(SeekFrom::Start(0)));
