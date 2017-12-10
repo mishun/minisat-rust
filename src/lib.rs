@@ -53,11 +53,7 @@ pub fn solveWith<S: Solver>(mut solver: S, options: MainOptions) -> io::Result<(
     info!("============================[ Problem Statistics ]=============================");
     info!("|                                                                             |");
 
-    let backward_subst = try!(dimacs::parseFile(
-        &options.in_path,
-        &mut solver,
-        options.strict
-    ));
+    let backward_subst = dimacs::parseFile(&options.in_path, &mut solver, options.strict)?;
 
     info!(
         "|  Number of variables:  {:12}                                         |",
@@ -127,22 +123,14 @@ pub fn solveWith<S: Solver>(mut solver: S, options: MainOptions) -> io::Result<(
             printStats(stats, cpu_time);
             println!("SATISFIABLE");
             assert!(
-                try!(dimacs::validateModelFile(
-                    &options.in_path,
-                    &backward_subst,
-                    &model
-                )),
+                dimacs::validateModelFile(&options.in_path, &backward_subst, &model)?,
                 "SELF-CHECK FAILED"
             );
         }
     }
 
     if let Some(path) = options.out_path {
-        try!(dimacs::writeResult(
-            try!(fs::File::create(path)),
-            result,
-            &backward_subst
-        ));
+        dimacs::writeResult(fs::File::create(path)?, result, &backward_subst)?;
     }
 
     Ok(())

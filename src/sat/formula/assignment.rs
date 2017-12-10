@@ -289,11 +289,11 @@ impl fmt::Debug for Assignment {
             };
 
             if r > l {
-                try!(write!(f, "[{}:", level));
+                write!(f, "[{}:", level)?;
                 for lit in self.trail[l..r].iter() {
-                    try!(write!(f, " {:?}", lit));
+                    write!(f, " {:?}", lit)?;
                 }
-                try!(write!(f, " ]"));
+                write!(f, " ]")?;
             }
         }
 

@@ -18,7 +18,7 @@ pub fn parseFile<P: AsRef<path::Path>, S: Solver>(
     solver: &mut S,
     validate: bool,
 ) -> io::Result<VarMap<i32>> {
-    let mut reader = io::BufReader::new(try!(fs::File::open(path)));
+    let mut reader = io::BufReader::new(fs::File::open(path)?);
     {
         let gz = GzDecoder::new(&mut reader);
 
@@ -27,7 +27,7 @@ pub fn parseFile<P: AsRef<path::Path>, S: Solver>(
         }
     }
 
-    try!(reader.seek(SeekFrom::Start(0)));
+    reader.seek(SeekFrom::Start(0))?;
     parse(reader, solver, validate)
 }
 
@@ -38,11 +38,7 @@ pub fn parse<R: io::Read, S: Solver>(
     validate: bool,
 ) -> io::Result<VarMap<i32>> {
     let mut subst = Subst::new(solver);
-    try!(DimacsParser::parse(
-        reader,
-        validate,
-        |cl| { subst.addClause(cl) }
-    ));
+    DimacsParser::parse(reader, validate, |cl| subst.addClause(cl))?;
     Ok(subst.backward_subst)
 }
 
@@ -54,24 +50,20 @@ pub fn writeResult<W: io::Write, S>(
 ) -> io::Result<()> {
     match result {
         SolveRes::UnSAT(_) => {
-            try!(writeln!(writer, "UNSAT"));
+            writeln!(writer, "UNSAT")?;
         }
 
         SolveRes::Interrupted(_, _) => {
-            try!(writeln!(writer, "INDET"));
+            writeln!(writer, "INDET")?;
         }
 
         SolveRes::SAT(model, _) => {
-            try!(writeln!(writer, "SAT"));
+            writeln!(writer, "SAT")?;
             for lit in model.iter() {
                 let var_id = backward_subst[&lit.var()];
-                try!(write!(
-                    writer,
-                    "{} ",
-                    if lit.sign() { -var_id } else { var_id }
-                ));
+                write!(writer, "{} ", if lit.sign() { -var_id } else { var_id })?;
             }
-            try!(writeln!(writer, "0"));
+            writeln!(writer, "0")?;
         }
     }
     Ok(())
@@ -83,7 +75,7 @@ pub fn validateModelFile<P: AsRef<path::Path>>(
     backward_subst: &VarMap<i32>,
     model: &Vec<Lit>,
 ) -> io::Result<bool> {
-    let mut reader = io::BufReader::new(try!(fs::File::open(path)));
+    let mut reader = io::BufReader::new(fs::File::open(path)?);
     {
         let gz = GzDecoder::new(&mut reader);
         if gz.header().is_some() {
@@ -91,7 +83,7 @@ pub fn validateModelFile<P: AsRef<path::Path>>(
         }
     }
 
-    try!(reader.seek(SeekFrom::Start(0)));
+    reader.seek(SeekFrom::Start(0))?;
     validateModel(reader, backward_subst, model)
 }
 
@@ -118,7 +110,7 @@ pub fn validateModel<R: io::Read>(
     }
 
     let mut ok = true;
-    try!(DimacsParser::parse(reader, false, |cl| {
+    DimacsParser::parse(reader, false, |cl| {
         let mut found = false;
         for lit in cl {
             if lits.contains(&lit) {
@@ -130,7 +122,7 @@ pub fn validateModel<R: io::Read>(
         if !found {
             ok = false;
         }
-    }));
+    })?;
 
     Ok(ok)
 }
@@ -190,7 +182,7 @@ impl<'p> DimacsParser<'p> {
         clause: F,
     ) -> io::Result<()> {
         let mut buf = String::new();
-        try!(reader.read_to_string(&mut buf));
+        reader.read_to_string(&mut buf)?;
 
         let mut p = DimacsParser {
             reader: buf.chars(),
@@ -198,7 +190,7 @@ impl<'p> DimacsParser<'p> {
             vars: HashSet::new(),
             clauses: 0,
         };
-        try!(p.next());
+        p.next()?;
         p.parseMe(validate, clause)
     }
 
@@ -214,24 +206,24 @@ impl<'p> DimacsParser<'p> {
 
         let mut state = State::Waiting;
         loop {
-            try!(self.skipWhitespace());
+            self.skipWhitespace()?;
             match state {
                 State::Waiting => match self.current() {
                     Some('c') => {
-                        try!(self.skipLine());
+                        self.skipLine()?;
                     }
 
                     _ => {
-                        try!(self.consume("p cnf"));
-                        let vars = try!(self.nextUInt());
-                        let clauses = try!(self.nextUInt());
+                        self.consume("p cnf")?;
+                        let vars = self.nextUInt()?;
+                        let clauses = self.nextUInt()?;
                         state = State::Parsing(vars, clauses);
                     }
                 },
 
                 State::Parsing(vars, clauses) => match self.current() {
                     Some('c') => {
-                        try!(self.skipLine());
+                        self.skipLine()?;
                     }
 
                     None => {
@@ -250,7 +242,7 @@ impl<'p> DimacsParser<'p> {
                     }
 
                     _ => {
-                        let c = try!(self.parseClause());
+                        let c = self.parseClause()?;
                         clause(c);
                     }
                 },
@@ -261,7 +253,7 @@ impl<'p> DimacsParser<'p> {
     fn parseClause(&mut self) -> io::Result<Vec<i32>> {
         let mut lits = Vec::new();
         loop {
-            let lit = try!(self.nextInt());
+            let lit = self.nextInt()?;
             if lit == 0 {
                 self.clauses += 1;
                 return Ok(lits);
@@ -289,7 +281,7 @@ impl<'p> DimacsParser<'p> {
             match self.cur {
                 None => break,
                 Some(c) if !c.is_whitespace() => break,
-                _ => try!(self.next()),
+                _ => self.next()?,
             }
         }
         Ok(())
@@ -300,10 +292,10 @@ impl<'p> DimacsParser<'p> {
             match self.cur {
                 None => break,
                 Some('\n') => {
-                    try!(self.next());
+                    self.next()?;
                     break;
                 }
-                _ => try!(self.next()),
+                _ => self.next()?,
             }
         }
         Ok(())
@@ -312,7 +304,7 @@ impl<'p> DimacsParser<'p> {
     pub fn consume(&mut self, target: &str) -> io::Result<()> {
         for tc in target.chars() {
             match self.cur {
-                Some(c) if c == tc => try!(self.next()),
+                Some(c) if c == tc => self.next()?,
                 _ => {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
@@ -332,7 +324,7 @@ impl<'p> DimacsParser<'p> {
                 Some(d) => {
                     value = value * 10 + (d as usize);
                     len += 1;
-                    try!(self.next())
+                    self.next()?
                 }
 
                 _ if len > 0 => return Ok(value),
@@ -345,27 +337,27 @@ impl<'p> DimacsParser<'p> {
     }
 
     pub fn nextInt(&mut self) -> io::Result<i32> {
-        try!(self.skipWhitespace());
+        self.skipWhitespace()?;
         let sign = match self.cur {
             Some('+') => {
-                try!(self.next());
+                self.next()?;
                 1
             }
             Some('-') => {
-                try!(self.next());
+                self.next()?;
                 -1
             }
             _ => 1,
         };
 
-        let val = try!(self.readIntBody());
+        let val = self.readIntBody()?;
         Ok(sign * (val as i32))
     }
 
     pub fn nextUInt(&mut self) -> io::Result<usize> {
-        try!(self.skipWhitespace());
+        self.skipWhitespace()?;
         match self.cur {
-            Some('+') => try!(self.next()),
+            Some('+') => self.next()?,
             _ => {}
         }
         self.readIntBody()

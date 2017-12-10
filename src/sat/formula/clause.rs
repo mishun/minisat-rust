@@ -155,16 +155,16 @@ impl Clause {
 impl fmt::Debug for Clause {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.is_deleted() {
-            try!(write!(f, "<deleted>"));
+            write!(f, "<deleted>")?;
         }
-        try!(write!(f, "("));
+        write!(f, "(")?;
         let mut first = true;
         for lit in self.lits() {
             if !first {
-                try!(write!(f, " ∨ "));
+                write!(f, " ∨ ")?;
             }
             first = false;
-            try!(write!(f, "{:?}", lit));
+            write!(f, "{:?}", lit)?;
         }
         write!(f, ")")
     }

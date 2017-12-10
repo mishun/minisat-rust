@@ -66,7 +66,7 @@ impl ops::Not for Lit {
 impl fmt::Debug for Lit {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.sign() {
-            try!(write!(f, "¬"));
+            write!(f, "¬")?;
         }
         write!(f, "{:?}", self.var())
     }

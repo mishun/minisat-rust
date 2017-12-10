@@ -19,11 +19,11 @@ fn walk() -> io::Result<()> {
     let mut sat = 0;
     let mut unsat = 0;
 
-    for _entry in try!(fs::read_dir("./tests/cnf")) {
-        let entry = try!(_entry);
-        if try!(entry.file_type()).is_file() {
+    for _entry in fs::read_dir("./tests/cnf")? {
+        let entry = _entry?;
+        if entry.file_type()?.is_file() {
             let ref path = entry.path();
-            let outcome = try!(test_file(path.as_path()));
+            let outcome = test_file(path.as_path())?;
             if outcome {
                 sat += 1;
             } else {
@@ -39,14 +39,12 @@ fn walk() -> io::Result<()> {
 
 fn test_file(path: &path::Path) -> io::Result<bool> {
     let (minisat_result, stdout, minisat_time) = {
-        let out_file = try!(tempfile::NamedTempFile::new());
+        let out_file = tempfile::NamedTempFile::new()?;
         let start_time = time::precise_time_s();
-        let out = try!(
-            process::Command::new("minisat")
-                .arg(path)
-                .arg(out_file.path())
-                .output()
-        );
+        let out = process::Command::new("minisat")
+            .arg(path)
+            .arg(out_file.path())
+            .output()?;
         let end_time = time::precise_time_s();
         assert!(
             out.status.code() == Some(10) || out.status.code() == Some(20),
@@ -56,7 +54,7 @@ fn test_file(path: &path::Path) -> io::Result<bool> {
 
         let output = {
             let mut buf = String::new();
-            try!(try!(out_file.reopen()).read_to_string(&mut buf));
+            out_file.reopen()?.read_to_string(&mut buf)?;
             buf
         };
 
@@ -64,7 +62,7 @@ fn test_file(path: &path::Path) -> io::Result<bool> {
 
         let stdout: Vec<String> = {
             let mut buf = String::new();
-            try!(io::Cursor::new(out.stdout).read_to_string(&mut buf));
+            io::Cursor::new(out.stdout).read_to_string(&mut buf)?;
             buf.lines().map(|line| line.to_string()).collect()
         };
 
@@ -117,11 +115,11 @@ fn test_file(path: &path::Path) -> io::Result<bool> {
     };
 
     let result = {
-        let mut output = try!(tempfile::tempfile());
-        try!(dimacs::writeResult(&mut output, res, &backward_subst));
-        try!(output.seek(io::SeekFrom::Start(0)));
+        let mut output = tempfile::tempfile()?;
+        dimacs::writeResult(&mut output, res, &backward_subst)?;
+        output.seek(io::SeekFrom::Start(0))?;
         let mut buf = String::new();
-        try!(output.read_to_string(&mut buf));
+        output.read_to_string(&mut buf)?;
         buf
     };
 
