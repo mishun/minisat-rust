@@ -254,7 +254,7 @@ impl<K: Idx> IdxHeap<K> {
         true
     }
 
-    pub fn heapifyFrom<F: Fn(&K, &K) -> bool>(&mut self, from: Vec<K>, before: F) {
+    pub fn heapify_from<F: Fn(&K, &K) -> bool>(&mut self, from: Vec<K>, before: F) {
         self.index.clear();
         self.heap = from;
 

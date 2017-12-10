@@ -42,7 +42,7 @@ impl Clause {
     }
 
     #[inline]
-    pub fn setActivity(&mut self, act: f64) {
+    pub fn set_activity(&mut self, act: f64) {
         assert!(self.header.has_extra);
         self.header.data_act = act as f32;
     }
@@ -54,7 +54,7 @@ impl Clause {
     }
 
     #[inline]
-    pub fn setTouched(&mut self, b: bool) {
+    pub fn set_touched(&mut self, b: bool) {
         if b {
             self.header.mark |= 2;
         } else {
@@ -69,7 +69,7 @@ impl Clause {
     }
 
     #[inline]
-    pub fn headPair(&self) -> (Lit, Lit) {
+    pub fn head_pair(&self) -> (Lit, Lit) {
         assert!(self.len > 1);
         (self.data[0], self.data[1])
     }
@@ -80,7 +80,7 @@ impl Clause {
     }
 
     #[inline]
-    pub fn litsFrom<'c>(&'c self, start: usize) -> &'c [Lit] {
+    pub fn lits_from<'c>(&'c self, start: usize) -> &'c [Lit] {
         &self.lits()[start..]
     }
 
@@ -91,7 +91,7 @@ impl Clause {
     }
 
     #[inline]
-    pub fn retainSuffix<F: Fn(&Lit) -> bool>(&mut self, base: usize, f: F) {
+    pub fn retain_suffix<F: Fn(&Lit) -> bool>(&mut self, base: usize, f: F) {
         let mut i = base;
         while i < self.len {
             if f(&self.data[i]) {
@@ -104,7 +104,7 @@ impl Clause {
     }
 
     #[inline]
-    pub fn pullLiteral<F: FnMut(Lit) -> bool>(&mut self, place: usize, mut f: F) -> Option<Lit> {
+    pub fn pull_literal<F: FnMut(Lit) -> bool>(&mut self, place: usize, mut f: F) -> Option<Lit> {
         unsafe {
             let p = self.data.as_mut_ptr();
             let src = p.offset(place as isize);
@@ -131,7 +131,7 @@ impl Clause {
                     self.data[j - 1] = self.data[j];
                 }
                 self.len -= 1;
-                self.calcAbstraction();
+                self.calc_abstraction();
                 return;
             }
         }
@@ -142,7 +142,7 @@ impl Clause {
         self.header.data_abs
     }
 
-    fn calcAbstraction(&mut self) {
+    fn calc_abstraction(&mut self) {
         assert!(self.header.has_extra);
         let mut abstraction: u32 = 0;
         for lit in self.lits() {
@@ -213,7 +213,7 @@ pub fn subsumes(this: &Clause, other: &Clause) -> Subsumes {
     return ret;
 }
 
-pub fn unitSubsumes(unit: Lit, c: &Clause) -> Subsumes {
+pub fn unit_subsumes(unit: Lit, c: &Clause) -> Subsumes {
     assert!(!c.is_learnt());
 
     if unit.abstraction() & !c.abstraction() != 0 {
@@ -243,7 +243,7 @@ pub struct ClauseAllocator {
 }
 
 impl ClauseAllocator {
-    pub fn newEmpty() -> ClauseAllocator {
+    pub fn new_empty() -> ClauseAllocator {
         ClauseAllocator {
             clauses: Vec::new(),
             lc: LegacyCounter::new(),
@@ -251,7 +251,7 @@ impl ClauseAllocator {
         }
     }
 
-    pub fn newForGC(old: &ClauseAllocator) -> ClauseAllocator {
+    pub fn new_for_gc(old: &ClauseAllocator) -> ClauseAllocator {
         // old.size - old.wasted
         ClauseAllocator {
             clauses: Vec::new(),
@@ -279,7 +279,7 @@ impl ClauseAllocator {
             if c.header.learnt {
                 c.header.data_act = 0.0;
             } else {
-                c.calcAbstraction();
+                c.calc_abstraction();
             };
         }
 
@@ -312,11 +312,11 @@ impl ClauseAllocator {
     }
 
     #[inline]
-    pub fn isDeleted(&self, ClauseRef(index): ClauseRef) -> bool {
+    pub fn is_deleted(&self, ClauseRef(index): ClauseRef) -> bool {
         self.clauses[index].is_deleted()
     }
 
-    pub fn relocTo(&mut self, to: &mut ClauseAllocator, src: ClauseRef) -> Option<ClauseRef> {
+    pub fn reloc_to(&mut self, to: &mut ClauseAllocator, src: ClauseRef) -> Option<ClauseRef> {
         let c = self.edit(src);
         if c.is_deleted() {
             None
@@ -332,7 +332,7 @@ impl ClauseAllocator {
         self.lc.size
     }
 
-    pub fn checkGarbage(&mut self, gf: f64) -> bool {
+    pub fn check_garbage(&mut self, gf: f64) -> bool {
         (self.lc.wasted as f64) > (self.lc.size as f64) * gf
     }
 
@@ -360,7 +360,7 @@ struct LegacyCounter {
 }
 
 impl LegacyCounter {
-    fn clauseSize(size: usize, has_extra: bool) -> usize {
+    fn clause_size(size: usize, has_extra: bool) -> usize {
         4 * (1 + size + (has_extra as usize))
     }
 
@@ -369,10 +369,10 @@ impl LegacyCounter {
     }
 
     pub fn add(&mut self, c: &Clause) {
-        self.size += Self::clauseSize(c.len, c.header.has_extra);
+        self.size += Self::clause_size(c.len, c.header.has_extra);
     }
 
     pub fn sub(&mut self, c: &Clause) {
-        self.wasted += Self::clauseSize(c.len, c.header.has_extra);
+        self.wasted += Self::clause_size(c.len, c.header.has_extra);
     }
 }

@@ -68,7 +68,7 @@ impl DecisionHeuristic {
         }
     }
 
-    pub fn initVar(&mut self, v: Var, upol: Option<bool>, dvar: bool) {
+    pub fn init_var(&mut self, v: Var, upol: Option<bool>, dvar: bool) {
         self.activity.insert(
             &v,
             if self.settings.rnd_init_act {
@@ -85,10 +85,10 @@ impl DecisionHeuristic {
                 decision: false,
             },
         );
-        self.setDecisionVar(v, dvar);
+        self.set_decision_var(v, dvar);
     }
 
-    pub fn setDecisionVar(&mut self, v: Var, b: bool) {
+    pub fn set_decision_var(&mut self, v: Var, b: bool) {
         let ref mut ln = self.var[&v];
         if b != ln.decision {
             if b {
@@ -119,7 +119,7 @@ impl DecisionHeuristic {
         }
     }
 
-    pub fn bumpActivity(&mut self, v: &Var) {
+    pub fn bump_activity(&mut self, v: &Var) {
         let new = self.activity[v] + self.var_inc;
         if new > 1e100 {
             self.var_inc *= 1e-100;
@@ -135,27 +135,27 @@ impl DecisionHeuristic {
         self.queue.update(v, |a, b| act[a] > act[b]);
     }
 
-    pub fn decayActivity(&mut self) {
+    pub fn decay_activity(&mut self) {
         self.var_inc *= 1.0 / self.settings.var_decay;
     }
 
-    pub fn rebuildOrderHeap(&mut self, assigns: &Assignment) {
+    pub fn rebuild_order_heap(&mut self, assigns: &Assignment) {
         let mut tmp = Vec::with_capacity(self.queue.len());
         for (v, vl) in self.var.iter() {
-            if vl.decision && assigns.isUndef(v) {
+            if vl.decision && assigns.is_undef(v) {
                 tmp.push(v);
             }
         }
 
         let ref act = self.activity;
-        self.queue.heapifyFrom(tmp, |a, b| act[a] > act[b]);
+        self.queue.heapify_from(tmp, |a, b| act[a] > act[b]);
     }
 
-    fn pickBranchVar(&mut self, assigns: &Assignment) -> Option<Var> {
+    fn pick_branch_var(&mut self, assigns: &Assignment) -> Option<Var> {
         // Random decision:
         if self.rand.chance(self.settings.random_var_freq) && !self.queue.is_empty() {
             let v = self.queue[self.rand.irand(self.queue.len())];
-            if assigns.isUndef(v) && self.var[&v].decision {
+            if assigns.is_undef(v) && self.var[&v].decision {
                 self.rnd_decisions += 1;
                 return Some(v);
             }
@@ -166,7 +166,7 @@ impl DecisionHeuristic {
             let ref act = self.activity;
             self.queue.pop(|a, b| act[a] > act[b])
         } {
-            if assigns.isUndef(v) && self.var[&v].decision {
+            if assigns.is_undef(v) && self.var[&v].decision {
                 return Some(v);
             }
         }
@@ -174,9 +174,9 @@ impl DecisionHeuristic {
         None
     }
 
-    pub fn pickBranchLit(&mut self, assigns: &Assignment) -> Option<Lit> {
+    pub fn pick_branch_lit(&mut self, assigns: &Assignment) -> Option<Lit> {
         // Choose polarity based on different polarity modes (global or per-variable):
-        self.pickBranchVar(assigns).map(|v| {
+        self.pick_branch_var(assigns).map(|v| {
             let ref ln = self.var[&v];
             let s = match ln.user_pol {
                 Some(s) => s,

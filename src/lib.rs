@@ -1,6 +1,3 @@
-#![allow(non_snake_case)]
-#![allow(non_upper_case_globals)]
-
 extern crate flate2;
 #[macro_use]
 extern crate log;
@@ -33,7 +30,7 @@ pub fn solve(main_opts: MainOptions, solver_opts: SolverOptions) -> io::Result<(
     match solver_opts {
         SolverOptions::Core(opts) => {
             let solver = minisat::CoreSolver::new(opts);
-            solveWith(solver, main_opts)
+            solve_with(solver, main_opts)
         }
 
         SolverOptions::Simp(opts) => {
@@ -41,27 +38,27 @@ pub fn solve(main_opts: MainOptions, solver_opts: SolverOptions) -> io::Result<(
             if !main_opts.pre {
                 solver.preprocess(&Budget::new());
             }
-            solveWith(solver, main_opts)
+            solve_with(solver, main_opts)
         }
     }
 }
 
 
-pub fn solveWith<S: Solver>(mut solver: S, options: MainOptions) -> io::Result<()> {
+pub fn solve_with<S: Solver>(mut solver: S, options: MainOptions) -> io::Result<()> {
     let initial_time = time::precise_time_s();
 
     info!("============================[ Problem Statistics ]=============================");
     info!("|                                                                             |");
 
-    let backward_subst = dimacs::parseFile(&options.in_path, &mut solver, options.strict)?;
+    let backward_subst = dimacs::parse_file(&options.in_path, &mut solver, options.strict)?;
 
     info!(
         "|  Number of variables:  {:12}                                         |",
-        solver.nVars()
+        solver.n_vars()
     );
     info!(
         "|  Number of clauses:    {:12}                                         |",
-        solver.nClauses()
+        solver.n_clauses()
     );
 
     let parsed_time = time::precise_time_s();
@@ -91,7 +88,7 @@ pub fn solveWith<S: Solver>(mut solver: S, options: MainOptions) -> io::Result<(
     } else {
         let result =
             if options.solve {
-                solver.solveLimited(&budget, &[])
+                solver.solve_limited(&budget, &[])
             } else {
                 info!("===============================================================================");
                 SolveRes::Interrupted(0.0, solver)
@@ -110,33 +107,33 @@ pub fn solveWith<S: Solver>(mut solver: S, options: MainOptions) -> io::Result<(
     let cpu_time = time::precise_time_s() - initial_time;
     match result {
         SolveRes::UnSAT(ref stats) => {
-            printStats(stats, cpu_time);
+            print_stats(stats, cpu_time);
             println!("UNSATISFIABLE");
         }
 
         SolveRes::Interrupted(_, ref s) => {
-            printStats(&s.stats(), cpu_time);
+            print_stats(&s.stats(), cpu_time);
             println!("INDETERMINATE");
         }
 
         SolveRes::SAT(ref model, ref stats) => {
-            printStats(stats, cpu_time);
+            print_stats(stats, cpu_time);
             println!("SATISFIABLE");
             assert!(
-                dimacs::validateModelFile(&options.in_path, &backward_subst, &model)?,
+                dimacs::validate_model_file(&options.in_path, &backward_subst, &model)?,
                 "SELF-CHECK FAILED"
             );
         }
     }
 
     if let Some(path) = options.out_path {
-        dimacs::writeResult(fs::File::create(path)?, result, &backward_subst)?;
+        dimacs::write_result(fs::File::create(path)?, result, &backward_subst)?;
     }
 
     Ok(())
 }
 
-fn printStats(stats: &Stats, cpu_time: f64) {
+fn print_stats(stats: &Stats, cpu_time: f64) {
     info!("restarts              : {:<12}", stats.restarts);
     info!(
         "conflicts             : {:<12}   ({:.0} /sec)",

@@ -75,7 +75,7 @@ fn test_file(path: &path::Path) -> io::Result<bool> {
     let start_time = time::precise_time_s();
     let mut solver = minisat::SimpSolver::new(Default::default());
 
-    let backward_subst = match dimacs::parseFile(path, &mut solver, false) {
+    let backward_subst = match dimacs::parse_file(path, &mut solver, false) {
         Ok(bs) => bs,
         Err(e) => panic!("Error parsing {}: {}", path.display(), e),
     };
@@ -86,7 +86,7 @@ fn test_file(path: &path::Path) -> io::Result<bool> {
         if !solver.preprocess(&budget) {
             SolveRes::UnSAT(Default::default())
         } else {
-            solver.solveLimited(&budget, &[])
+            solver.solve_limited(&budget, &[])
         }
     };
 
@@ -116,7 +116,7 @@ fn test_file(path: &path::Path) -> io::Result<bool> {
 
     let result = {
         let mut output = tempfile::tempfile()?;
-        dimacs::writeResult(&mut output, res, &backward_subst)?;
+        dimacs::write_result(&mut output, res, &backward_subst)?;
         output.seek(io::SeekFrom::Start(0))?;
         let mut buf = String::new();
         output.read_to_string(&mut buf)?;

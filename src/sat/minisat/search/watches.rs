@@ -31,15 +31,15 @@ impl Watches {
         }
     }
 
-    pub fn initVar(&mut self, v: Var) {
-        self.watches.init(v.posLit());
-        self.watches.init(v.negLit());
+    pub fn init_var(&mut self, v: Var) {
+        self.watches.init(v.pos_lit());
+        self.watches.init(v.neg_lit());
     }
 
-    pub fn tryClearVar(&mut self, _: Var) {}
+    pub fn try_clear_var(&mut self, _: Var) {}
 
-    pub fn watchClause(&mut self, c: &Clause, cr: ClauseRef) {
-        let (c0, c1) = c.headPair();
+    pub fn watch_clause(&mut self, c: &Clause, cr: ClauseRef) {
+        let (c0, c1) = c.head_pair();
         self.watches[!c0].watchers.push(Watcher {
             cref: cr,
             blocker: c1,
@@ -50,14 +50,14 @@ impl Watches {
         });
     }
 
-    pub fn unwatchClauseStrict(&mut self, c: &Clause, cr: ClauseRef) {
-        let (c0, c1) = c.headPair();
+    pub fn unwatch_clause_strict(&mut self, c: &Clause, cr: ClauseRef) {
+        let (c0, c1) = c.head_pair();
         self.watches[!c0].watchers.retain(|w| w.cref != cr);
         self.watches[!c1].watchers.retain(|w| w.cref != cr);
     }
 
-    pub fn unwatchClauseLazy(&mut self, c: &Clause) {
-        let (c0, c1) = c.headPair();
+    pub fn unwatch_clause_lazy(&mut self, c: &Clause) {
+        let (c0, c1) = c.head_pair();
         self.watches[!c0].dirty = true;
         self.watches[!c1].dirty = true;
     }
@@ -81,7 +81,7 @@ impl Watches {
             {
                 let ref mut line = self.watches[p];
                 if line.dirty {
-                    line.watchers.retain(|w| !ca.isDeleted(w.cref));
+                    line.watchers.retain(|w| !ca.is_deleted(w.cref));
                     line.dirty = false;
                 }
             }
@@ -98,7 +98,7 @@ impl Watches {
                     let pwi = *head;
                     head = head.offset(1);
 
-                    if assigns.isAssignedPos(pwi.blocker) {
+                    if assigns.is_assigned_pos(pwi.blocker) {
                         *tail = pwi;
                         tail = tail.offset(1);
                         continue;
@@ -115,14 +115,14 @@ impl Watches {
                         cref: pwi.cref,
                         blocker: c.head(),
                     };
-                    if cw.blocker != pwi.blocker && assigns.isAssignedPos(cw.blocker) {
+                    if cw.blocker != pwi.blocker && assigns.is_assigned_pos(cw.blocker) {
                         *tail = cw;
                         tail = tail.offset(1);
                         continue;
                     }
 
                     // Look for new watch:
-                    match c.pullLiteral(1, |lit| !assigns.isAssignedNeg(lit)) {
+                    match c.pull_literal(1, |lit| !assigns.is_assigned_neg(lit)) {
                         Some(lit) => {
                             self.watches[!lit].watchers.push(cw);
                         }
@@ -132,8 +132,8 @@ impl Watches {
                             *tail = cw;
                             tail = tail.offset(1);
 
-                            if assigns.isAssignedNeg(cw.blocker) {
-                                assigns.dequeueAll();
+                            if assigns.is_assigned_neg(cw.blocker) {
+                                assigns.dequeue_all();
 
                                 // Copy the remaining watches:
                                 while head < end {
@@ -144,7 +144,7 @@ impl Watches {
 
                                 confl = Some(cw.cref);
                             } else {
-                                assigns.assignLit(cw.blocker, Some(cw.cref));
+                                assigns.assign_lit(cw.blocker, Some(cw.cref));
                             }
                         }
                     }
@@ -158,12 +158,12 @@ impl Watches {
         confl
     }
 
-    pub fn relocGC(&mut self, from: &mut ClauseAllocator, to: &mut ClauseAllocator) {
+    pub fn reloc_gc(&mut self, from: &mut ClauseAllocator, to: &mut ClauseAllocator) {
         for line in self.watches.iter_mut() {
             line.dirty = false;
-            line.watchers.retain(|w| !from.isDeleted(w.cref));
+            line.watchers.retain(|w| !from.is_deleted(w.cref));
             for w in line.watchers.iter_mut() {
-                w.cref = from.relocTo(to, w.cref).unwrap();
+                w.cref = from.reloc_to(to, w.cref).unwrap();
             }
         }
     }

@@ -4,9 +4,9 @@ use super::clause::*;
 
 
 // Returns true if a clause is satisfied with assignment
-pub fn satisfiedWith(c: &Clause, s: &Assignment) -> bool {
+pub fn satisfied_with(c: &Clause, s: &Assignment) -> bool {
     for &lit in c.lits() {
-        if s.isAssignedPos(lit) {
+        if s.is_assigned_pos(lit) {
             return true;
         }
     }

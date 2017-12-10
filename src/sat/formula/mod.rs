@@ -17,12 +17,12 @@ impl Var {
     }
 
     #[inline]
-    pub fn posLit(&self) -> Lit {
+    pub fn pos_lit(&self) -> Lit {
         Lit(self.0 << 1)
     }
 
     #[inline]
-    pub fn negLit(&self) -> Lit {
+    pub fn neg_lit(&self) -> Lit {
         Lit((self.0 << 1) | 1)
     }
 }

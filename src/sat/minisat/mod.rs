@@ -31,21 +31,21 @@ pub struct CoreSolver {
 }
 
 impl Solver for CoreSolver {
-    fn nVars(&self) -> usize {
-        self.search.numberOfVars()
+    fn n_vars(&self) -> usize {
+        self.search.number_of_vars()
     }
 
-    fn nClauses(&self) -> usize {
-        self.search.numberOfClauses()
+    fn n_clauses(&self) -> usize {
+        self.search.number_of_clauses()
     }
 
-    fn newVar(&mut self, upol: Option<bool>, dvar: bool) -> Var {
-        self.search.newVar(upol, dvar)
+    fn new_var(&mut self, upol: Option<bool>, dvar: bool) -> Var {
+        self.search.new_var(upol, dvar)
     }
 
-    fn addClause(&mut self, clause: &[Lit]) -> bool {
+    fn add_clause(&mut self, clause: &[Lit]) -> bool {
         if self.ok {
-            if let AddClauseRes::UnSAT = self.search.addClause(clause) {
+            if let AddClauseRes::UnSAT = self.search.add_clause(clause) {
                 self.ok = false;
             }
         }
@@ -59,11 +59,11 @@ impl Solver for CoreSolver {
         self.ok
     }
 
-    fn solveLimited(self, budget: &Budget, assumptions: &[Lit]) -> SolveRes<Self> {
+    fn solve_limited(self, budget: &Budget, assumptions: &[Lit]) -> SolveRes<Self> {
         if self.ok {
             match self.search.search(&self.ss, budget, assumptions) {
                 SearchRes::UnSAT(stats) => SolveRes::UnSAT(stats),
-                SearchRes::SAT(assigns, stats) => SolveRes::SAT(extractModel(&assigns), stats),
+                SearchRes::SAT(assigns, stats) => SolveRes::SAT(extract_model(&assigns), stats),
                 SearchRes::Interrupted(c, s) => SolveRes::Interrupted(
                     c,
                     CoreSolver {
@@ -123,27 +123,27 @@ pub struct SimpSolver {
 }
 
 impl Solver for SimpSolver {
-    fn nVars(&self) -> usize {
-        self.core.nVars()
+    fn n_vars(&self) -> usize {
+        self.core.n_vars()
     }
 
-    fn nClauses(&self) -> usize {
-        self.core.nClauses()
+    fn n_clauses(&self) -> usize {
+        self.core.n_clauses()
     }
 
-    fn newVar(&mut self, upol: Option<bool>, dvar: bool) -> Var {
-        let v = self.core.newVar(upol, dvar);
+    fn new_var(&mut self, upol: Option<bool>, dvar: bool) -> Var {
+        let v = self.core.new_var(upol, dvar);
         if let Some(ref mut simp) = self.simp {
-            simp.initVar(v);
+            simp.init_var(v);
         }
         v
     }
 
-    fn addClause(&mut self, ps: &[Lit]) -> bool {
+    fn add_clause(&mut self, ps: &[Lit]) -> bool {
         match self.simp {
-            None => self.core.addClause(ps),
+            None => self.core.add_clause(ps),
             Some(ref mut simp) => {
-                let res = simp.addClause(&mut self.core.search, ps);
+                let res = simp.add_clause(&mut self.core.search, ps);
                 if !res {
                     self.core.ok = false;
                 }
@@ -165,7 +165,7 @@ impl Solver for SimpSolver {
             }
             // TODO:
             //                if !turn_off_elim && self.core.search.db.ca.checkGarbage(self.core.search.settings.garbage_frac) {
-            //                    simp.garbageCollect(&mut self.core.search);
+            //                    simp.garbage_collect(&mut self.core.search);
             //                }
             result
         } else {
@@ -173,17 +173,17 @@ impl Solver for SimpSolver {
         };
 
         if turn_off_elim {
-            self.simpOff();
+            self.simp_off();
         }
 
-        self.elimclauses.logSize();
+        self.elimclauses.log_size();
         result
     }
 
-    fn solveLimited(mut self, budget: &Budget, assumptions: &[Lit]) -> SolveRes<Self> {
+    fn solve_limited(mut self, budget: &Budget, assumptions: &[Lit]) -> SolveRes<Self> {
         match self.simp {
             Some(mut simp) => {
-                match simp.solveLimited(
+                match simp.solve_limited(
                     self.core.search,
                     &self.core.ss,
                     budget,
@@ -194,13 +194,13 @@ impl Solver for SimpSolver {
 
                     SearchRes::SAT(mut assigns, stats) => {
                         self.elimclauses.extend(&mut assigns);
-                        SolveRes::SAT(extractModel(&assigns), stats)
+                        SolveRes::SAT(extract_model(&assigns), stats)
                     }
 
                     SearchRes::Interrupted(c, s) => {
                         // TODO:
                         //        if turn_off_simp {
-                        //            self.simpOff();
+                        //            self.simp_off();
                         //        }
                         SolveRes::Interrupted(
                             c,
@@ -223,7 +223,7 @@ impl Solver for SimpSolver {
 
                 SearchRes::SAT(mut assigns, stats) => {
                     self.elimclauses.extend(&mut assigns);
-                    SolveRes::SAT(extractModel(&assigns), stats)
+                    SolveRes::SAT(extract_model(&assigns), stats)
                 }
 
                 SearchRes::Interrupted(c, s) => SolveRes::Interrupted(
@@ -258,7 +258,7 @@ impl SimpSolver {
         }
     }
 
-    fn simpOff(&mut self) {
+    fn simp_off(&mut self) {
         if let Some(_) = self.simp {
             Simplificator::off(&mut self.core.search);
             self.simp = None;

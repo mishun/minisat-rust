@@ -23,9 +23,9 @@ impl ElimQueue {
         }
     }
 
-    pub fn initVar(&mut self, v: Var) {
-        self.n_occ.insert(&v.posLit(), 0);
-        self.n_occ.insert(&v.negLit(), 0);
+    pub fn init_var(&mut self, v: Var) {
+        self.n_occ.insert(&v.pos_lit(), 0);
+        self.n_occ.insert(&v.neg_lit(), 0);
 
         let ref n_occ = self.n_occ;
         self.heap.insert(v, move |a, b| Self::before(n_occ, a, b));
@@ -33,9 +33,9 @@ impl ElimQueue {
 
     #[inline]
     fn before(n_occ: &LitMap<isize>, a: &Var, b: &Var) -> bool {
-        let costA = (n_occ[&a.posLit()] as u64) * (n_occ[&a.negLit()] as u64);
-        let costB = (n_occ[&b.posLit()] as u64) * (n_occ[&b.negLit()] as u64);
-        costA < costB
+        let cost_a = (n_occ[&a.pos_lit()] as u64) * (n_occ[&a.neg_lit()] as u64);
+        let cost_b = (n_occ[&b.pos_lit()] as u64) * (n_occ[&b.neg_lit()] as u64);
+        cost_a < cost_b
     }
 
     #[inline]
@@ -43,11 +43,17 @@ impl ElimQueue {
         self.heap.len()
     }
 
-    pub fn updateElimHeap(&mut self, v: Var, var_status: &VarMap<VarStatus>, assigns: &Assignment) {
+    pub fn update_elim_heap(
+        &mut self,
+        v: Var,
+        var_status: &VarMap<VarStatus>,
+        assigns: &Assignment,
+    ) {
         let ref n_occ = self.n_occ;
         if self.heap.contains(&v) {
             self.heap.update(&v, move |a, b| Self::before(n_occ, a, b));
-        } else if var_status[&v].frozen == 0 && var_status[&v].eliminated == 0 && assigns.isUndef(v)
+        } else if var_status[&v].frozen == 0 && var_status[&v].eliminated == 0
+            && assigns.is_undef(v)
         {
             self.heap.insert(v, move |a, b| Self::before(n_occ, a, b));
         }
@@ -57,7 +63,7 @@ impl ElimQueue {
         self.heap.clear();
     }
 
-    pub fn bumpLitOcc(&mut self, lit: &Lit, delta: isize) {
+    pub fn bump_lit_occ(&mut self, lit: &Lit, delta: isize) {
         self.n_occ[lit] += delta;
 
         let ref n_occ = self.n_occ;
@@ -89,7 +95,7 @@ impl OccLists {
         }
     }
 
-    pub fn initVar(&mut self, v: &Var) {
+    pub fn init_var(&mut self, v: &Var) {
         self.occs.insert(
             v,
             OccLine {
@@ -99,28 +105,28 @@ impl OccLists {
         );
     }
 
-    pub fn clearVar(&mut self, v: &Var) {
+    pub fn clear_var(&mut self, v: &Var) {
         self.occs.remove(v);
     }
 
-    pub fn pushOcc(&mut self, v: &Var, x: ClauseRef) {
+    pub fn push_occ(&mut self, v: &Var, x: ClauseRef) {
         self.occs[v].occs.push(x);
     }
 
-    pub fn removeOcc(&mut self, v: &Var, x: ClauseRef) {
+    pub fn remove_occ(&mut self, v: &Var, x: ClauseRef) {
         self.occs[v].occs.retain(|&y| y != x)
     }
 
     pub fn lookup(&mut self, v: &Var, ca: &ClauseAllocator) -> &Vec<ClauseRef> {
         let ol = &mut self.occs[v];
         if ol.dirty {
-            ol.occs.retain(|&cr| !ca.isDeleted(cr));
+            ol.occs.retain(|&cr| !ca.is_deleted(cr));
             ol.dirty = false;
         }
         &ol.occs
     }
 
-    pub fn occsDirty(&self, v: Var) -> usize {
+    pub fn occs_dirty(&self, v: Var) -> usize {
         self.occs[&v].occs.len()
     }
 
@@ -131,15 +137,15 @@ impl OccLists {
         }
     }
 
-    pub fn relocGC(&mut self, from: &mut ClauseAllocator, to: &mut ClauseAllocator) {
+    pub fn reloc_gc(&mut self, from: &mut ClauseAllocator, to: &mut ClauseAllocator) {
         for (_, ol) in self.occs.iter_mut() {
             if ol.dirty {
-                ol.occs.retain(|&cr| !from.isDeleted(cr));
+                ol.occs.retain(|&cr| !from.is_deleted(cr));
                 ol.dirty = false;
             }
 
             for occ in ol.occs.iter_mut() {
-                *occ = from.relocTo(to, *occ).unwrap();
+                *occ = from.reloc_to(to, *occ).unwrap();
             }
         }
     }
