@@ -94,17 +94,15 @@ fn test_file(path: &path::Path) -> io::Result<bool> {
 
     let outcome = match res {
         SolveRes::SAT(_, ref stats) => {
-            assert!(
-                stdout.last().unwrap() == "SATISFIABLE",
-                "Different outcomes"
-            );
+            assert_eq!(stdout.last().unwrap(), "SATISFIABLE", "Different outcomes");
             test_stats(path, stats, &stdout);
             true
         }
 
         SolveRes::UnSAT(ref stats) => {
-            assert!(
-                stdout.last().unwrap() == "UNSATISFIABLE",
+            assert_eq!(
+                stdout.last().unwrap(),
+                "UNSATISFIABLE",
                 "Different outcomes"
             );
             test_stats(path, stats, &stdout);
@@ -123,8 +121,9 @@ fn test_file(path: &path::Path) -> io::Result<bool> {
         buf
     };
 
-    assert!(
-        minisat_result == result,
+    assert_eq!(
+        minisat_result,
+        result,
         "Result difference on {}",
         path.display()
     );
@@ -143,32 +142,37 @@ fn test_file(path: &path::Path) -> io::Result<bool> {
 
 fn test_stats(path: &path::Path, stats: &Stats, stdout: &Vec<String>) {
     let base = stdout.len() - 9;
-    assert!(
-        stats.restarts == parse_stats(&stdout[base + 0], &["restarts"]),
+    assert_eq!(
+        stats.restarts,
+        parse_stats(&stdout[base + 0], &["restarts"]),
         "Number of restarts on {}\n{:?}",
         path.display(),
         stats
     );
-    assert!(
-        stats.conflicts == parse_stats(&stdout[base + 1], &["conflicts"]),
+    assert_eq!(
+        stats.conflicts,
+        parse_stats(&stdout[base + 1], &["conflicts"]),
         "Number of conflicts on {}\n{:?}",
         path.display(),
         stats
     );
-    assert!(
-        stats.decisions == parse_stats(&stdout[base + 2], &["decisions"]),
+    assert_eq!(
+        stats.decisions,
+        parse_stats(&stdout[base + 2], &["decisions"]),
         "Number of decisions on {}\n{:?}",
         path.display(),
         stats
     );
-    assert!(
-        stats.propagations == parse_stats(&stdout[base + 3], &["propagations"]),
+    assert_eq!(
+        stats.propagations,
+        parse_stats(&stdout[base + 3], &["propagations"]),
         "Number of propagations on {}\n{:?}",
         path.display(),
         stats
     );
-    assert!(
-        stats.tot_literals == parse_stats(&stdout[base + 4], &["conflict", "literals"]),
+    assert_eq!(
+        stats.tot_literals,
+        parse_stats(&stdout[base + 4], &["conflict", "literals"]),
         "Number of conflict literals on {}\n{:?}",
         path.display(),
         stats

@@ -15,7 +15,7 @@ impl DecisionLevel {
 }
 
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum LitVal {
     Undef,
@@ -250,7 +250,7 @@ impl Assignment {
     #[inline]
     pub fn vardata(&self, Lit(p): Lit) -> &VarData {
         let ref line = unsafe { self.assignment.get_unchecked(p >> 1) };
-        assert!(line.assign[p & 1] == LitVal::False);
+        assert_eq!(line.assign[p & 1], LitVal::False);
         &line.vd
     }
 

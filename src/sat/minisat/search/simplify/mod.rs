@@ -83,7 +83,7 @@ impl Simplificator {
     pub fn add_clause(&mut self, search: &mut Searcher, ps: &[Lit]) -> bool {
         //#ifndef NDEBUG
         for l in ps.iter() {
-            assert!(self.var_status[&l.var()].eliminated == 0);
+            assert_eq!(self.var_status[&l.var()].eliminated, 0);
         }
         //#endif
 
@@ -126,7 +126,7 @@ impl Simplificator {
             let ref mut st = self.var_status[&lit.var()];
 
             // If an assumption has been eliminated, remember it.
-            assert!(st.eliminated == 0);
+            assert_eq!(st.eliminated, 0);
             if st.frozen == 0 {
                 // Freeze and store.
                 st.frozen = 1;
@@ -171,9 +171,9 @@ impl Simplificator {
 
             // Empty elim_heap and return immediately on user-interrupt:
             if budget.interrupted() {
-                assert!(self.subsumption_queue.assigns_left(&search.assigns) == 0);
+                assert_eq!(self.subsumption_queue.assigns_left(&search.assigns), 0);
                 assert!(self.subsumption_queue.is_empty());
-                assert!(self.n_touched == 0);
+                assert_eq!(self.n_touched, 0);
                 self.elim.clear();
                 return true;
             }
@@ -290,7 +290,7 @@ impl Simplificator {
             search.watches.unwatch_clause_strict(search.ca.view(cr), cr);
             search.db.edit_clause(&mut search.ca, cr, |c| {
                 c.strengthen(l);
-                assert!(c.len() == len - 1);
+                assert_eq!(c.len(), len - 1);
             });
             search.watches.watch_clause(search.ca.view(cr), cr);
 
