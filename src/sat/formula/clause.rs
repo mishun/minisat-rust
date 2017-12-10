@@ -4,18 +4,18 @@ use super::Lit;
 
 #[derive(Clone, Copy)]
 struct ClauseHeader {
-    mark      : u32,
-    learnt    : bool,
-    has_extra : bool,
-    data_act  : f32,
-    data_abs  : u32,
-    reloced   : Option<ClauseRef>
+    mark: u32,
+    learnt: bool,
+    has_extra: bool,
+    data_act: f32,
+    data_abs: u32,
+    reloced: Option<ClauseRef>,
 }
 
 pub struct Clause {
-    header : ClauseHeader,
-    len    : usize,
-    data   : Box<[Lit]>
+    header: ClauseHeader,
+    len: usize,
+    data: Box<[Lit]>,
 }
 
 impl Clause {
@@ -42,7 +42,7 @@ impl Clause {
     }
 
     #[inline]
-    pub fn setActivity(&mut self, act : f64) {
+    pub fn setActivity(&mut self, act: f64) {
         assert!(self.header.has_extra);
         self.header.data_act = act as f32;
     }
@@ -54,7 +54,7 @@ impl Clause {
     }
 
     #[inline]
-    pub fn setTouched(&mut self, b : bool) {
+    pub fn setTouched(&mut self, b: bool) {
         if b {
             self.header.mark |= 2;
         } else {
@@ -80,18 +80,18 @@ impl Clause {
     }
 
     #[inline]
-    pub fn litsFrom<'c>(&'c self, start : usize) -> &'c [Lit] {
-        &self.lits()[start ..]
+    pub fn litsFrom<'c>(&'c self, start: usize) -> &'c [Lit] {
+        &self.lits()[start..]
     }
 
 
     #[inline]
-    pub fn swap(&mut self, i : usize, j : usize) {
+    pub fn swap(&mut self, i: usize, j: usize) {
         self.data.swap(i, j);
     }
 
     #[inline]
-    pub fn retainSuffix<F : Fn(&Lit) -> bool>(&mut self, base : usize, f : F) {
+    pub fn retainSuffix<F: Fn(&Lit) -> bool>(&mut self, base: usize, f: F) {
         let mut i = base;
         while i < self.len {
             if f(&self.data[i]) {
@@ -104,7 +104,7 @@ impl Clause {
     }
 
     #[inline]
-    pub fn pullLiteral<F : FnMut(Lit) -> bool>(&mut self, place : usize, mut f : F) -> Option<Lit> {
+    pub fn pullLiteral<F: FnMut(Lit) -> bool>(&mut self, place: usize, mut f: F) -> Option<Lit> {
         unsafe {
             let p = self.data.as_mut_ptr();
             let src = p.offset(place as isize);
@@ -124,10 +124,10 @@ impl Clause {
     }
 
 
-    pub fn strengthen(&mut self, p : Lit) {
-        for i in 0 .. self.len {
+    pub fn strengthen(&mut self, p: Lit) {
+        for i in 0..self.len {
             if self.data[i] == p {
-                for j in i + 1 .. self.len {
+                for j in i + 1..self.len {
                     self.data[j - 1] = self.data[j];
                 }
                 self.len -= 1;
@@ -144,7 +144,7 @@ impl Clause {
 
     fn calcAbstraction(&mut self) {
         assert!(self.header.has_extra);
-        let mut abstraction : u32 = 0;
+        let mut abstraction: u32 = 0;
         for lit in self.lits() {
             abstraction |= lit.abstraction();
         }
@@ -153,14 +153,16 @@ impl Clause {
 }
 
 impl fmt::Debug for Clause {
-    fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.is_deleted() {
             try!(write!(f, "<deleted>"));
         }
         try!(write!(f, "("));
         let mut first = true;
         for lit in self.lits() {
-            if !first { try!(write!(f, " ∨ ")); }
+            if !first {
+                try!(write!(f, " ∨ "));
+            }
             first = false;
             try!(write!(f, "{:?}", lit));
         }
@@ -172,10 +174,10 @@ impl fmt::Debug for Clause {
 pub enum Subsumes {
     Different,
     Exact,
-    LitSign(Lit)
+    LitSign(Lit),
 }
 
-pub fn subsumes(this : &Clause, other : &Clause) -> Subsumes {
+pub fn subsumes(this: &Clause, other: &Clause) -> Subsumes {
     assert!(!this.is_learnt());
     assert!(!other.is_learnt());
 
@@ -211,7 +213,7 @@ pub fn subsumes(this : &Clause, other : &Clause) -> Subsumes {
     return ret;
 }
 
-pub fn unitSubsumes(unit : Lit, c : &Clause) -> Subsumes {
+pub fn unitSubsumes(unit: Lit, c: &Clause) -> Subsumes {
     assert!(!c.is_learnt());
 
     if unit.abstraction() & !c.abstraction() != 0 {
@@ -235,39 +237,42 @@ pub struct ClauseRef(usize);
 
 
 pub struct ClauseAllocator {
-    clauses            : Vec<Clause>,
-    lc                 : LegacyCounter,
-    extra_clause_field : bool
+    clauses: Vec<Clause>,
+    lc: LegacyCounter,
+    extra_clause_field: bool,
 }
 
 impl ClauseAllocator {
     pub fn newEmpty() -> ClauseAllocator {
-        ClauseAllocator { clauses            : Vec::new()
-                        , lc                 : LegacyCounter::new()
-                        , extra_clause_field : false
-                        }
+        ClauseAllocator {
+            clauses: Vec::new(),
+            lc: LegacyCounter::new(),
+            extra_clause_field: false,
+        }
     }
 
-    pub fn newForGC(old : &ClauseAllocator) -> ClauseAllocator {
+    pub fn newForGC(old: &ClauseAllocator) -> ClauseAllocator {
         // old.size - old.wasted
-        ClauseAllocator { clauses            : Vec::new()
-                        , lc                 : LegacyCounter::new()
-                        , extra_clause_field : old.extra_clause_field
-                        }
+        ClauseAllocator {
+            clauses: Vec::new(),
+            lc: LegacyCounter::new(),
+            extra_clause_field: old.extra_clause_field,
+        }
     }
 
-    pub fn alloc(&mut self, ps : Box<[Lit]>, learnt : bool) -> (&Clause, ClauseRef) {
+    pub fn alloc(&mut self, ps: Box<[Lit]>, learnt: bool) -> (&Clause, ClauseRef) {
         assert!(ps.len() > 1);
         let mut c = Clause {
-            header : ClauseHeader { mark      : 0
-                                  , learnt    : learnt
-                                  , has_extra : learnt | self.extra_clause_field
-                                  , data_act  : 0.0
-                                  , data_abs  : 0
-                                  , reloced   : None
-                                  },
-            len    : ps.len(),
-            data   : ps
+            header: ClauseHeader {
+                mark: 0,
+                learnt: learnt,
+                has_extra: learnt | self.extra_clause_field,
+                data_act: 0.0,
+                data_abs: 0,
+                reloced: None,
+            },
+            len: ps.len(),
+            data: ps,
         };
 
         if c.header.has_extra {
@@ -285,11 +290,11 @@ impl ClauseAllocator {
         (&self.clauses[index], ClauseRef(index))
     }
 
-    fn reloc(&mut self, src : &Clause) -> ClauseRef {
+    fn reloc(&mut self, src: &Clause) -> ClauseRef {
         let mut c = Clause {
-            header : src.header,
-            len    : src.len,
-            data   : src.data.clone()
+            header: src.header,
+            len: src.len,
+            data: src.data.clone(),
         };
         c.header.has_extra |= self.extra_clause_field;
         self.lc.add(&c);
@@ -299,7 +304,7 @@ impl ClauseAllocator {
         ClauseRef(index)
     }
 
-    pub fn free(&mut self, ClauseRef(cr) : ClauseRef) {
+    pub fn free(&mut self, ClauseRef(cr): ClauseRef) {
         let ref mut c = self.clauses[cr];
         assert!(!c.is_deleted());
         c.header.mark |= 1;
@@ -307,11 +312,11 @@ impl ClauseAllocator {
     }
 
     #[inline]
-    pub fn isDeleted(&self, ClauseRef(index) : ClauseRef) -> bool {
+    pub fn isDeleted(&self, ClauseRef(index): ClauseRef) -> bool {
         self.clauses[index].is_deleted()
     }
 
-    pub fn relocTo(&mut self, to : &mut ClauseAllocator, src : ClauseRef) -> Option<ClauseRef> {
+    pub fn relocTo(&mut self, to: &mut ClauseAllocator, src: ClauseRef) -> Option<ClauseRef> {
         let c = self.edit(src);
         if c.is_deleted() {
             None
@@ -327,22 +332,22 @@ impl ClauseAllocator {
         self.lc.size
     }
 
-    pub fn checkGarbage(&mut self, gf : f64) -> bool {
+    pub fn checkGarbage(&mut self, gf: f64) -> bool {
         (self.lc.wasted as f64) > (self.lc.size as f64) * gf
     }
 
-    pub fn set_extra_clause_field(&mut self, new_value : bool) {
+    pub fn set_extra_clause_field(&mut self, new_value: bool) {
         self.extra_clause_field = new_value;
     }
 
     #[inline]
-    pub fn view<'a>(&'a self, ClauseRef(index) : ClauseRef) -> &'a Clause {
+    pub fn view<'a>(&'a self, ClauseRef(index): ClauseRef) -> &'a Clause {
         assert!(index < self.clauses.len());
         &self.clauses[index]
     }
 
     #[inline]
-    pub fn edit<'a>(&'a mut self, ClauseRef(index) : ClauseRef) -> &'a mut Clause {
+    pub fn edit<'a>(&'a mut self, ClauseRef(index): ClauseRef) -> &'a mut Clause {
         assert!(index < self.clauses.len());
         &mut self.clauses[index]
     }
@@ -350,26 +355,24 @@ impl ClauseAllocator {
 
 
 struct LegacyCounter {
-    size   : usize,
-    wasted : usize
+    size: usize,
+    wasted: usize,
 }
 
 impl LegacyCounter {
-    fn clauseSize(size : usize, has_extra : bool) -> usize {
+    fn clauseSize(size: usize, has_extra: bool) -> usize {
         4 * (1 + size + (has_extra as usize))
     }
 
     pub fn new() -> LegacyCounter {
-        LegacyCounter { size   : 0
-                      , wasted : 0
-                      }
+        LegacyCounter { size: 0, wasted: 0 }
     }
 
-    pub fn add(&mut self, c : &Clause) {
+    pub fn add(&mut self, c: &Clause) {
         self.size += Self::clauseSize(c.len, c.header.has_extra);
     }
 
-    pub fn sub(&mut self, c : &Clause) {
+    pub fn sub(&mut self, c: &Clause) {
         self.wasted += Self::clauseSize(c.len, c.header.has_extra);
     }
 }

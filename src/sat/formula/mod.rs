@@ -12,7 +12,7 @@ pub struct Var(usize);
 
 impl Var {
     #[inline]
-    pub fn lit(&self, sign : bool) -> Lit {
+    pub fn lit(&self, sign: bool) -> Lit {
         Lit((self.0 << 1) | (sign as usize))
     }
 
@@ -28,7 +28,7 @@ impl Var {
 }
 
 impl fmt::Debug for Var {
-    fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "x{}", self.0)
     }
 }
@@ -64,8 +64,10 @@ impl ops::Not for Lit {
 }
 
 impl fmt::Debug for Lit {
-    fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
-        if self.sign() { try!(write!(f, "¬")); }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.sign() {
+            try!(write!(f, "¬"));
+        }
         write!(f, "{:?}", self.var())
     }
 }

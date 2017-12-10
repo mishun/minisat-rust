@@ -5,30 +5,29 @@ use sat::formula::clause::*;
 
 
 pub struct SubsumptionQueue {
-    subsumption_queue : VecDeque<ClauseRef>,
-    bwdsub_assigns    : usize
+    subsumption_queue: VecDeque<ClauseRef>,
+    bwdsub_assigns: usize,
 }
 
 pub enum SubsumptionJob {
     Clause(ClauseRef),
-    Assign(Lit)
+    Assign(Lit),
 }
 
 impl SubsumptionQueue {
     pub fn new() -> Self {
-        SubsumptionQueue { subsumption_queue : VecDeque::new()
-                         , bwdsub_assigns    : 0
-                         }
+        SubsumptionQueue {
+            subsumption_queue: VecDeque::new(),
+            bwdsub_assigns: 0,
+        }
     }
 
-    pub fn pop(&mut self, ca : &ClauseAllocator, assigns : &Assignment) -> Option<SubsumptionJob> {
+    pub fn pop(&mut self, ca: &ClauseAllocator, assigns: &Assignment) -> Option<SubsumptionJob> {
         loop {
             match self.subsumption_queue.pop_front() {
-                Some(cr) => {
-                    if !ca.isDeleted(cr) {
-                        return Some(SubsumptionJob::Clause(cr));
-                    }
-                }
+                Some(cr) => if !ca.isDeleted(cr) {
+                    return Some(SubsumptionJob::Clause(cr));
+                },
 
                 None if self.bwdsub_assigns < assigns.numberOfGroundAssigns() => {
                     let lit = assigns.assignAt(self.bwdsub_assigns);
@@ -43,7 +42,7 @@ impl SubsumptionQueue {
         }
     }
 
-    pub fn push(&mut self, cr : ClauseRef) {
+    pub fn push(&mut self, cr: ClauseRef) {
         self.subsumption_queue.push_back(cr);
     }
 
@@ -55,16 +54,16 @@ impl SubsumptionQueue {
         self.subsumption_queue.is_empty()
     }
 
-    pub fn assignsLeft(&self, assigns : &Assignment) -> usize {
+    pub fn assignsLeft(&self, assigns: &Assignment) -> usize {
         assigns.numberOfGroundAssigns() - self.bwdsub_assigns
     }
 
-    pub fn clear(&mut self, assigns : &Assignment) {
+    pub fn clear(&mut self, assigns: &Assignment) {
         self.subsumption_queue.clear();
         self.bwdsub_assigns = assigns.numberOfGroundAssigns();
     }
 
-    pub fn remarkTouched(&mut self, ca : &mut ClauseAllocator, src : bool) {
+    pub fn remarkTouched(&mut self, ca: &mut ClauseAllocator, src: bool) {
         for &cr in self.subsumption_queue.iter() {
             let c = ca.edit(cr);
             if c.touched() == src {
@@ -73,8 +72,8 @@ impl SubsumptionQueue {
         }
     }
 
-    pub fn relocGC(&mut self, from : &mut ClauseAllocator, to : &mut ClauseAllocator) {
-        self.subsumption_queue.retain(|&cr| { !from.isDeleted(cr) });
+    pub fn relocGC(&mut self, from: &mut ClauseAllocator, to: &mut ClauseAllocator) {
+        self.subsumption_queue.retain(|&cr| !from.isDeleted(cr));
         for cr in self.subsumption_queue.iter_mut() {
             *cr = from.relocTo(to, *cr).unwrap();
         }
