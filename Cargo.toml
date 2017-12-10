@@ -19,6 +19,11 @@ vec_map = "0.8"
 [dev-dependencies]
 tempfile = "2.2"
 
+[profile.bench]
+debug = false
+lto = true
+opt-level = 3
+
 [profile.release]
 debug = false
 lto = true
