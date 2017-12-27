@@ -1,22 +1,30 @@
 [package]
-name = "minisat-rust"
-version = "0.0.1"
 authors = ["Alexander Mishunin <alexander.mishunin@gmail.com>"]
+keywords = [
+    "sat",
+    "minisat",
+]
+name = "minisat-rust"
 repository = "https://github.com/mishun/minisat-rust.git"
-keywords = ["sat", "minisat"]
+version = "0.0.1"
 
 [dependencies]
-time = "0.1.*"
-vec_map = "0.6.*"
-log = "0.3.*"
-env_logger = "0.3.*"
-clap = "2.*"
-flate2 = "0.2.*"
+clap = "2"
+env_logger = "0.4"
+flate2 = "1"
+log = "0.3"
+time = "0.1"
+vec_map = "0.8"
 
 [dev-dependencies]
-tempfile = "2.*"
+tempfile = "2.2"
+
+[profile.bench]
+debug = false
+lto = true
+opt-level = 3
 
 [profile.release]
-opt-level = 3
-lto = true
 debug = false
+lto = true
+opt-level = 3

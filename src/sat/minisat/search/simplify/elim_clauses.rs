@@ -1,29 +1,30 @@
 use std::mem;
-use sat::formula::{Var, Lit};
+use sat::formula::{Lit, Var};
 use sat::formula::assignment::*;
 use sat::formula::clause::Clause;
 
 
 pub struct ElimClauses {
-    extend_model : bool,
-    literals     : Vec<Lit>,
-    sizes        : Vec<usize>
+    extend_model: bool,
+    literals: Vec<Lit>,
+    sizes: Vec<usize>,
 }
 
 impl ElimClauses {
-    pub fn new(extend_model : bool) -> ElimClauses {
-        ElimClauses { extend_model : extend_model
-                    , literals     : Vec::new()
-                    , sizes        : Vec::new()
-                    }
+    pub fn new(extend_model: bool) -> ElimClauses {
+        ElimClauses {
+            extend_model,
+            literals: Vec::new(),
+            sizes: Vec::new(),
+        }
     }
 
-    pub fn mkElimUnit(&mut self, x : Lit) {
+    pub fn mk_elim_unit(&mut self, x: Lit) {
         self.literals.push(x);
         self.sizes.push(1);
     }
 
-    pub fn mkElimClause(&mut self, v : Var, c : &Clause) {
+    pub fn mk_elim_clause(&mut self, v: Var, c: &Clause) {
         let first = self.literals.len();
 
         // Copy clause to elimclauses-vector. Remember position where the
@@ -48,8 +49,10 @@ impl ElimClauses {
         self.sizes.push(c.len());
     }
 
-    pub fn extend(&self, assigns : &mut Assignment) {
-        if !self.extend_model { return; }
+    pub fn extend(&self, assigns: &mut Assignment) {
+        if !self.extend_model {
+            return;
+        }
 
         let mut i = self.literals.len();
         let mut cl = self.sizes.len();
@@ -61,7 +64,7 @@ impl ElimClauses {
             i -= 1;
             let mut skip = false;
             while j > 1 {
-                if assigns.isAssignedPos(self.literals[i]) {
+                if assigns.is_assigned_pos(self.literals[i]) {
                     skip = true;
                     break;
                 }
@@ -71,7 +74,7 @@ impl ElimClauses {
             }
 
             if !skip {
-                assigns.rewriteLit(self.literals[i]);
+                assigns.rewrite_lit(self.literals[i]);
             }
 
             if i > j - 1 {
@@ -82,10 +85,13 @@ impl ElimClauses {
         }
     }
 
-    pub fn logSize(&self) {
+    pub fn log_size(&self) {
         let sz = self.literals.len() + self.sizes.len();
         if sz > 0 {
-            info!("|  Eliminated clauses:     {:10.2} Mb                                      |", ((sz * mem::size_of::<u32>()) as f64) / (1024.0 * 1024.0));
+            info!(
+                "|  Eliminated clauses:     {:10.2} Mb                                      |",
+                ((sz * mem::size_of::<u32>()) as f64) / (1024.0 * 1024.0)
+            );
         }
     }
 }

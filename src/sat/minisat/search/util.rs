@@ -1,11 +1,10 @@
-
 pub struct Random {
-    seed : f64
+    seed: f64,
 }
 
 impl Random {
-    pub fn new(seed : f64) -> Random {
-        Random { seed : seed }
+    pub fn new(seed: f64) -> Random {
+        Random { seed }
     }
 
     // Returns a random float 0 <= x < 1. Seed must never be 0.
@@ -17,17 +16,17 @@ impl Random {
     }
 
     // Returns a random integer 0 <= x < size. Seed must never be 0.
-    pub fn irand(&mut self, size : usize) -> usize {
+    pub fn irand(&mut self, size: usize) -> usize {
         (self.drand() * (size as f64)) as usize
     }
 
-    pub fn chance(&mut self, p : f64) -> bool {
+    pub fn chance(&mut self, p: f64) -> bool {
         self.drand() < p
     }
 }
 
 
-pub fn luby(y : f64, mut x : u32) -> f64 {
+pub fn luby(y: f64, mut x: u32) -> f64 {
     // Find the finite subsequence that contains index 'x', and the
     // size of that subsequence:
     let mut size = 1;

@@ -1,6 +1,6 @@
 use std::{marker, ops, slice};
 use vec_map;
-use super::{Var, Lit};
+use super::{Lit, Var};
 
 
 pub type VarMap<V> = IdxMap<Var, V>;
@@ -22,7 +22,7 @@ impl Idx for Var {
     }
 
     #[inline]
-    fn unidx(idx : usize) -> Var {
+    fn unidx(idx: usize) -> Var {
         Var(idx)
     }
 }
@@ -34,73 +34,80 @@ impl Idx for Lit {
     }
 
     #[inline]
-    fn unidx(idx : usize) -> Lit {
+    fn unidx(idx: usize) -> Lit {
         Lit(idx)
     }
 }
 
 
-pub struct IdxMap<K : Idx, V> {
-    map : vec_map::VecMap<V>,
-    ph  : marker::PhantomData<K>
+pub struct IdxMap<K: Idx, V> {
+    map: vec_map::VecMap<V>,
+    ph: marker::PhantomData<K>,
 }
 
-impl<K : Idx, V> IdxMap<K, V> {
+impl<K: Idx, V> IdxMap<K, V> {
     pub fn new() -> Self {
-        IdxMap { map : vec_map::VecMap::new()
-               , ph  : marker::PhantomData
-               }
+        IdxMap {
+            map: vec_map::VecMap::new(),
+            ph: marker::PhantomData,
+        }
     }
 
     #[inline]
-    pub fn insert(&mut self, k : &K, v : V) -> Option<V> {
+    pub fn insert(&mut self, k: &K, v: V) -> Option<V> {
         self.map.insert(k.idx(), v)
     }
 
     #[inline]
-    pub fn remove(&mut self, k : &K) -> Option<V> {
+    pub fn remove(&mut self, k: &K) -> Option<V> {
         self.map.remove(k.idx())
     }
 
     #[inline]
-    pub fn get(&self, k : &K) -> Option<&V> {
+    pub fn get(&self, k: &K) -> Option<&V> {
         self.map.get(k.idx())
     }
 
     #[inline]
     pub fn iter(&self) -> Iter<K, V> {
-        Iter { it : self.map.iter(), ph : marker::PhantomData }
+        Iter {
+            it: self.map.iter(),
+            ph: marker::PhantomData,
+        }
     }
 
     #[inline]
     pub fn iter_mut(&mut self) -> IterMut<K, V> {
-        IterMut { it : self.map.iter_mut(), ph : marker::PhantomData }
+        IterMut {
+            it: self.map.iter_mut(),
+            ph: marker::PhantomData,
+        }
     }
 }
 
-impl<'r, K : Idx, V> ops::Index<&'r K> for IdxMap<K, V> {
+impl<'r, K: Idx, V> ops::Index<&'r K> for IdxMap<K, V> {
     type Output = V;
 
     #[inline]
-    fn index(&self, k : &'r K) -> &V {
+    fn index(&self, k: &'r K) -> &V {
         self.map.index(&k.idx())
     }
 }
 
-impl<'r, K : Idx, V> ops::IndexMut<&'r K> for IdxMap<K, V> {
+impl<'r, K: Idx, V> ops::IndexMut<&'r K> for IdxMap<K, V> {
     #[inline]
-    fn index_mut(&mut self, k : &'r K) -> &mut V {
+    fn index_mut(&mut self, k: &'r K) -> &mut V {
         self.map.index_mut(&k.idx())
     }
 }
 
 
-pub struct Iter<'a, K : Idx, V : 'a> {
-    it : vec_map::Iter<'a, V>,
-    ph : marker::PhantomData<K>
+pub struct Iter<'a, K: Idx, V: 'a> {
+    it: vec_map::Iter<'a, V>,
+    ph: marker::PhantomData<K>,
 }
 
-impl<'a, K : Idx, V : 'a> Iterator for Iter<'a, K, V> {
+impl<'a, K: Idx, V: 'a> Iterator for Iter<'a, K, V> {
     type Item = (K, &'a V);
 
     #[inline]
@@ -110,12 +117,12 @@ impl<'a, K : Idx, V : 'a> Iterator for Iter<'a, K, V> {
 }
 
 
-pub struct IterMut<'a, K : Idx, V : 'a> {
-    it : vec_map::IterMut<'a, V>,
-    ph : marker::PhantomData<K>
+pub struct IterMut<'a, K: Idx, V: 'a> {
+    it: vec_map::IterMut<'a, V>,
+    ph: marker::PhantomData<K>,
 }
 
-impl<'a, K : Idx, V : 'a> Iterator for IterMut<'a, K, V> {
+impl<'a, K: Idx, V: 'a> Iterator for IterMut<'a, K, V> {
     type Item = (K, &'a mut V);
 
     #[inline]
@@ -125,20 +132,21 @@ impl<'a, K : Idx, V : 'a> Iterator for IterMut<'a, K, V> {
 }
 
 
-pub struct IdxVec<K : Idx, V> {
-    vec : Vec<V>,
-    ph  : marker::PhantomData<K>
+pub struct IdxVec<K: Idx, V> {
+    vec: Vec<V>,
+    ph: marker::PhantomData<K>,
 }
 
-impl<K : Idx, V : Default> IdxVec<K, V> {
+impl<K: Idx, V: Default> IdxVec<K, V> {
     pub fn new() -> Self {
-        IdxVec { vec : Vec::new()
-               , ph  : marker::PhantomData
-               }
+        IdxVec {
+            vec: Vec::new(),
+            ph: marker::PhantomData,
+        }
     }
 
     #[inline]
-    pub fn init(&mut self, k : K) {
+    pub fn init(&mut self, k: K) {
         while self.vec.len() <= k.idx() {
             self.vec.push(V::default());
         }
@@ -155,33 +163,34 @@ impl<K : Idx, V : Default> IdxVec<K, V> {
     }
 }
 
-impl<K : Idx, V> ops::Index<K> for IdxVec<K, V> {
+impl<K: Idx, V> ops::Index<K> for IdxVec<K, V> {
     type Output = V;
 
     #[inline]
-    fn index(&self, k : K) -> &V {
+    fn index(&self, k: K) -> &V {
         &self.vec[k.idx()]
     }
 }
 
-impl<K : Idx, V> ops::IndexMut<K> for IdxVec<K, V> {
+impl<K: Idx, V> ops::IndexMut<K> for IdxVec<K, V> {
     #[inline]
-    fn index_mut(&mut self, k : K) -> &mut V {
+    fn index_mut(&mut self, k: K) -> &mut V {
         &mut self.vec[k.idx()]
     }
 }
 
 
-pub struct IdxHeap<K : Idx> {
-    heap  : Vec<K>,
-    index : vec_map::VecMap<usize>
+pub struct IdxHeap<K: Idx> {
+    heap: Vec<K>,
+    index: vec_map::VecMap<usize>,
 }
 
-impl<K : Idx> IdxHeap<K> {
+impl<K: Idx> IdxHeap<K> {
     pub fn new() -> Self {
-        IdxHeap { heap  : Vec::new()
-                , index : vec_map::VecMap::new()
-                }
+        IdxHeap {
+            heap: Vec::new(),
+            index: vec_map::VecMap::new(),
+        }
     }
 
     #[inline]
@@ -195,7 +204,7 @@ impl<K : Idx> IdxHeap<K> {
     }
 
     #[inline]
-    pub fn contains(&self, key : &K) -> bool {
+    pub fn contains(&self, key: &K) -> bool {
         self.index.contains_key(key.idx())
     }
 
@@ -206,7 +215,7 @@ impl<K : Idx> IdxHeap<K> {
     }
 
     #[inline]
-    pub fn insert<F : Fn(&K, &K) -> bool>(&mut self, key : K, before : F) -> bool {
+    pub fn insert<F: Fn(&K, &K) -> bool>(&mut self, key: K, before: F) -> bool {
         if !self.index.contains_key(key.idx()) {
             let place = self.heap.len();
             self.heap.push(key);
@@ -218,7 +227,7 @@ impl<K : Idx> IdxHeap<K> {
     }
 
     #[inline]
-    pub fn pop<F : Fn(&K, &K) -> bool>(&mut self, before : F) -> Option<K> {
+    pub fn pop<F: Fn(&K, &K) -> bool>(&mut self, before: F) -> Option<K> {
         if self.heap.is_empty() {
             None
         } else {
@@ -232,29 +241,30 @@ impl<K : Idx> IdxHeap<K> {
     }
 
     #[inline]
-    pub fn update<F : Fn(&K, &K) -> bool>(&mut self, key : &K, before : F) -> bool {
-        let place =
-            match self.index.get(key.idx()) {
-                None    => { return false; }
-                Some(i) => { *i }
-            };
+    pub fn update<F: Fn(&K, &K) -> bool>(&mut self, key: &K, before: F) -> bool {
+        let place = match self.index.get(key.idx()) {
+            None => {
+                return false;
+            }
+            Some(i) => *i,
+        };
 
         self.sift_down(place, &before);
         self.sift_up(place, before);
         true
     }
 
-    pub fn heapifyFrom<F : Fn(&K, &K) -> bool>(&mut self, from : Vec<K>, before : F) {
+    pub fn heapify_from<F: Fn(&K, &K) -> bool>(&mut self, from: Vec<K>, before: F) {
         self.index.clear();
         self.heap = from;
 
-        for i in (0 .. self.heap.len()).rev() {
+        for i in (0..self.heap.len()).rev() {
             self.sift_down(i, &before);
         }
     }
 
     #[inline]
-    fn sift_up<F : Fn(&K, &K) -> bool>(&mut self, mut i : usize, before : F) {
+    fn sift_up<F: Fn(&K, &K) -> bool>(&mut self, mut i: usize, before: F) {
         while i > 0 {
             let p = (i - 1) >> 1;
             if before(&self.heap[i], &self.heap[p]) {
@@ -270,13 +280,19 @@ impl<K : Idx> IdxHeap<K> {
     }
 
     #[inline]
-    fn sift_down<F : Fn(&K, &K) -> bool>(&mut self, mut i : usize, before : &F) {
+    fn sift_down<F: Fn(&K, &K) -> bool>(&mut self, mut i: usize, before: &F) {
         loop {
             let c = {
                 let l = 2 * i + 1;
-                if l >= self.heap.len() { break; }
+                if l >= self.heap.len() {
+                    break;
+                }
                 let r = l + 1;
-                if r < self.heap.len() && before(&self.heap[r], &self.heap[l]) { r } else { l }
+                if r < self.heap.len() && before(&self.heap[r], &self.heap[l]) {
+                    r
+                } else {
+                    l
+                }
             };
 
             if before(&self.heap[c], &self.heap[i]) {
@@ -292,11 +308,11 @@ impl<K : Idx> IdxHeap<K> {
     }
 }
 
-impl<K : Idx> ops::Index<usize> for IdxHeap<K> {
+impl<K: Idx> ops::Index<usize> for IdxHeap<K> {
     type Output = K;
 
     #[inline]
-    fn index(&self, i : usize) -> &K {
+    fn index(&self, i: usize) -> &K {
         self.heap.index(i)
     }
 }

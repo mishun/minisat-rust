@@ -1,10 +1,11 @@
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate clap;
 extern crate env_logger;
-#[macro_use] extern crate clap;
+extern crate log;
 extern crate minisat_rust;
 
 use std::path;
-use minisat_rust::sat::minisat::{self, PhaseSaving, CCMinMode};
+use minisat_rust::sat::minisat::{self, CCMinMode, PhaseSaving};
 
 
 fn main() {
@@ -55,90 +56,160 @@ fn main() {
 
     {
         let mut builder = env_logger::LogBuilder::new();
-        builder.format(|record: &log::LogRecord| { format!("{}", record.args()) });
-        builder.filter(None,
-            matches.value_of("verb").map(|v| {
-                match v {
-                    "1" => { log::LogLevelFilter::Info }
-                    "2" => { log::LogLevelFilter::Trace }
-                    _   => { log::LogLevelFilter::Off }
-                }
-            }).unwrap_or(log::LogLevelFilter::Info));
+        builder.format(|record: &log::LogRecord| format!("{}", record.args()));
+        builder.filter(
+            None,
+            matches
+                .value_of("verb")
+                .map(|v| match v {
+                    "1" => log::LogLevelFilter::Info,
+                    "2" => log::LogLevelFilter::Trace,
+                    _ => log::LogLevelFilter::Off,
+                })
+                .unwrap_or(log::LogLevelFilter::Info),
+        );
         builder.init().unwrap();
     }
 
-    let main =
-        minisat_rust::MainOptions {
-            strict      : matches.is_present("strict"),
-            pre         : !matches.is_present("no-pre"),
-            solve       : !matches.is_present("no-solve"),
-            in_path     : path::PathBuf::from(matches.value_of("input").unwrap()),
-            out_path    : matches.value_of("output").map(|x| path::PathBuf::from(x)),
-            dimacs_path : matches.value_of("dimacs").map(|x| path::PathBuf::from(x))
-        };
+    let main = minisat_rust::MainOptions {
+        strict: matches.is_present("strict"),
+        pre: !matches.is_present("no-pre"),
+        solve: !matches.is_present("no-solve"),
+        in_path: path::PathBuf::from(matches.value_of("input").unwrap()),
+        out_path: matches.value_of("output").map(|x| path::PathBuf::from(x)),
+        dimacs_path: matches.value_of("dimacs").map(|x| path::PathBuf::from(x)),
+    };
 
     let solver = {
         let core_options = {
             let mut s = minisat::CoreSettings::default();
 
-            for &x in matches.value_of("var-decay").and_then(|s| s.parse().ok()).iter() {
-                if 0.0 < x && x < 1.0 { s.heur.var_decay = x; }
+            for &x in matches
+                .value_of("var-decay")
+                .and_then(|s| s.parse().ok())
+                .iter()
+            {
+                if 0.0 < x && x < 1.0 {
+                    s.heur.var_decay = x;
+                }
             }
 
-            for &x in matches.value_of("cla-decay").and_then(|s| s.parse().ok()).iter() {
-                if 0.0 < x && x < 1.0 { s.db.clause_decay = x; }
+            for &x in matches
+                .value_of("cla-decay")
+                .and_then(|s| s.parse().ok())
+                .iter()
+            {
+                if 0.0 < x && x < 1.0 {
+                    s.db.clause_decay = x;
+                }
             }
 
-            for &x in matches.value_of("rnd-freq").and_then(|s| s.parse().ok()).iter() {
-                if 0.0 <= x && x <= 1.0 { s.heur.random_var_freq = x; }
+            for &x in matches
+                .value_of("rnd-freq")
+                .and_then(|s| s.parse().ok())
+                .iter()
+            {
+                if 0.0 <= x && x <= 1.0 {
+                    s.heur.random_var_freq = x;
+                }
             }
 
-            for &x in matches.value_of("rnd-seed").and_then(|s| s.parse().ok()).iter() {
-                if 0.0 < x { s.heur.random_seed = x; }
+            for &x in matches
+                .value_of("rnd-seed")
+                .and_then(|s| s.parse().ok())
+                .iter()
+            {
+                if 0.0 < x {
+                    s.heur.random_seed = x;
+                }
             }
 
             for &x in matches.value_of("ccmin-mode").iter() {
                 match x {
-                    "0" => { s.ccmin_mode = CCMinMode::None; }
-                    "1" => { s.ccmin_mode = CCMinMode::Basic; }
-                    "2" => { s.ccmin_mode = CCMinMode::Deep; }
-                    _   => {}
+                    "0" => {
+                        s.ccmin_mode = CCMinMode::None;
+                    }
+                    "1" => {
+                        s.ccmin_mode = CCMinMode::Basic;
+                    }
+                    "2" => {
+                        s.ccmin_mode = CCMinMode::Deep;
+                    }
+                    _ => {}
                 }
             }
 
             for &x in matches.value_of("phase_saving").iter() {
                 match x {
-                    "0" => { s.heur.phase_saving = PhaseSaving::None; }
-                    "1" => { s.heur.phase_saving = PhaseSaving::Limited; }
-                    "2" => { s.heur.phase_saving = PhaseSaving::Full; }
-                    _   => {}
+                    "0" => {
+                        s.heur.phase_saving = PhaseSaving::None;
+                    }
+                    "1" => {
+                        s.heur.phase_saving = PhaseSaving::Limited;
+                    }
+                    "2" => {
+                        s.heur.phase_saving = PhaseSaving::Full;
+                    }
+                    _ => {}
                 }
             }
 
-            if matches.is_present("rnd-init") { s.heur.rnd_init_act = true; }
-            if matches.is_present("no-rnd-init") { s.heur.rnd_init_act = false; }
+            if matches.is_present("rnd-init") {
+                s.heur.rnd_init_act = true;
+            }
+            if matches.is_present("no-rnd-init") {
+                s.heur.rnd_init_act = false;
+            }
 
-            if matches.is_present("luby") { s.search.restart.luby_restart = true; }
-            if matches.is_present("no-luby") { s.search.restart.luby_restart = false; }
+            if matches.is_present("luby") {
+                s.search.restart.luby_restart = true;
+            }
+            if matches.is_present("no-luby") {
+                s.search.restart.luby_restart = false;
+            }
 
-            for &x in matches.value_of("rfirst").and_then(|s| s.parse().ok()).iter() {
-                if 0.0 < x { s.search.restart.restart_first = x; }
+            for &x in matches
+                .value_of("rfirst")
+                .and_then(|s| s.parse().ok())
+                .iter()
+            {
+                if 0.0 < x {
+                    s.search.restart.restart_first = x;
+                }
             }
 
             for &x in matches.value_of("rinc").and_then(|s| s.parse().ok()).iter() {
-                if 1.0 < x { s.search.restart.restart_inc = x; }
+                if 1.0 < x {
+                    s.search.restart.restart_inc = x;
+                }
             }
 
-            for &x in matches.value_of("gc-frac").and_then(|s| s.parse().ok()).iter() {
-                if 0.0 < x && x <= 1.0 { s.core.garbage_frac = x; }
+            for &x in matches
+                .value_of("gc-frac")
+                .and_then(|s| s.parse().ok())
+                .iter()
+            {
+                if 0.0 < x && x <= 1.0 {
+                    s.core.garbage_frac = x;
+                }
             }
 
-            for &x in matches.value_of("min-learnts").and_then(|s| s.parse().ok()).iter() {
-                if 0 <= x { s.search.learn.min_learnts_lim = x; }
+            for &x in matches
+                .value_of("min-learnts")
+                .and_then(|s| s.parse().ok())
+                .iter()
+            {
+                if 0 <= x {
+                    s.search.learn.min_learnts_lim = x;
+                }
             }
 
-            if matches.is_present("rcheck") { s.core.use_rcheck = true; }
-            if matches.is_present("no-rcheck") { s.core.use_rcheck = false; }
+            if matches.is_present("rcheck") {
+                s.core.use_rcheck = true;
+            }
+            if matches.is_present("no-rcheck") {
+                s.core.use_rcheck = false;
+            }
 
             s
         };
@@ -150,26 +221,52 @@ fn main() {
                 let mut s = minisat::SimpSettings::default();
                 s.core = core_options;
 
-                if matches.is_present("asymm") { s.simp.use_asymm = true; }
-                if matches.is_present("no-asymm") { s.simp.use_asymm = false; }
+                if matches.is_present("asymm") {
+                    s.simp.use_asymm = true;
+                }
+                if matches.is_present("no-asymm") {
+                    s.simp.use_asymm = false;
+                }
 
-                if matches.is_present("elim") { s.simp.use_elim = true; }
-                if matches.is_present("no-elim") { s.simp.use_elim = false; }
+                if matches.is_present("elim") {
+                    s.simp.use_elim = true;
+                }
+                if matches.is_present("no-elim") {
+                    s.simp.use_elim = false;
+                }
 
                 for &x in matches.value_of("grow").and_then(|s| s.parse().ok()).iter() {
                     s.simp.grow = x;
                 }
 
-                for &x in matches.value_of("cl-lim").and_then(|s| s.parse().ok()).iter() {
-                    if -1 <= x { s.simp.clause_lim = x; }
+                for &x in matches
+                    .value_of("cl-lim")
+                    .and_then(|s| s.parse().ok())
+                    .iter()
+                {
+                    if -1 <= x {
+                        s.simp.clause_lim = x;
+                    }
                 }
 
-                for &x in matches.value_of("sub-lim").and_then(|s| s.parse().ok()).iter() {
-                    if -1 <= x { s.simp.subsumption_lim = x; }
+                for &x in matches
+                    .value_of("sub-lim")
+                    .and_then(|s| s.parse().ok())
+                    .iter()
+                {
+                    if -1 <= x {
+                        s.simp.subsumption_lim = x;
+                    }
                 }
 
-                for &x in matches.value_of("simp-gc-frac").and_then(|s| s.parse().ok()).iter() {
-                    if 0.0 < x && x <= 1.0 { s.simp.simp_garbage_frac = x; }
+                for &x in matches
+                    .value_of("simp-gc-frac")
+                    .and_then(|s| s.parse().ok())
+                    .iter()
+                {
+                    if 0.0 < x && x <= 1.0 {
+                        s.simp.simp_garbage_frac = x;
+                    }
                 }
 
                 s

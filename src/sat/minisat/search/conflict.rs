@@ -1,4 +1,4 @@
-use sat::formula::{Var, Lit, VarMap, LitMap};
+use sat::formula::{Lit, LitMap, Var, VarMap};
 use sat::formula::clause::*;
 use sat::formula::assignment::*;
 
@@ -7,7 +7,7 @@ use sat::formula::assignment::*;
 pub enum CCMinMode {
     None,
     Basic,
-    Deep
+    Deep,
 }
 
 impl Default for CCMinMode {
@@ -20,39 +20,40 @@ impl Default for CCMinMode {
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 #[repr(u8)]
 enum Seen {
-    Undef     = 0,
-    Source    = 1,
+    Undef = 0,
+    Source = 1,
     Removable = 2,
-    Failed    = 3
+    Failed = 3,
 }
 
 
 pub enum Conflict {
     Ground,
     Unit(DecisionLevel, Lit),
-    Learned(DecisionLevel, Lit, Box<[Lit]>)
+    Learned(DecisionLevel, Lit, Box<[Lit]>),
 }
 
 
 pub struct AnalyzeContext {
-    ccmin_mode       : CCMinMode,    // Controls conflict clause minimization
-    seen             : VarMap<Seen>,
-    analyze_toclear  : Vec<Lit>,
-    pub max_literals : u64,
-    pub tot_literals : u64
+    ccmin_mode: CCMinMode, // Controls conflict clause minimization
+    seen: VarMap<Seen>,
+    analyze_toclear: Vec<Lit>,
+    pub max_literals: u64,
+    pub tot_literals: u64,
 }
 
 impl AnalyzeContext {
-    pub fn new(ccmin_mode : CCMinMode) -> AnalyzeContext {
-        AnalyzeContext { ccmin_mode      : ccmin_mode
-                       , seen            : VarMap::new()
-                       , analyze_toclear : Vec::new()
-                       , max_literals    : 0
-                       , tot_literals    : 0
-                       }
+    pub fn new(ccmin_mode: CCMinMode) -> AnalyzeContext {
+        AnalyzeContext {
+            ccmin_mode,
+            seen: VarMap::new(),
+            analyze_toclear: Vec::new(),
+            max_literals: 0,
+            tot_literals: 0,
+        }
     }
 
-    pub fn initVar(&mut self, v : Var) {
+    pub fn init_var(&mut self, v: Var) {
         self.seen.insert(&v, Seen::Undef);
     }
 
@@ -68,9 +69,19 @@ impl AnalyzeContext {
     //     * If out_learnt.size() > 1 then 'out_learnt[1]' has the greatest decision level of the
     //       rest of literals. There may be others from the same level though.
     //
-    pub fn analyze<BV, BC>(&mut self, assigns : &Assignment, ca : &mut ClauseAllocator, confl0 : ClauseRef, mut bumpVar : BV, mut bumpCla : BC) -> Conflict
-        where BV : FnMut(Var) -> (), BC : FnMut(&mut ClauseAllocator, ClauseRef) -> () {
-        if assigns.isGroundLevel() {
+    pub fn analyze<BV, BC>(
+        &mut self,
+        assigns: &Assignment,
+        ca: &mut ClauseAllocator,
+        confl0: ClauseRef,
+        mut bump_var: BV,
+        mut bump_cla: BC,
+    ) -> Conflict
+    where
+        BV: FnMut(Var) -> (),
+        BC: FnMut(&mut ClauseAllocator, ClauseRef) -> (),
+    {
+        if assigns.is_ground_level() {
             return Conflict::Ground;
         }
 
@@ -79,20 +90,22 @@ impl AnalyzeContext {
 
         {
             let mut confl = confl0;
-            let mut pathC = 0;
-            let mut index = assigns.numberOfAssigns();
+            let mut path_c = 0;
+            let mut index = assigns.number_of_assigns();
             loop {
-                bumpCla(ca, confl);
+                bump_cla(ca, confl);
 
-                for &q in ca.view(confl).litsFrom(if confl == confl0 { 0 } else { 1 }) {
+                for &q in ca.view(confl)
+                    .lits_from(if confl == confl0 { 0 } else { 1 })
+                {
                     let v = q.var();
                     if self.seen[&v] == Seen::Undef {
                         let level = assigns.vardata(q).level;
-                        if level > GroundLevel {
+                        if level > GROUND_LEVEL {
                             self.seen[&v] = Seen::Source;
-                            bumpVar(v);
-                            if level >= assigns.decisionLevel() {
-                                pathC += 1;
+                            bump_var(v);
+                            if level >= assigns.decision_level() {
+                                path_c += 1;
                             } else {
                                 out_learnt.push(q);
                             }
@@ -104,15 +117,17 @@ impl AnalyzeContext {
                 let pl = {
                     loop {
                         index -= 1;
-                        if self.seen[&assigns.assignAt(index).var()] != Seen::Undef { break; }
+                        if self.seen[&assigns.assign_at(index).var()] != Seen::Undef {
+                            break;
+                        }
                     }
-                    assigns.assignAt(index)
+                    assigns.assign_at(index)
                 };
 
                 self.seen[&pl.var()] = Seen::Undef;
 
-                pathC -= 1;
-                if pathC <= 0 {
+                path_c -= 1;
+                if path_c <= 0 {
                     out_learnt.insert(0, !pl);
                     break;
                 }
@@ -126,24 +141,28 @@ impl AnalyzeContext {
         self.analyze_toclear = out_learnt.clone();
         self.max_literals += out_learnt.len() as u64;
         match self.ccmin_mode {
-            CCMinMode::Deep  => { out_learnt.retain(|&l| { !self.litRedundant(ca, assigns, l) }); }
-            CCMinMode::Basic => { out_learnt.retain(|&l| { !self.litRedundantBasic(ca, assigns, l) }); }
-            CCMinMode::None  => {}
+            CCMinMode::Deep => {
+                out_learnt.retain(|&l| !self.lit_redundant(ca, assigns, l));
+            }
+            CCMinMode::Basic => {
+                out_learnt.retain(|&l| !self.lit_redundant_basic(ca, assigns, l));
+            }
+            CCMinMode::None => {}
         }
         self.tot_literals += out_learnt.len() as u64;
 
         for l in self.analyze_toclear.iter() {
-            self.seen[&l.var()] = Seen::Undef;    // ('seen[]' is now cleared)
+            self.seen[&l.var()] = Seen::Undef; // ('seen[]' is now cleared)
         }
 
         // Find correct backtrack level:
         if out_learnt.len() == 1 {
-            Conflict::Unit(GroundLevel, out_learnt[0])
+            Conflict::Unit(GROUND_LEVEL, out_learnt[0])
         } else {
             // Find the first literal assigned at the next-highest level:
             let mut max_i = 1;
             let mut max_level = assigns.vardata(out_learnt[1]).level;
-            for i in 2 .. out_learnt.len() {
+            for i in 2..out_learnt.len() {
                 let level = assigns.vardata(out_learnt[i]).level;
                 if level > max_level {
                     max_i = i;
@@ -157,12 +176,19 @@ impl AnalyzeContext {
         }
     }
 
-    fn litRedundantBasic(&self, ca : &ClauseAllocator, assigns : &Assignment, literal : Lit) -> bool {
+    fn lit_redundant_basic(
+        &self,
+        ca: &ClauseAllocator,
+        assigns: &Assignment,
+        literal: Lit,
+    ) -> bool {
         match assigns.vardata(literal).reason {
-            None     => { false }
+            None => false,
             Some(cr) => {
-                for &lit in ca.view(cr).litsFrom(1) {
-                    if self.seen[&lit.var()] == Seen::Undef && assigns.vardata(lit).level > GroundLevel {
+                for &lit in ca.view(cr).lits_from(1) {
+                    if self.seen[&lit.var()] == Seen::Undef
+                        && assigns.vardata(lit).level > GROUND_LEVEL
+                    {
                         return false;
                     }
                 }
@@ -172,14 +198,18 @@ impl AnalyzeContext {
     }
 
     // Check if 'p' can be removed from a conflict clause.
-    fn litRedundant(&mut self, ca : &ClauseAllocator, assigns : &Assignment, literal : Lit) -> bool {
-        assert!({ let s = self.seen[&literal.var()]; s == Seen::Undef || s == Seen::Source });
+    fn lit_redundant(&mut self, ca: &ClauseAllocator, assigns: &Assignment, literal: Lit) -> bool {
+        assert!({
+            let s = self.seen[&literal.var()];
+            s == Seen::Undef || s == Seen::Source
+        });
 
-        let mut analyze_stack =
-            match assigns.vardata(literal).reason {
-                None     => { return false; }
-                Some(cr) => { vec![(literal, ca.view(cr).litsFrom(1))] }
-            };
+        let mut analyze_stack = match assigns.vardata(literal).reason {
+            None => {
+                return false;
+            }
+            Some(cr) => vec![(literal, ca.view(cr).lits_from(1))],
+        };
 
         while let Some((p, lits)) = analyze_stack.pop() {
             match lits.split_first() {
@@ -189,18 +219,18 @@ impl AnalyzeContext {
                     let seen = self.seen[&l.var()];
 
                     // Variable at level 0 or previously removable:
-                    if vd.level == GroundLevel || seen == Seen::Source || seen == Seen::Removable {
+                    if vd.level == GROUND_LEVEL || seen == Seen::Source || seen == Seen::Removable {
                         continue;
                     }
 
                     match vd.reason {
                         // Recursively check 'l':
                         Some(cr) if seen == Seen::Undef => {
-                            analyze_stack.push((l, ca.view(cr).litsFrom(1)));
+                            analyze_stack.push((l, ca.view(cr).lits_from(1)));
                         }
 
                         // Check variable can not be removed for some local reason:
-                        _                                => {
+                        _ => {
                             for &(l, _) in analyze_stack.iter() {
                                 if self.seen[&l.var()] == Seen::Undef {
                                     self.seen[&l.var()] = Seen::Failed;
@@ -212,7 +242,7 @@ impl AnalyzeContext {
                     }
                 }
 
-                None             => {
+                None => {
                     // Finished with current element 'p' and reason 'c':
                     if self.seen[&p.var()] == Seen::Undef {
                         self.seen[&p.var()] = Seen::Removable;
@@ -229,25 +259,28 @@ impl AnalyzeContext {
     //   Specialized analysis procedure to express the final conflict in terms of assumptions.
     //   Calculates the (possibly empty) set of assumptions that led to the assignment of 'p', and
     //   stores the result in 'out_conflict'.
-    pub fn analyzeFinal(&mut self, ca : &ClauseAllocator, assigns : &Assignment, p : Lit) -> LitMap<()> {
+    pub fn analyze_final(
+        &mut self,
+        ca: &ClauseAllocator,
+        assigns: &Assignment,
+        p: Lit,
+    ) -> LitMap<()> {
         let mut out_conflict = LitMap::new();
         out_conflict.insert(&p, ());
 
-        assigns.inspectUntilLevel(GroundLevel, |lit| {
+        assigns.inspect_until_level(GROUND_LEVEL, |lit| {
             if self.seen[&lit.var()] != Seen::Undef {
                 match assigns.vardata(lit).reason {
-                    None     => {
-                        assert!(assigns.vardata(lit).level > GroundLevel);
+                    None => {
+                        assert!(assigns.vardata(lit).level > GROUND_LEVEL);
                         out_conflict.insert(&!lit, ());
                     }
 
-                    Some(cr) => {
-                        for &lit in ca.view(cr).litsFrom(1) {
-                            if assigns.vardata(lit).level > GroundLevel {
-                                self.seen[&lit.var()] = Seen::Source;
-                            }
+                    Some(cr) => for &lit in ca.view(cr).lits_from(1) {
+                        if assigns.vardata(lit).level > GROUND_LEVEL {
+                            self.seen[&lit.var()] = Seen::Source;
                         }
-                    }
+                    },
                 }
             }
         });
