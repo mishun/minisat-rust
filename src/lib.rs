@@ -5,8 +5,8 @@ extern crate time;
 extern crate vec_map;
 
 use std::{fs, io, path};
-use sat::*;
-use sat::minisat::budget::Budget;
+use crate::sat::*;
+use crate::sat::minisat::budget::Budget;
 
 pub mod sat;
 

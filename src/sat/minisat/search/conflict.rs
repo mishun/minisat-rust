@@ -1,6 +1,6 @@
-use sat::formula::{Lit, LitMap, Var, VarMap};
-use sat::formula::clause::*;
-use sat::formula::assignment::*;
+use crate::sat::formula::{Lit, LitMap, Var, VarMap};
+use crate::sat::formula::clause::*;
+use crate::sat::formula::assignment::*;
 
 
 #[derive(PartialEq, Eq)]

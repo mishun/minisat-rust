@@ -3,8 +3,8 @@ use std::{fs, io, path, str};
 use std::io::{Seek, SeekFrom};
 use std::collections::{HashMap, HashSet};
 use flate2::read::GzDecoder;
-use sat::formula::{Lit, Var, VarMap};
-use sat::{SolveRes, Solver};
+use crate::sat::formula::{Lit, Var, VarMap};
+use crate::sat::{SolveRes, Solver};
 
 
 pub fn write<W: io::Write, S: Solver>(_: W, _: &S) -> io::Result<()> {
@@ -105,7 +105,7 @@ pub fn validate_model<R: io::Read>(
 
         lits.insert(lit_id);
         if lits.contains(&(-lit_id)) {
-            return Ok((false));
+            return Ok(false);
         }
     }
 

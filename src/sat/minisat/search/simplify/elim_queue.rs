@@ -1,6 +1,6 @@
-use sat::formula::{Lit, LitMap, Var, VarHeap, VarMap};
-use sat::formula::assignment::Assignment;
-use sat::formula::clause::*;
+use crate::sat::formula::{Lit, LitMap, Var, VarHeap, VarMap};
+use crate::sat::formula::assignment::Assignment;
+use crate::sat::formula::clause::*;
 
 
 #[derive(Debug)]

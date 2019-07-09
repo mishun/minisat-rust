@@ -1,5 +1,5 @@
-use sat::formula::{Lit, Var, VarHeap, VarMap};
-use sat::formula::assignment::Assignment;
+use crate::sat::formula::{Lit, Var, VarHeap, VarMap};
+use crate::sat::formula::assignment::Assignment;
 use super::util;
 
 

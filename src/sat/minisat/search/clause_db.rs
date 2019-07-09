@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
-use sat::formula::Lit;
-use sat::formula::assignment::Assignment;
-use sat::formula::clause::*;
-use sat::formula::util::*;
+use crate::sat::formula::Lit;
+use crate::sat::formula::assignment::Assignment;
+use crate::sat::formula::clause::*;
+use crate::sat::formula::util::*;
 
 
 pub struct ClauseDBSettings {

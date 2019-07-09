@@ -1,7 +1,7 @@
 use std::collections::vec_deque::VecDeque;
-use sat::formula::Lit;
-use sat::formula::assignment::Assignment;
-use sat::formula::clause::*;
+use crate::sat::formula::Lit;
+use crate::sat::formula::assignment::Assignment;
+use crate::sat::formula::clause::*;
 
 
 pub struct SubsumptionQueue {
