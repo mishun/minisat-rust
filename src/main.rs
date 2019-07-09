@@ -1,9 +1,9 @@
 #[macro_use]
 extern crate clap;
-extern crate env_logger;
+use env_logger;
 
-extern crate log;
-extern crate minisat_rust;
+use log;
+use minisat_rust;
 
 use std::path;
 use std::io::Write;
