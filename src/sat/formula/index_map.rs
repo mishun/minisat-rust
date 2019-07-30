@@ -12,7 +12,7 @@ pub type VarHeap = IdxHeap<Var>;
 
 pub trait Idx {
     fn idx(&self) -> usize;
-    fn unidx(usize) -> Self;
+    fn unidx(_: usize) -> Self;
 }
 
 impl Idx for Var {

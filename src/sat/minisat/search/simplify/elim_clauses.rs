@@ -1,7 +1,7 @@
 use std::mem;
-use sat::formula::{Lit, Var};
-use sat::formula::assignment::*;
-use sat::formula::clause::Clause;
+use crate::sat::formula::{Lit, Var};
+use crate::sat::formula::assignment::*;
+use crate::sat::formula::clause::Clause;
 
 
 pub struct ElimClauses {

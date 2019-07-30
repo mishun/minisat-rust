@@ -1,7 +1,7 @@
-use sat::formula::{Lit, Var, VarMap};
-use sat::formula::assignment::*;
-use sat::formula::clause::*;
-use sat::formula::util::*;
+use crate::sat::formula::{Lit, Var, VarMap};
+use crate::sat::formula::assignment::*;
+use crate::sat::formula::clause::*;
+use crate::sat::formula::util::*;
 use super::{SearchRes, SearchSettings, Searcher};
 use super::super::budget::Budget;
 use self::subsumption_queue::*;

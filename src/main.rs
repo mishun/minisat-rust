@@ -1,10 +1,12 @@
 #[macro_use]
 extern crate clap;
-extern crate env_logger;
-extern crate log;
-extern crate minisat_rust;
+use env_logger;
+
+use log;
+use minisat_rust;
 
 use std::path;
+use std::io::Write;
 use minisat_rust::sat::minisat::{self, CCMinMode, PhaseSaving};
 
 
@@ -55,20 +57,20 @@ fn main() {
         .get_matches();
 
     {
-        let mut builder = env_logger::LogBuilder::new();
-        builder.format(|record: &log::LogRecord| format!("{}", record.args()));
+        let mut builder = env_logger::Builder::new();
+        builder.format(|buf, record| writeln!(buf, "{}", record.args()));
         builder.filter(
             None,
             matches
                 .value_of("verb")
                 .map(|v| match v {
-                    "1" => log::LogLevelFilter::Info,
-                    "2" => log::LogLevelFilter::Trace,
-                    _ => log::LogLevelFilter::Off,
+                    "1" => log::LevelFilter::Info,
+                    "2" => log::LevelFilter::Trace,
+                    _ => log::LevelFilter::Off,
                 })
-                .unwrap_or(log::LogLevelFilter::Info),
+                .unwrap_or(log::LevelFilter::Info),
         );
-        builder.init().unwrap();
+        builder.init();
     }
 
     let main = minisat_rust::MainOptions {

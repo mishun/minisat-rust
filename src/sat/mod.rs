@@ -1,4 +1,4 @@
-use sat::formula::{Lit, Var};
+use crate::sat::formula::{Lit, Var};
 
 pub mod dimacs;
 pub mod formula;
@@ -30,7 +30,7 @@ pub trait Solver: Sized {
     fn n_clauses(&self) -> usize;
     fn new_var(&mut self, upol: Option<bool>, dvar: bool) -> Var;
     fn add_clause(&mut self, clause: &[Lit]) -> bool;
-    fn preprocess(&mut self, &minisat::budget::Budget) -> bool;
-    fn solve_limited(self, &minisat::budget::Budget, &[Lit]) -> SolveRes<Self>;
+    fn preprocess(&mut self, _: &minisat::budget::Budget) -> bool;
+    fn solve_limited(self, _: &minisat::budget::Budget, _: &[Lit]) -> SolveRes<Self>;
     fn stats(&self) -> Stats;
 }

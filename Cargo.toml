@@ -7,17 +7,18 @@ keywords = [
 name = "minisat-rust"
 repository = "https://github.com/mishun/minisat-rust.git"
 version = "0.0.1"
+edition = "2018"
 
 [dependencies]
 clap = "2"
-env_logger = "0.4"
+env_logger = "0.6.2"
 flate2 = "1"
-log = "0.3"
+log = "0.4.6"
 time = "0.1"
 vec_map = "0.8"
 
 [dev-dependencies]
-tempfile = "2.2"
+tempfile = "3.1.0"
 
 [profile.bench]
 debug = false

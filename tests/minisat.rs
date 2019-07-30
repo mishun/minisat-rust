@@ -1,6 +1,6 @@
-extern crate minisat_rust;
-extern crate tempfile;
-extern crate time;
+
+use tempfile;
+use time;
 
 use std::{fs, io, path, process};
 use std::io::{Read, Seek};

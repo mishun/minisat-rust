@@ -1,6 +1,6 @@
-use sat::{SolveRes, Solver, Stats};
-use sat::formula::{Lit, Var};
-use sat::formula::assignment::*;
+use crate::sat::{SolveRes, Solver, Stats};
+use crate::sat::formula::{Lit, Var};
+use crate::sat::formula::assignment::*;
 use self::search::clause_db::ClauseDBSettings;
 pub use self::search::conflict::CCMinMode;
 use self::search::decision_heuristic::DecisionHeuristicSettings;

@@ -1,7 +1,7 @@
 use std::mem;
-use sat::formula::{Lit, LitVec, Var};
-use sat::formula::assignment::Assignment;
-use sat::formula::clause::*;
+use crate::sat::formula::{Lit, LitVec, Var};
+use crate::sat::formula::assignment::Assignment;
+use crate::sat::formula::clause::*;
 
 
 #[derive(Clone, Copy, Debug)]

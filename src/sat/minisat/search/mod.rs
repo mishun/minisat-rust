@@ -1,7 +1,7 @@
-use sat;
-use sat::formula::{Lit, LitMap, Var};
-use sat::formula::clause::*;
-use sat::formula::assignment::*;
+use crate::sat;
+use crate::sat::formula::{Lit, LitMap, Var};
+use crate::sat::formula::clause::*;
+use crate::sat::formula::assignment::*;
 use self::conflict::{AnalyzeContext, CCMinMode, Conflict};
 use self::decision_heuristic::{DecisionHeuristic, DecisionHeuristicSettings};
 use super::budget;

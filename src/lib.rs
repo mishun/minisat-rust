@@ -1,12 +1,12 @@
-extern crate flate2;
+
 #[macro_use]
 extern crate log;
-extern crate time;
-extern crate vec_map;
+use time;
+
 
 use std::{fs, io, path};
-use sat::*;
-use sat::minisat::budget::Budget;
+use crate::sat::*;
+use crate::sat::minisat::budget::Budget;
 
 pub mod sat;
 
