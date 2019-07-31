@@ -70,24 +70,16 @@ impl ClauseDB {
         }
     }
 
-    pub fn add_clause<'c>(
-        &mut self,
-        ca: &'c mut ClauseAllocator,
-        ps: Box<[Lit]>,
-    ) -> (&'c Clause, ClauseRef) {
-        let (c, cr) = ca.alloc(ps, false);
+    pub fn add_clause<'c>(&mut self, ca: &'c mut ClauseAllocator, literals: &[Lit]) -> (&'c Clause, ClauseRef) {
+        let (c, cr) = ca.alloc(literals, false);
         self.stats.add(c);
         self.clauses.push(cr);
         (c, cr)
     }
 
-    pub fn learn_clause<'c>(
-        &mut self,
-        ca: &'c mut ClauseAllocator,
-        ps: Box<[Lit]>,
-    ) -> (&'c Clause, ClauseRef) {
+    pub fn learn_clause<'c>(&mut self, ca: &'c mut ClauseAllocator, literals: &[Lit]) -> (&'c Clause, ClauseRef) {
         let cr = {
-            let (c, cr) = ca.alloc(ps, true);
+            let (c, cr) = ca.alloc(literals, true);
             self.stats.add(c);
             cr
         };

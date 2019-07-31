@@ -30,7 +30,7 @@ enum Seen {
 pub enum Conflict {
     Ground,
     Unit(DecisionLevel, Lit),
-    Learned(DecisionLevel, Lit, Box<[Lit]>),
+    Learned(DecisionLevel, Lit, Vec<Lit>),
 }
 
 
@@ -172,7 +172,7 @@ impl AnalyzeContext {
 
             // Swap-in this literal at index 1:
             out_learnt.swap(1, max_i);
-            Conflict::Learned(max_level, out_learnt[0], out_learnt.into_boxed_slice())
+            Conflict::Learned(max_level, out_learnt[0], out_learnt)
         }
     }
 

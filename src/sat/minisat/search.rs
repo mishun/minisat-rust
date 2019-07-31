@@ -258,7 +258,7 @@ impl Searcher {
                 }
             }
 
-            ps.into_boxed_slice()
+            ps
         };
 
         match ps.len() {
@@ -273,7 +273,7 @@ impl Searcher {
             }
 
             _ => {
-                let (c, cr) = self.db.add_clause(&mut self.ca, ps);
+                let (c, cr) = self.db.add_clause(&mut self.ca, ps.as_slice());
                 self.watches.watch_clause(c, cr);
                 AddClauseRes::Added(c, cr)
             }
@@ -461,7 +461,7 @@ impl Searcher {
 
                 Conflict::Learned(level, lit, clause) => {
                     self.cancel_until(level);
-                    let (c, cr) = self.db.learn_clause(&mut self.ca, clause);
+                    let (c, cr) = self.db.learn_clause(&mut self.ca, clause.as_slice());
                     self.watches.watch_clause(c, cr);
                     self.assigns.assign_lit(lit, Some(cr));
                 }

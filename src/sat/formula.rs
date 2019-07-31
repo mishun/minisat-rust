@@ -1,9 +1,11 @@
 use std::{fmt, ops};
 pub use self::index_map::*;
 
+mod allocator;
 pub mod assignment;
 pub mod clause;
 mod index_map;
+pub mod subsumes;
 pub mod util;
 
 
