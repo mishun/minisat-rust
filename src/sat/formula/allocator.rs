@@ -2,7 +2,7 @@ use std::{alloc, mem, ptr};
 use std::marker::PhantomData;
 
 
-pub type Ref = usize;
+pub type Ref = u32;
 
 pub struct RegionAllocator<T> {
     memory: *mut u8,
@@ -33,7 +33,7 @@ impl<T> RegionAllocator<T> {
             while new_capacity < min_capacity {
                 let delta = ((new_capacity >> 1) + (new_capacity >> 3) + 2) & !1;
                 new_capacity += delta;
-                match Ref::checked_add(new_capacity, delta) {
+                match usize::checked_add(new_capacity, delta) {
                     Some(res) => new_capacity = res,
                     None      => panic!("overflow")
                 }
@@ -54,8 +54,8 @@ impl<T> RegionAllocator<T> {
     }
 
     pub unsafe fn allocate_with_extra<E>(&mut self, extra: usize) -> (&mut T, Ref) {
-        if self.offset > Ref::max_value() {
-            panic!("Ref overflow");
+        if self.offset > Ref::max_value() as usize {
+            panic!("Ref {} is out of bound {}", self.offset, Ref::max_value())
         }
 
         let size = mem::size_of::<T>() + extra * mem::size_of::<E>();
@@ -76,13 +76,13 @@ impl<T> RegionAllocator<T> {
 
     #[inline]
     pub fn get(&self, reference: Ref) -> &T {
-        assert!(reference < self.offset);
+        assert!((reference as usize) < self.offset);
         unsafe { &*(self.memory.offset(reference as isize) as *const T) }
     }
 
     #[inline]
     pub fn get_mut(&self, reference: Ref) -> &mut T {
-        assert!(reference < self.offset);
+        assert!((reference as usize) < self.offset);
         unsafe { &mut *(self.memory.offset(reference as isize) as *mut T) }
     }
 }

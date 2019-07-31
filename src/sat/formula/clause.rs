@@ -18,14 +18,14 @@ struct ClauseHeader {
 
 pub struct Clause {
     header: ClauseHeader,
-    len: usize,
+    len: u32,
     hp: [Lit; MIN_CLAUSE_SIZE]
 }
 
 impl Clause {
     #[inline]
     pub fn len(&self) -> usize {
-        self.len
+        self.len as usize
     }
 
     #[inline]
@@ -79,7 +79,7 @@ impl Clause {
 
     #[inline]
     pub fn lits(&self) -> &[Lit] {
-        unsafe { slice::from_raw_parts(self.hp.as_ptr(), self.len) }
+        unsafe { slice::from_raw_parts(self.hp.as_ptr(), self.len as usize) }
     }
 
     #[inline]
@@ -89,7 +89,7 @@ impl Clause {
 
     #[inline]
     fn lits_mut(&mut self) -> &mut [Lit] {
-        unsafe { slice::from_raw_parts_mut(self.hp.as_mut_ptr(), self.len) }
+        unsafe { slice::from_raw_parts_mut(self.hp.as_mut_ptr(), self.len as usize) }
     }
 
 
@@ -101,15 +101,15 @@ impl Clause {
 
     #[inline]
     pub fn retain_suffix<F: Fn(&Lit) -> bool>(&mut self, base: usize, f: F) {
-        let data = unsafe { slice::from_raw_parts_mut(self.hp.as_mut_ptr(), self.len) };
+        let data = unsafe { slice::from_raw_parts_mut(self.hp.as_mut_ptr(), self.len as usize) };
 
         let mut i = base;
-        while i < self.len {
+        while i < self.len as usize {
             if f(&data[i]) {
                 i += 1
             } else {
                 self.len -= 1;
-                data[i] = data[self.len];
+                data[i] = data[self.len as usize];
             }
         }
     }
@@ -136,11 +136,11 @@ impl Clause {
 
 
     pub fn strengthen(&mut self, p: Lit) {
-        let data = unsafe { slice::from_raw_parts_mut(self.hp.as_mut_ptr(), self.len) };
+        let data = unsafe { slice::from_raw_parts_mut(self.hp.as_mut_ptr(), self.len as usize) };
 
-        for i in 0..self.len {
+        for i in 0..self.len as usize {
             if data[i] == p {
-                for j in i + 1..self.len {
+                for j in i + 1..self.len as usize {
                     data[j - 1] = data[j];
                 }
                 self.len -= 1;
@@ -225,7 +225,7 @@ impl ClauseAllocator {
                 data_abs: 0,
                 reloced: None,
             };
-            clause.len = len;
+            clause.len = len as u32;
             ptr::copy_nonoverlapping(literals.as_ptr(), clause.hp.as_mut_ptr(), len);
 
             if clause.header.has_extra {
@@ -242,14 +242,15 @@ impl ClauseAllocator {
     }
 
     fn reloc(&mut self, src: &Clause) -> ClauseRef {
-        assert!(src.len >= MIN_CLAUSE_SIZE);
+        let len = src.len as usize;
+        assert!(len >= MIN_CLAUSE_SIZE);
         unsafe {
-            let (clause, cref) = self.ra.allocate_with_extra::<Lit>(src.len - MIN_CLAUSE_SIZE);
+            let (clause, cref) = self.ra.allocate_with_extra::<Lit>(len - MIN_CLAUSE_SIZE);
 
             clause.header = src.header;
             clause.header.has_extra |= self.extra_clause_field;
             clause.len = src.len;
-            ptr::copy_nonoverlapping(src.hp.as_ptr(), clause.hp.as_mut_ptr(), src.len);
+            ptr::copy_nonoverlapping(src.hp.as_ptr(), clause.hp.as_mut_ptr(), len);
 
             self.lc.add(clause);
             ClauseRef(cref)
@@ -320,10 +321,10 @@ impl LegacyCounter {
     }
 
     pub fn add(&mut self, clause: &Clause) {
-        self.size += Self::clause_size(clause.len, clause.header.has_extra);
+        self.size += Self::clause_size(clause.len as usize, clause.header.has_extra);
     }
 
     pub fn sub(&mut self, clause: &Clause) {
-        self.wasted += Self::clause_size(clause.len, clause.header.has_extra);
+        self.wasted += Self::clause_size(clause.len as usize, clause.header.has_extra);
     }
 }

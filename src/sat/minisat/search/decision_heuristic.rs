@@ -178,12 +178,12 @@ impl DecisionHeuristic {
         // Choose polarity based on different polarity modes (global or per-variable):
         self.pick_branch_var(assigns).map(|v| {
             let ref ln = self.var[&v];
-            let s = match ln.user_pol {
+            let sign = match ln.user_pol {
                 Some(s) => s,
                 None if self.settings.rnd_pol => self.rand.chance(0.5),
                 None => ln.polarity,
             };
-            v.lit(s)
+            v.sign_lit(sign)
         })
     }
 }

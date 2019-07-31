@@ -10,12 +10,12 @@ pub mod util;
 
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Hash)]
-pub struct Var(usize);
+pub struct Var(u32);
 
 impl Var {
     #[inline]
-    pub fn lit(&self, sign: bool) -> Lit {
-        Lit((self.0 << 1) | (sign as usize))
+    pub fn sign_lit(&self, sign: bool) -> Lit {
+        Lit((self.0 << 1) | (sign as u32))
     }
 
     #[inline]
@@ -27,6 +27,21 @@ impl Var {
     pub fn neg_lit(&self) -> Lit {
         Lit((self.0 << 1) | 1)
     }
+
+
+    #[inline]
+    fn index(&self) -> usize {
+        self.0 as usize
+    }
+
+    #[inline]
+    fn from_index(index: usize) -> Var {
+        if index <= 0x7FFFFFFF {
+            Var(index as u32)
+        } else {
+            panic!("Var index {} is out of bound", index)
+        }
+    }
 }
 
 impl fmt::Debug for Var {
@@ -37,7 +52,7 @@ impl fmt::Debug for Var {
 
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Hash)]
-pub struct Lit(usize);
+pub struct Lit(u32);
 
 impl Lit {
     #[inline]
@@ -50,9 +65,21 @@ impl Lit {
         Var(self.0 >> 1)
     }
 
+
     #[inline]
-    pub fn abstraction(&self) -> u32 {
+    fn abstraction(&self) -> u32 {
         1 << ((self.0 >> 1) & 31)
+    }
+
+
+    #[inline]
+    fn var_index(&self) -> usize {
+        (self.0 >> 1) as usize
+    }
+
+    #[inline]
+    fn sign_index(&self) -> usize {
+        (self.0 & 1) as usize
     }
 }
 

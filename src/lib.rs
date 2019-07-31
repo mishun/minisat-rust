@@ -45,12 +45,12 @@ pub fn solve(main_opts: MainOptions, solver_opts: SolverOptions) -> io::Result<(
 
 
 pub fn solve_with<S: Solver>(mut solver: S, options: MainOptions) -> io::Result<()> {
-    let initial_time = time::precise_time_s();
-
     info!("============================[ Problem Statistics ]=============================");
     info!("|                                                                             |");
 
+    let initial_time = time::precise_time_s();
     let backward_subst = dimacs::parse_file(&options.in_path, &mut solver, options.strict)?;
+    let parse_time = time::precise_time_s();
 
     info!(
         "|  Number of variables:  {:12}                                         |",
@@ -60,11 +60,9 @@ pub fn solve_with<S: Solver>(mut solver: S, options: MainOptions) -> io::Result<
         "|  Number of clauses:    {:12}                                         |",
         solver.n_clauses()
     );
-
-    let parsed_time = time::precise_time_s();
     info!(
         "|  Parse time:           {:12.2} s                                       |",
-        parsed_time - initial_time
+        parse_time - initial_time
     );
 
     let mut budget = Budget::new();
@@ -72,11 +70,8 @@ pub fn solve_with<S: Solver>(mut solver: S, options: MainOptions) -> io::Result<
 
     let elim_res = solver.preprocess(&budget);
     {
-        let simplified_time = time::precise_time_s();
-        info!(
-            "|  Simplification time:  {:12.2} s                                       |",
-            simplified_time - parsed_time
-        );
+        let simplify_time = time::precise_time_s() - parse_time;
+        info!("|  Simplification time:  {:12.2} s                                       |", simplify_time);
     }
 
     info!("|                                                                             |");

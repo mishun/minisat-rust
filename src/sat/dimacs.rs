@@ -157,7 +157,7 @@ impl<'s, S: Solver> Subst<'s, S> {
             }
         }
 
-        self.forward_subst[&lit_id.abs()].lit(lit_id < 0)
+        self.forward_subst[&lit_id.abs()].sign_lit(lit_id < 0)
     }
 
     fn new_var(&mut self, var_id: i32) {

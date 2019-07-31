@@ -48,7 +48,7 @@ struct VarLine {
 
 pub struct Assignment {
     assignment: Vec<VarLine>,
-    free_vars: Vec<usize>,
+    free_vars: Vec<Var>,
     trail: Vec<Lit>,
     lim: Vec<usize>,
     qhead: usize,
@@ -93,22 +93,21 @@ impl Assignment {
                 level: GROUND_LEVEL,
             },
         };
-        let vid = match self.free_vars.pop() {
-            Some(v) => {
-                self.assignment[v] = line;
-                v
+
+        match self.free_vars.pop() {
+            Some(var) => {
+                self.assignment[var.index()] = line;
+                var
             }
 
             None => {
                 self.assignment.push(line);
-                self.assignment.len() - 1
+                Var::from_index(self.assignment.len() - 1)
             }
-        };
-
-        Var(vid)
+        }
     }
 
-    pub fn free_var(&mut self, Var(v): Var) {
+    pub fn free_var(&mut self, v: Var) {
         self.free_vars.push(v);
     }
 
@@ -130,22 +129,23 @@ impl Assignment {
 
 
     #[inline]
-    pub fn assign_lit(&mut self, Lit(p): Lit, reason: Option<clause::ClauseRef>) {
-        let line = unsafe { self.assignment.get_unchecked_mut(p >> 1) };
+    pub fn assign_lit(&mut self, lit: Lit, reason: Option<clause::ClauseRef>) {
+        let line = unsafe { self.assignment.get_unchecked_mut(lit.var_index()) };
 
         assert!(line.assign[0].is_undef());
-        line.assign[p & 1] = LitVal::True;
-        line.assign[(p & 1) ^ 1] = LitVal::False;
+        line.assign[lit.sign_index()] = LitVal::True;
+        line.assign[lit.sign_index() ^ 1] = LitVal::False;
         line.vd.level = DecisionLevel(self.lim.len());
         line.vd.reason = reason;
-        self.trail.push(Lit(p));
+        self.trail.push(lit);
     }
 
+    // TODO: remove (used in ElimClauses only)
     #[inline]
-    pub fn rewrite_lit(&mut self, Lit(p): Lit) {
-        let ref mut line = self.assignment[p >> 1];
-        line.assign[p & 1] = LitVal::True;
-        line.assign[(p & 1) ^ 1] = LitVal::False;
+    pub fn rewrite_lit(&mut self, lit: Lit) {
+        let ref mut line = self.assignment[lit.var_index()];
+        line.assign[lit.sign_index()] = LitVal::True;
+        line.assign[lit.sign_index() ^ 1] = LitVal::False;
     }
 
     #[inline]
@@ -162,8 +162,7 @@ impl Assignment {
 
                 f(DecisionLevel(level), lit);
 
-                let Var(v) = lit.var();
-                let ref mut line = self.assignment[v];
+                let ref mut line = self.assignment[lit.var_index()];
                 line.assign = [LitVal::Undef, LitVal::Undef];
                 line.vd.reason = None;
             }
@@ -216,8 +215,8 @@ impl Assignment {
 
 
     #[inline]
-    pub fn is_undef(&self, Var(v): Var) -> bool {
-        let ref line = self.assignment[v];
+    pub fn is_undef(&self, var: Var) -> bool {
+        let ref line = self.assignment[var.index()];
         line.assign[0].is_undef()
     }
 
@@ -238,39 +237,35 @@ impl Assignment {
     }
 
     #[inline]
-    pub fn of_lit(&self, Lit(p): Lit) -> LitVal {
+    pub fn of_lit(&self, lit: Lit) -> LitVal {
         unsafe {
             *self.assignment
-                .get_unchecked(p >> 1)
+                .get_unchecked(lit.var_index())
                 .assign
-                .get_unchecked(p & 1)
+                .get_unchecked(lit.sign_index())
         }
     }
 
     #[inline]
-    pub fn vardata(&self, Lit(p): Lit) -> &VarData {
-        let ref line = unsafe { self.assignment.get_unchecked(p >> 1) };
-        assert_eq!(line.assign[p & 1], LitVal::False);
+    pub fn vardata(&self, lit: Lit) -> &VarData {
+        let ref line = unsafe { self.assignment.get_unchecked(lit.var_index()) };
+        assert_eq!(line.assign[lit.sign_index()], LitVal::False);
         &line.vd
     }
 
 
-    pub fn reloc_gc(
-        &mut self,
-        from: &mut clause::ClauseAllocator,
-        to: &mut clause::ClauseAllocator,
-    ) {
-        for &Lit(p) in self.trail.iter() {
-            let ref mut reason = self.assignment[p >> 1].vd.reason;
+    pub fn reloc_gc(&mut self, from: &mut clause::ClauseAllocator, to: &mut clause::ClauseAllocator) {
+        for lit in self.trail.iter() {
+            let ref mut reason = self.assignment[lit.var_index()].vd.reason;
             *reason = reason.and_then(|cr| from.reloc_to(to, cr));
         }
     }
 
     pub fn is_locked(&self, ca: &clause::ClauseAllocator, cr: clause::ClauseRef) -> bool {
-        let Lit(p) = ca.view(cr).head();
-        let ref line = unsafe { self.assignment.get_unchecked(p >> 1) };
+        let lit = ca.view(cr).head();
+        let ref line = unsafe { self.assignment.get_unchecked(lit.var_index()) };
 
-        if let LitVal::True = line.assign[p & 1] {
+        if let LitVal::True = line.assign[lit.sign_index()] {
             line.vd.reason == Some(cr)
         } else {
             false
@@ -327,7 +322,7 @@ pub fn progress_estimate(assigns: &Assignment) -> f64 {
 pub fn extract_model(assigns: &Assignment) -> Vec<Lit> {
     let mut model = Vec::new();
     for i in 0..assigns.assignment.len() {
-        let v = Var(i);
+        let v = Var::from_index(i);
         match assigns.assignment[i].assign[0] {
             LitVal::Undef => {}
             LitVal::False => {

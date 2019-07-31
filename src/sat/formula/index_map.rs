@@ -18,24 +18,24 @@ pub trait Idx {
 impl Idx for Var {
     #[inline]
     fn idx(&self) -> usize {
-        self.0
+        self.0 as usize
     }
 
     #[inline]
     fn unidx(idx: usize) -> Var {
-        Var(idx)
+        Var(idx as u32)
     }
 }
 
 impl Idx for Lit {
     #[inline]
     fn idx(&self) -> usize {
-        self.0
+        self.0 as usize
     }
 
     #[inline]
     fn unidx(idx: usize) -> Lit {
-        Lit(idx)
+        Lit(idx as u32)
     }
 }
 
