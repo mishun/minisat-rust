@@ -1,7 +1,5 @@
 use std::mem;
-use crate::sat::formula::{Lit, LitVec, Var};
-use crate::sat::formula::assignment::Assignment;
-use crate::sat::formula::clause::*;
+use crate::sat::formula::{assignment::Assignment, clause::*, Lit, LitVec, Var};
 
 
 #[derive(Clone, Copy, Debug)]
@@ -39,27 +37,22 @@ impl Watches {
     pub fn try_clear_var(&mut self, _: Var) {}
 
     pub fn watch_clause(&mut self, c: &Clause, cr: ClauseRef) {
-        let (c0, c1) = c.head_pair();
-        self.watches[!c0].watchers.push(Watcher {
-            cref: cr,
-            blocker: c1,
-        });
-        self.watches[!c1].watchers.push(Watcher {
-            cref: cr,
-            blocker: c0,
-        });
+        for i in 0..2 {
+            let w = Watcher { cref: cr, blocker: c.head[i ^ 1] };
+            self.watches[!c.head[i]].watchers.push(w);
+        }
     }
 
     pub fn unwatch_clause_strict(&mut self, c: &Clause, cr: ClauseRef) {
-        let (c0, c1) = c.head_pair();
-        self.watches[!c0].watchers.retain(|w| w.cref != cr);
-        self.watches[!c1].watchers.retain(|w| w.cref != cr);
+        for &lit in &c.head {
+            self.watches[!lit].watchers.retain(|w| w.cref != cr);
+        }
     }
 
     pub fn unwatch_clause_lazy(&mut self, c: &Clause) {
-        let (c0, c1) = c.head_pair();
-        self.watches[!c0].dirty = true;
-        self.watches[!c1].dirty = true;
+        for &lit in &c.head {
+            self.watches[!lit].dirty = true;
+        }
     }
 
     // Description:
@@ -68,11 +61,7 @@ impl Watches {
     //
     //   Post-conditions:
     //     * the propagation queue is empty, even if there was a conflict.
-    pub fn propagate(
-        &mut self,
-        ca: &mut ClauseAllocator,
-        assigns: &mut Assignment,
-    ) -> Option<ClauseRef> {
+    pub fn propagate(&mut self, ca: &mut ClauseAllocator, assigns: &mut Assignment) -> Option<ClauseRef> {
         let mut confl = None;
         while let Some(p) = assigns.dequeue() {
             self.propagations += 1;
@@ -90,7 +79,7 @@ impl Watches {
                 let p_watches = &mut self.watches[p].watchers as *mut Vec<Watcher>;
 
                 let begin = (*p_watches).as_mut_ptr();
-                let end = begin.offset((*p_watches).len() as isize);
+                let end = begin.add((*p_watches).len());
 
                 let mut head = begin;
                 let mut tail = begin;
@@ -105,15 +94,15 @@ impl Watches {
                     }
 
                     let c = ca.edit(pwi.cref);
-                    if c.head() == false_lit {
-                        c.swap(0, 1);
+                    if c.head[0] == false_lit {
+                        c.head.swap(0, 1);
                     }
-                    //assert!(c[1] == false_lit);
+                    //assert!(c.head[1] == false_lit);
 
                     // If 0th watch is true, then clause is already satisfied.
                     let cw = Watcher {
                         cref: pwi.cref,
-                        blocker: c.head(),
+                        blocker: c.head[0],
                     };
                     if cw.blocker != pwi.blocker && assigns.is_assigned_pos(cw.blocker) {
                         *tail = cw;
@@ -150,8 +139,7 @@ impl Watches {
                     }
                 }
 
-                (*p_watches)
-                    .truncate(((tail as usize) - (begin as usize)) / mem::size_of::<Watcher>());
+                (*p_watches).truncate(((tail as usize) - (begin as usize)) / mem::size_of::<Watcher>());
             }
         }
 

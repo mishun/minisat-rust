@@ -280,13 +280,10 @@ impl Simplificator {
             let unit = {
                 let c = search.ca.edit(cr);
                 c.strengthen(l);
-                c.head()
+                c.head[0]
             }; // TODO: it produces clauses of length 1. Not good.
             try_assign_lit(&mut search.assigns, unit, None)
-                && search
-                    .watches
-                    .propagate(&mut search.ca, &mut search.assigns)
-                    .is_none()
+                && search.watches.propagate(&mut search.ca, &mut search.assigns).is_none()
         } else {
             search.watches.unwatch_clause_strict(search.ca.view(cr), cr);
             search.db.edit_clause(&mut search.ca, cr, |c| {
@@ -297,8 +294,7 @@ impl Simplificator {
 
             self.occurs.remove_occ(&l.var(), cr);
             self.elim.bump_lit_occ(&l, -1);
-            self.elim
-                .update_elim_heap(l.var(), &self.var_status, &search.assigns);
+            self.elim.update_elim_heap(l.var(), &self.var_status, &search.assigns);
             true
         }
     }
@@ -339,7 +335,7 @@ impl Simplificator {
         for &pr in pos.iter() {
             for &nr in neg.iter() {
                 self.stats.merges += 1;
-                if let Some(resolvent) = merge(v, search.ca.view(pr), search.ca.view(nr)) {
+                if let Some(resolvent) = merge(v, search.ca.literals(pr), search.ca.literals(nr)) {
                     cnt += 1;
                     if cnt > cls.len() + self.settings.grow
                         || (self.settings.clause_lim != -1
@@ -358,12 +354,12 @@ impl Simplificator {
 
         if pos.len() > neg.len() {
             for &cr in neg.iter() {
-                elimclauses.mk_elim_clause(v, search.ca.view(cr));
+                elimclauses.mk_elim_clause(v, search.ca.view(cr).lits());
             }
             elimclauses.mk_elim_unit(v.pos_lit());
         } else {
             for &cr in pos.iter() {
-                elimclauses.mk_elim_clause(v, search.ca.view(cr));
+                elimclauses.mk_elim_clause(v, search.ca.view(cr).lits());
             }
             elimclauses.mk_elim_unit(v.neg_lit());
         }
@@ -376,7 +372,7 @@ impl Simplificator {
         for &pr in pos.iter() {
             for &nr in neg.iter() {
                 self.stats.merges += 1;
-                if let Some(resolvent) = merge(v, search.ca.view(pr), search.ca.view(nr)) {
+                if let Some(resolvent) = merge(v, search.ca.literals(pr), search.ca.literals(nr)) {
                     if !self.add_clause(search, &resolvent[..]) {
                         return false;
                     }
@@ -462,8 +458,8 @@ impl Simplificator {
                 SubsumptionJob::Clause(cr) => {
                     let best = {
                         let c = search.ca.view(cr);
-                        let mut best = c.head().var();
-                        for &lit in c.lits_from(1) {
+                        let mut best = c.head[0].var();
+                        for &lit in &c.lits()[1..] {
                             // TODO: why not use n_occ?
                             if self.occurs.occs_dirty(lit.var()) < self.occurs.occs_dirty(best) {
                                 best = lit.var();
@@ -518,7 +514,7 @@ impl Simplificator {
             if *touched != 0 && self.var_status[&v].eliminated == 0 {
                 for &cr in self.occurs.lookup(&v, ca) {
                     let c = ca.edit(cr);
-                    if !c.touched() {
+                    if !c.is_touched() {
                         self.subsumption_queue.push(cr);
                         c.set_touched(true);
                     }
@@ -564,7 +560,7 @@ fn asymmetric_branching(search: &mut Searcher, v: Var, cr: ClauseRef) -> Option<
 
     let l = {
         let c = search.ca.view(cr);
-        if c.is_deleted() || satisfied_with(c, &search.assigns) {
+        if c.is_deleted() || satisfied_with(c.lits(), &search.assigns) {
             return None;
         }
 
@@ -582,9 +578,7 @@ fn asymmetric_branching(search: &mut Searcher, v: Var, cr: ClauseRef) -> Option<
         vl.unwrap()
     };
 
-    let res = search
-        .watches
-        .propagate(&mut search.ca, &mut search.assigns);
+    let res = search.watches.propagate(&mut search.ca, &mut search.assigns);
     search.cancel_until(GROUND_LEVEL);
     res.map(|_| l)
 }

@@ -1,6 +1,4 @@
-use crate::sat::formula::{Lit, LitMap, Var, VarMap};
-use crate::sat::formula::clause::*;
-use crate::sat::formula::assignment::*;
+use crate::sat::formula::{assignment::*, clause::*, Lit, LitMap, Var, VarMap};
 
 
 #[derive(PartialEq, Eq)]
@@ -95,9 +93,7 @@ impl AnalyzeContext {
             loop {
                 bump_cla(ca, confl);
 
-                for &q in ca.view(confl)
-                    .lits_from(if confl == confl0 { 0 } else { 1 })
-                {
+                for &q in &ca.view(confl).lits()[(if confl == confl0 { 0 } else { 1 })..] {
                     let v = q.var();
                     if self.seen[&v] == Seen::Undef {
                         let level = assigns.vardata(q).level;
@@ -176,16 +172,11 @@ impl AnalyzeContext {
         }
     }
 
-    fn lit_redundant_basic(
-        &self,
-        ca: &ClauseAllocator,
-        assigns: &Assignment,
-        literal: Lit,
-    ) -> bool {
+    fn lit_redundant_basic(&self, ca: &ClauseAllocator, assigns: &Assignment, literal: Lit) -> bool {
         match assigns.vardata(literal).reason {
             None => false,
             Some(cr) => {
-                for &lit in ca.view(cr).lits_from(1) {
+                for &lit in &ca.view(cr).lits()[1..] {
                     if self.seen[&lit.var()] == Seen::Undef
                         && assigns.vardata(lit).level > GROUND_LEVEL
                     {
@@ -204,12 +195,11 @@ impl AnalyzeContext {
             s == Seen::Undef || s == Seen::Source
         });
 
-        let mut analyze_stack = match assigns.vardata(literal).reason {
-            None => {
-                return false;
-            }
-            Some(cr) => vec![(literal, ca.view(cr).lits_from(1))],
-        };
+        let mut analyze_stack =
+            match assigns.vardata(literal).reason {
+                None => return false,
+                Some(cr) => vec![(literal, &ca.view(cr).lits()[1..])],
+            };
 
         while let Some((p, lits)) = analyze_stack.pop() {
             match lits.split_first() {
@@ -226,7 +216,7 @@ impl AnalyzeContext {
                     match vd.reason {
                         // Recursively check 'l':
                         Some(cr) if seen == Seen::Undef => {
-                            analyze_stack.push((l, ca.view(cr).lits_from(1)));
+                            analyze_stack.push((l, &ca.view(cr).lits()[1..]));
                         }
 
                         // Check variable can not be removed for some local reason:
@@ -259,12 +249,7 @@ impl AnalyzeContext {
     //   Specialized analysis procedure to express the final conflict in terms of assumptions.
     //   Calculates the (possibly empty) set of assumptions that led to the assignment of 'p', and
     //   stores the result in 'out_conflict'.
-    pub fn analyze_final(
-        &mut self,
-        ca: &ClauseAllocator,
-        assigns: &Assignment,
-        p: Lit,
-    ) -> LitMap<()> {
+    pub fn analyze_final(&mut self, ca: &ClauseAllocator, assigns: &Assignment, p: Lit) -> LitMap<()> {
         let mut out_conflict = LitMap::new();
         out_conflict.insert(&p, ());
 
@@ -276,11 +261,13 @@ impl AnalyzeContext {
                         out_conflict.insert(&!lit, ());
                     }
 
-                    Some(cr) => for &lit in ca.view(cr).lits_from(1) {
-                        if assigns.vardata(lit).level > GROUND_LEVEL {
-                            self.seen[&lit.var()] = Seen::Source;
+                    Some(cr) => {
+                        for &lit in &ca.view(cr).lits()[1..] {
+                            if assigns.vardata(lit).level > GROUND_LEVEL {
+                                self.seen[&lit.var()] = Seen::Source;
+                            }
                         }
-                    },
+                    }
                 }
             }
         });

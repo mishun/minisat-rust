@@ -1,6 +1,5 @@
 use std::{cmp, fmt};
-use super::{Lit, Var};
-use super::clause;
+use super::{clause, LBool, Lit, Var, VarMap};
 
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
@@ -15,25 +14,6 @@ impl DecisionLevel {
 }
 
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
-#[repr(u8)]
-pub enum LitVal {
-    Undef,
-    False,
-    True,
-}
-
-impl LitVal {
-    #[inline]
-    fn is_undef(&self) -> bool {
-        match *self {
-            LitVal::Undef => true,
-            _ => false,
-        }
-    }
-}
-
-
 pub struct VarData {
     pub reason: Option<clause::ClauseRef>,
     pub level: DecisionLevel,
@@ -41,7 +21,7 @@ pub struct VarData {
 
 
 struct VarLine {
-    assign: [LitVal; 2],
+    assign: [LBool; 2],
     vd: VarData,
 }
 
@@ -87,7 +67,7 @@ impl Assignment {
 
     pub fn new_var(&mut self) -> Var {
         let line = VarLine {
-            assign: [LitVal::Undef, LitVal::Undef],
+            assign: [LBool::Undef, LBool::Undef],
             vd: VarData {
                 reason: None,
                 level: GROUND_LEVEL,
@@ -108,6 +88,7 @@ impl Assignment {
     }
 
     pub fn free_var(&mut self, v: Var) {
+        // TODO: check that it's actually free
         self.free_vars.push(v);
     }
 
@@ -133,19 +114,11 @@ impl Assignment {
         let line = unsafe { self.assignment.get_unchecked_mut(lit.var_index()) };
 
         assert!(line.assign[0].is_undef());
-        line.assign[lit.sign_index()] = LitVal::True;
-        line.assign[lit.sign_index() ^ 1] = LitVal::False;
+        line.assign[lit.sign_index()] = LBool::True;
+        line.assign[lit.sign_index() ^ 1] = LBool::False;
         line.vd.level = DecisionLevel(self.lim.len());
         line.vd.reason = reason;
         self.trail.push(lit);
-    }
-
-    // TODO: remove (used in ElimClauses only)
-    #[inline]
-    pub fn rewrite_lit(&mut self, lit: Lit) {
-        let ref mut line = self.assignment[lit.var_index()];
-        line.assign[lit.sign_index()] = LitVal::True;
-        line.assign[lit.sign_index() ^ 1] = LitVal::False;
     }
 
     #[inline]
@@ -163,7 +136,7 @@ impl Assignment {
                 f(DecisionLevel(level), lit);
 
                 let ref mut line = self.assignment[lit.var_index()];
-                line.assign = [LitVal::Undef, LitVal::Undef];
+                line.assign = [LBool::Undef, LBool::Undef];
                 line.vd.reason = None;
             }
         }
@@ -184,13 +157,6 @@ impl Assignment {
         }
     }
 
-    #[inline]
-    pub fn retain_assignments<F: Fn(&Lit) -> bool>(&mut self, f: F) {
-        assert!(self.is_ground_level());
-        self.trail.retain(f); // TODO: what to do with assigned values?
-        self.qhead = self.trail.len();
-    }
-
 
     #[inline]
     pub fn dequeue_all(&mut self) {
@@ -208,6 +174,7 @@ impl Assignment {
         }
     }
 
+    // TODO: bad style
     #[inline]
     pub fn assign_at(&self, index: usize) -> Lit {
         self.trail[index]
@@ -222,22 +189,20 @@ impl Assignment {
 
     #[inline]
     pub fn is_assigned_pos(&self, p: Lit) -> bool {
-        match self.of_lit(p) {
-            LitVal::True => true,
-            _ => false,
+        unsafe {
+            p.is_pos_at(self.assignment.get_unchecked(p.var_index()).assign[0])
         }
     }
 
     #[inline]
     pub fn is_assigned_neg(&self, p: Lit) -> bool {
-        match self.of_lit(p) {
-            LitVal::False => true,
-            _ => false,
+        unsafe {
+            p.is_neg_at(self.assignment.get_unchecked(p.var_index()).assign[0])
         }
     }
 
     #[inline]
-    pub fn of_lit(&self, lit: Lit) -> LitVal {
+    pub fn of_lit(&self, lit: Lit) -> LBool {
         unsafe {
             *self.assignment
                 .get_unchecked(lit.var_index())
@@ -249,7 +214,7 @@ impl Assignment {
     #[inline]
     pub fn vardata(&self, lit: Lit) -> &VarData {
         let ref line = unsafe { self.assignment.get_unchecked(lit.var_index()) };
-        assert_eq!(line.assign[lit.sign_index()], LitVal::False);
+        assert_eq!(line.assign[lit.sign_index()], LBool::False);
         &line.vd
     }
 
@@ -262,10 +227,10 @@ impl Assignment {
     }
 
     pub fn is_locked(&self, ca: &clause::ClauseAllocator, cr: clause::ClauseRef) -> bool {
-        let lit = ca.view(cr).head();
-        let ref line = unsafe { self.assignment.get_unchecked(lit.var_index()) };
+        let lit = ca.view(cr).head[0];
+        let line = unsafe { self.assignment.get_unchecked(lit.var_index()) };
 
-        if let LitVal::True = line.assign[lit.sign_index()] {
+        if let LBool::True = line.assign[lit.sign_index()] {
             line.vd.reason == Some(cr)
         } else {
             false
@@ -319,31 +284,22 @@ pub fn progress_estimate(assigns: &Assignment) -> f64 {
 }
 
 
-pub fn extract_model(assigns: &Assignment) -> Vec<Lit> {
-    let mut model = Vec::new();
-    for i in 0..assigns.assignment.len() {
-        let v = Var::from_index(i);
-        match assigns.assignment[i].assign[0] {
-            LitVal::Undef => {}
-            LitVal::False => {
-                model.push(v.neg_lit());
-            }
-            LitVal::True => {
-                model.push(v.pos_lit());
-            }
-        }
-    }
-    model
-}
-
-
 pub fn try_assign_lit(assigns: &mut Assignment, p: Lit, from: Option<clause::ClauseRef>) -> bool {
     match assigns.of_lit(p) {
-        LitVal::True => true,
-        LitVal::False => false,
-        LitVal::Undef => {
+        LBool::True => true,
+        LBool::False => false,
+        LBool::Undef => {
             assigns.assign_lit(p, from);
             true
         }
     }
+}
+
+
+pub fn extract_model(assigns: &Assignment) -> VarMap<bool> {
+    let mut model = VarMap::new();
+    for lit in assigns.trail.iter() {
+        model.insert(&lit.var(), !lit.sign());
+    }
+    model
 }

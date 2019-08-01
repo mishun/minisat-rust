@@ -1,6 +1,5 @@
-use crate::sat::formula::{Lit, Var, VarHeap, VarMap};
-use crate::sat::formula::assignment::Assignment;
-use super::util;
+use crate::sat::formula::{assignment::Assignment, Lit, Var, VarHeap, VarMap};
+use super::random;
 
 
 #[derive(PartialEq, Eq)]
@@ -44,7 +43,7 @@ struct VarLine {
 pub struct DecisionHeuristic {
     settings: DecisionHeuristicSettings,
     var_inc: f64, // Amount to bump next variable with.
-    rand: util::Random,
+    rand: random::Random,
     var: VarMap<VarLine>,
     activity: VarMap<f64>,
     queue: VarHeap, // A priority queue of variables ordered with respect to the variable activity.
@@ -59,7 +58,7 @@ impl DecisionHeuristic {
         DecisionHeuristic {
             settings,
             var_inc: 1.0,
-            rand: util::Random::new(seed),
+            rand: random::Random::new(seed),
             var: VarMap::new(),
             activity: VarMap::new(),
             queue: VarHeap::new(),

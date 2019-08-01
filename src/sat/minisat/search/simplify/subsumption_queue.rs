@@ -1,7 +1,5 @@
 use std::collections::vec_deque::VecDeque;
-use crate::sat::formula::Lit;
-use crate::sat::formula::assignment::Assignment;
-use crate::sat::formula::clause::*;
+use crate::sat::formula::{assignment::Assignment, clause::*, Lit};
 
 
 pub struct SubsumptionQueue {
@@ -66,7 +64,7 @@ impl SubsumptionQueue {
     pub fn remark_touched(&mut self, ca: &mut ClauseAllocator, src: bool) {
         for &cr in self.subsumption_queue.iter() {
             let c = ca.edit(cr);
-            if c.touched() == src {
+            if c.is_touched() == src {
                 c.set_touched(!src);
             }
         }

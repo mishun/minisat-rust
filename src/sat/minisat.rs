@@ -63,7 +63,12 @@ impl Solver for CoreSolver {
         if self.ok {
             match self.search.search(&self.ss, budget, assumptions) {
                 SearchRes::UnSAT(stats) => SolveRes::UnSAT(stats),
-                SearchRes::SAT(assigns, stats) => SolveRes::SAT(extract_model(&assigns), stats),
+
+                SearchRes::SAT(assigns, stats) => {
+                    let model = extract_model(&assigns);
+                    SolveRes::SAT(model.iter().map(|(v, s)| v.sign_lit(!*s)).collect(), stats)
+                }
+
                 SearchRes::Interrupted(c, s) => SolveRes::Interrupted(
                     c,
                     CoreSolver {
@@ -192,9 +197,10 @@ impl Solver for SimpSolver {
                 ) {
                     SearchRes::UnSAT(stats) => SolveRes::UnSAT(stats),
 
-                    SearchRes::SAT(mut assigns, stats) => {
-                        self.elimclauses.extend(&mut assigns);
-                        SolveRes::SAT(extract_model(&assigns), stats)
+                    SearchRes::SAT(assigns, stats) => {
+                        let mut model = extract_model(&assigns);
+                        self.elimclauses.extend(&mut model);
+                        SolveRes::SAT(model.iter().map(|(v, s)| v.sign_lit(!*s)).collect(), stats)
                     }
 
                     SearchRes::Interrupted(c, s) => {
@@ -221,9 +227,10 @@ impl Solver for SimpSolver {
             _ => match self.core.search.search(&self.core.ss, budget, assumptions) {
                 SearchRes::UnSAT(stats) => SolveRes::UnSAT(stats),
 
-                SearchRes::SAT(mut assigns, stats) => {
-                    self.elimclauses.extend(&mut assigns);
-                    SolveRes::SAT(extract_model(&assigns), stats)
+                SearchRes::SAT(assigns, stats) => {
+                    let mut model = extract_model(&assigns);
+                    self.elimclauses.extend(&mut model);
+                    SolveRes::SAT(model.iter().map(|(v, s)| v.sign_lit(!*s)).collect(), stats)
                 }
 
                 SearchRes::Interrupted(c, s) => SolveRes::Interrupted(

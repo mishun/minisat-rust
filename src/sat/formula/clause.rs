@@ -1,6 +1,5 @@
 use std::{fmt, ptr, slice};
-use super::Lit;
-use super::allocator;
+use super::{allocator, util, Lit};
 
 
 pub const MIN_CLAUSE_SIZE : usize = 2;
@@ -19,7 +18,7 @@ struct ClauseHeader {
 pub struct Clause {
     header: ClauseHeader,
     len: u32,
-    hp: [Lit; MIN_CLAUSE_SIZE]
+    pub head: [Lit; MIN_CLAUSE_SIZE]
 }
 
 impl Clause {
@@ -29,35 +28,35 @@ impl Clause {
     }
 
     #[inline]
+    pub fn lits(&self) -> &[Lit] {
+        unsafe { slice::from_raw_parts(self.head.as_ptr(), self.len as usize) }
+    }
+
+    #[inline]
+    pub fn lits_mut(&mut self) -> &mut [Lit] {
+        unsafe { slice::from_raw_parts_mut(self.head.as_mut_ptr(), self.len as usize) }
+    }
+
+    #[inline]
+    pub unsafe fn ptr_range(&mut self) -> (*mut Lit, *mut Lit) {
+        let begin = self.head.as_mut_ptr();
+        let end = begin.add(self.len as usize);
+        (begin, end)
+    }
+
+
     pub fn is_deleted(&self) -> bool {
         (self.header.mark & 1) != 0
     }
 
-    #[inline]
-    pub fn is_learnt(&self) -> bool {
-        self.header.learnt
+    fn mark_deleted(&mut self) {
+        self.header.mark |= 1;
     }
 
-
-    #[inline]
-    pub fn activity(&self) -> f64 {
-        assert!(self.header.has_extra);
-        self.header.data_act as f64
-    }
-
-    #[inline]
-    pub fn set_activity(&mut self, act: f64) {
-        assert!(self.header.has_extra);
-        self.header.data_act = act as f32;
-    }
-
-
-    #[inline]
-    pub fn touched(&self) -> bool {
+    pub fn is_touched(&self) -> bool {
         (self.header.mark & 2) != 0
     }
 
-    #[inline]
     pub fn set_touched(&mut self, b: bool) {
         if b {
             self.header.mark |= 2;
@@ -66,50 +65,39 @@ impl Clause {
         }
     }
 
-
-    #[inline]
-    pub fn head(&self) -> Lit {
-        self.hp[0]
+    pub fn is_learnt(&self) -> bool {
+        self.header.learnt
     }
 
-    #[inline]
-    pub fn head_pair(&self) -> (Lit, Lit) {
-        (self.hp[0], self.hp[1])
+    pub fn activity(&self) -> f64 {
+        assert!(self.header.has_extra);
+        self.header.data_act as f64
     }
 
-    #[inline]
-    pub fn lits(&self) -> &[Lit] {
-        unsafe { slice::from_raw_parts(self.hp.as_ptr(), self.len as usize) }
+    pub fn set_activity(&mut self, act: f64) {
+        assert!(self.header.has_extra);
+        self.header.data_act = act as f32;
     }
 
-    #[inline]
-    pub fn lits_from(&self, start: usize) -> &[Lit] {
-        &self.lits()[start..]
-    }
-
-    #[inline]
-    fn lits_mut(&mut self) -> &mut [Lit] {
-        unsafe { slice::from_raw_parts_mut(self.hp.as_mut_ptr(), self.len as usize) }
+    pub fn abstraction(&self) -> u32 {
+        assert!(self.header.has_extra);
+        self.header.data_abs
     }
 
 
     #[inline]
-    pub fn swap(&mut self, i: usize, j: usize) {
-        let data = self.lits_mut();
-        data.swap(i, j);
-    }
-
-    #[inline]
-    pub fn retain_suffix<F: Fn(&Lit) -> bool>(&mut self, base: usize, f: F) {
-        let data = unsafe { slice::from_raw_parts_mut(self.hp.as_mut_ptr(), self.len as usize) };
-
-        let mut i = base;
-        while i < self.len as usize {
-            if f(&data[i]) {
-                i += 1
-            } else {
-                self.len -= 1;
-                data[i] = data[self.len as usize];
+    pub fn retain_suffix<F: Fn(Lit) -> bool>(&mut self, base: usize, f: F) {
+        unsafe {
+            let (mut l, mut r) = self.ptr_range();
+            l = l.add(base);
+            while l < r {
+                if f(*l) {
+                    l = l.offset(1);
+                } else {
+                    self.len -= 1;
+                    r = r.offset(-1);
+                    *l = *r;
+                }
             }
         }
     }
@@ -117,10 +105,8 @@ impl Clause {
     #[inline]
     pub fn pull_literal<F: FnMut(Lit) -> bool>(&mut self, place: usize, mut f: F) -> Option<Lit> {
         unsafe {
-            let p = self.hp.as_mut_ptr();
-            let src = p.offset(place as isize);
-            let end = p.offset(self.len as isize);
-
+            let (p, end) = self.ptr_range();
+            let src = p.add(place);
             let mut ptr = src.offset(1);
             while ptr < end {
                 if f(*ptr) {
@@ -129,39 +115,29 @@ impl Clause {
                 }
                 ptr = ptr.offset(1);
             }
-
             None
         }
     }
 
-
     pub fn strengthen(&mut self, p: Lit) {
-        let data = unsafe { slice::from_raw_parts_mut(self.hp.as_mut_ptr(), self.len as usize) };
+        assert!(self.header.has_extra);
+        unsafe {
+            let (mut l, r) = self.ptr_range();
+            while l < r {
+                if *l == p {
+                    l = l.offset(1);
+                    while l < r {
+                        *l.offset(-1) = *l;
+                        l = l.offset(1);
+                    }
 
-        for i in 0..self.len as usize {
-            if data[i] == p {
-                for j in i + 1..self.len as usize {
-                    data[j - 1] = data[j];
+                    self.len -= 1;
+                    self.header.data_abs = util::calc_abstraction(self.lits());
+                    return;
                 }
-                self.len -= 1;
-                self.calc_abstraction();
-                return;
+                l = l.offset(1);
             }
         }
-    }
-
-    pub fn abstraction(&self) -> u32 {
-        assert!(self.header.has_extra);
-        self.header.data_abs
-    }
-
-    fn calc_abstraction(&mut self) {
-        assert!(self.header.has_extra);
-        let mut abstraction: u32 = 0;
-        for lit in self.lits() {
-            abstraction |= lit.abstraction();
-        }
-        self.header.data_abs = abstraction; //data[header.size].abs = abstraction;
     }
 }
 
@@ -226,14 +202,14 @@ impl ClauseAllocator {
                 reloced: None,
             };
             clause.len = len as u32;
-            ptr::copy_nonoverlapping(literals.as_ptr(), clause.hp.as_mut_ptr(), len);
+            ptr::copy_nonoverlapping(literals.as_ptr(), clause.head.as_mut_ptr(), len);
 
             if clause.header.has_extra {
                 if clause.header.learnt {
                     clause.header.data_act = 0.0;
                 } else {
-                    clause.calc_abstraction();
-                };
+                    clause.header.data_abs = util::calc_abstraction(clause.lits());
+                }
             }
 
             self.lc.add(clause);
@@ -250,7 +226,7 @@ impl ClauseAllocator {
             clause.header = src.header;
             clause.header.has_extra |= self.extra_clause_field;
             clause.len = src.len;
-            ptr::copy_nonoverlapping(src.hp.as_ptr(), clause.hp.as_mut_ptr(), len);
+            ptr::copy_nonoverlapping(src.head.as_ptr(), clause.head.as_mut_ptr(), len);
 
             self.lc.add(clause);
             ClauseRef(cref)
@@ -270,10 +246,10 @@ impl ClauseAllocator {
     }
 
     pub fn free(&mut self, ClauseRef(cr): ClauseRef) {
-        let c = self.ra.get_mut(cr);
-        assert!(!c.is_deleted());
-        c.header.mark |= 1;
-        self.lc.sub(c);
+        let clause = self.ra.get_mut(cr);
+        assert!(!clause.is_deleted());
+        clause.mark_deleted();
+        self.lc.sub(clause);
     }
 
     #[inline]
@@ -281,6 +257,7 @@ impl ClauseAllocator {
         let c = self.ra.get(cr);
         c.is_deleted()
     }
+
 
     pub fn size(&self) -> usize {
         self.lc.size
@@ -294,6 +271,7 @@ impl ClauseAllocator {
         self.extra_clause_field = new_value;
     }
 
+
     #[inline]
     pub fn view(&self, ClauseRef(cr): ClauseRef) -> &Clause {
         self.ra.get(cr)
@@ -302,6 +280,11 @@ impl ClauseAllocator {
     #[inline]
     pub fn edit(&mut self, ClauseRef(cr): ClauseRef) -> &mut Clause {
         self.ra.get_mut(cr)
+    }
+
+    #[inline]
+    pub fn literals(&self, cref: ClauseRef) -> &[Lit] {
+        self.view(cref).lits()
     }
 }
 

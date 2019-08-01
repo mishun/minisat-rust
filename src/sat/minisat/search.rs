@@ -1,7 +1,5 @@
 use crate::sat;
-use crate::sat::formula::{Lit, LitMap, Var};
-use crate::sat::formula::clause::*;
-use crate::sat::formula::assignment::*;
+use crate::sat::formula::{assignment::*, clause::*, LBool, Lit, LitMap, Var};
 use self::conflict::{AnalyzeContext, CCMinMode, Conflict};
 use self::decision_heuristic::{DecisionHeuristic, DecisionHeuristicSettings};
 use super::budget;
@@ -9,8 +7,9 @@ use super::budget;
 pub mod conflict;
 pub mod clause_db;
 pub mod decision_heuristic;
+mod luby;
 pub mod simplify;
-mod util;
+mod random;
 mod watches;
 
 
@@ -34,7 +33,7 @@ impl Default for RestartStrategy {
 impl RestartStrategy {
     pub fn conflicts_to_go(&self, restarts: u32) -> u64 {
         let rest_base = if self.luby_restart {
-            util::luby(self.restart_inc, restarts)
+            luby::luby(self.restart_inc, restarts)
         } else {
             self.restart_inc.powi(restarts as i32)
         };
@@ -273,7 +272,7 @@ impl Searcher {
             }
 
             _ => {
-                let (c, cr) = self.db.add_clause(&mut self.ca, ps.as_slice());
+                let (c, cr) = self.db.add_clause(&mut self.ca, &ps[..]);
                 self.watches.watch_clause(c, cr);
                 AddClauseRes::Added(c, cr)
             }
@@ -398,15 +397,15 @@ impl Searcher {
                     // Perform user provided assumption:
                     let p = assumptions[self.assigns.decision_level().offset()];
                     match self.assigns.of_lit(p) {
-                        LitVal::True => {
+                        LBool::True => {
                             // Dummy decision level:
                             self.assigns.new_decision_level();
                         }
-                        LitVal::False => {
+                        LBool::False => {
                             let conflict = self.analyze.analyze_final(&self.ca, &self.assigns, !p);
                             return LoopRes::AssumpsConfl(conflict);
                         }
-                        LitVal::Undef => {
+                        LBool::Undef => {
                             next = Some(p);
                             break;
                         }
@@ -461,7 +460,7 @@ impl Searcher {
 
                 Conflict::Learned(level, lit, clause) => {
                     self.cancel_until(level);
-                    let (c, cr) = self.db.learn_clause(&mut self.ca, clause.as_slice());
+                    let (c, cr) = self.db.learn_clause(&mut self.ca, &clause[..]);
                     self.watches.watch_clause(c, cr);
                     self.assigns.assign_lit(lit, Some(cr));
                 }
@@ -594,21 +593,18 @@ fn is_implied(search: &mut Searcher, c: &[Lit]) -> bool {
     search.assigns.new_decision_level();
     for &lit in c.iter() {
         match search.assigns.of_lit(lit) {
-            LitVal::True => {
+            LBool::True => {
                 search.cancel_until(GROUND_LEVEL);
                 return true;
             }
-            LitVal::Undef => {
+            LBool::Undef => {
                 search.assigns.assign_lit(!lit, None);
             }
-            LitVal::False => {}
+            LBool::False => {}
         }
     }
 
-    let result = search
-        .watches
-        .propagate(&mut search.ca, &mut search.assigns)
-        .is_some();
+    let result = search.watches.propagate(&mut search.ca, &mut search.assigns).is_some();
     search.cancel_until(GROUND_LEVEL);
     return result;
 }

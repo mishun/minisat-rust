@@ -50,27 +50,23 @@ pub fn solve_with<S: Solver>(mut solver: S, options: MainOptions) -> io::Result<
 
     let initial_time = time::precise_time_s();
     let backward_subst = dimacs::parse_file(&options.in_path, &mut solver, options.strict)?;
-    let parse_time = time::precise_time_s();
+    let parse_end_time = time::precise_time_s();
 
-    info!(
-        "|  Number of variables:  {:12}                                         |",
-        solver.n_vars()
-    );
-    info!(
-        "|  Number of clauses:    {:12}                                         |",
-        solver.n_clauses()
-    );
-    info!(
-        "|  Parse time:           {:12.2} s                                       |",
-        parse_time - initial_time
-    );
+    info!("|  Number of variables:  {:12}                                         |", solver.n_vars());
+    info!("|  Number of clauses:    {:12}                                         |", solver.n_clauses());
+
+    {
+        let parse_time = parse_end_time - initial_time;
+        info!("|  Parse time:           {:12.2} s                                       |", parse_time);
+    }
 
     let mut budget = Budget::new();
     budget.off();
 
     let elim_res = solver.preprocess(&budget);
+
     {
-        let simplify_time = time::precise_time_s() - parse_time;
+        let simplify_time = time::precise_time_s() - parse_end_time;
         info!("|  Simplification time:  {:12.2} s                                       |", simplify_time);
     }
 
@@ -130,32 +126,29 @@ pub fn solve_with<S: Solver>(mut solver: S, options: MainOptions) -> io::Result<
 
 fn print_stats(stats: &Stats, cpu_time: f64) {
     info!("restarts              : {:<12}", stats.restarts);
-    info!(
-        "conflicts             : {:<12}   ({:.0} /sec)",
-        stats.conflicts,
-        (stats.conflicts as f64) / cpu_time
-    );
 
-    info!(
-        "decisions             : {:<12}   ({:4.2} % random) ({:.0} /sec)",
-        stats.decisions,
-        (stats.rnd_decisions as f64) * 100.0 / (stats.decisions as f64),
-        (stats.decisions as f64) / cpu_time
-    );
+    {
+        let confl_per_s = (stats.conflicts as f64) / cpu_time;
+        info!("conflicts             : {:<12}   ({:.0} /sec)", stats.conflicts, confl_per_s);
+    }
 
-    info!(
-        "propagations          : {:<12}   ({:.0} /sec)",
-        stats.propagations,
-        (stats.propagations as f64) / cpu_time
-    );
+    {
+        let rnd_percent = (stats.rnd_decisions as f64) * 100.0 / (stats.decisions as f64);
+        let decisions_per_s = (stats.decisions as f64) / cpu_time;
+        info!("decisions             : {:<12}   ({:4.2} % random) ({:.0} /sec)", stats.decisions, rnd_percent, decisions_per_s);
+    }
 
-    info!(
-        "conflict literals     : {:<12}   ({:4.2} % deleted)",
-        stats.tot_literals,
-        (stats.del_literals as f64) * 100.0 / ((stats.del_literals + stats.tot_literals) as f64)
-    );
+    {
+        let props_per_s = (stats.propagations as f64) / cpu_time;
+        info!("propagations          : {:<12}   ({:.0} /sec)", stats.propagations, props_per_s);
+    }
 
-    info!("Memory used           : {:.2} MB", 0.0);
+    {
+        let del_percent = (stats.del_literals as f64) * 100.0 / ((stats.del_literals + stats.tot_literals) as f64);
+        info!("conflict literals     : {:<12}   ({:4.2} % deleted)", stats.tot_literals, del_percent);
+    }
+
+    info!("Memory used           : {:.2} MB", 0.0); // TODO: implement
     info!("CPU time              : {} s", cpu_time);
     info!("");
 }

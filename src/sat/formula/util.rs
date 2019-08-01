@@ -1,11 +1,18 @@
-use super::{Lit, Var};
-use super::assignment::*;
-use super::clause::*;
+use super::{assignment::Assignment, Lit, Var};
+
+
+pub fn calc_abstraction(lits: &[Lit]) -> u32 {
+    let mut abstraction: u32 = 0;
+    for lit in lits {
+        abstraction |= lit.abstraction();
+    }
+    abstraction
+}
 
 
 // Returns true if a clause is satisfied with assignment
-pub fn satisfied_with(c: &Clause, s: &Assignment) -> bool {
-    for &lit in c.lits() {
+pub fn satisfied_with(clause: &[Lit], s: &Assignment) -> bool {
+    for &lit in clause {
         if s.is_assigned_pos(lit) {
             return true;
         }
@@ -15,19 +22,15 @@ pub fn satisfied_with(c: &Clause, s: &Assignment) -> bool {
 
 
 // Returns None if clause is always satisfied
-pub fn merge(v: Var, _ps: &Clause, _qs: &Clause) -> Option<Vec<Lit>> {
-    let (ps, qs) = if _ps.len() < _qs.len() {
-        (_qs, _ps)
-    } else {
-        (_ps, _qs)
-    };
+pub fn merge(v: Var, _ps: &[Lit], _qs: &[Lit]) -> Option<Vec<Lit>> {
+    let (ps, qs) = if _ps.len() < _qs.len() { (_qs, _ps) } else { (_ps, _qs) };
 
     let mut res = Vec::new();
-    for &qsi in qs.lits() {
+    for &qsi in qs {
         if qsi.var() != v {
             let mut ok = true;
 
-            for &psj in ps.lits() {
+            for &psj in ps {
                 if psj.var() == qsi.var() {
                     if psj == !qsi {
                         return None;
@@ -44,7 +47,7 @@ pub fn merge(v: Var, _ps: &Clause, _qs: &Clause) -> Option<Vec<Lit>> {
         }
     }
 
-    for &psi in ps.lits() {
+    for &psi in ps {
         if psi.var() != v {
             res.push(psi);
         }

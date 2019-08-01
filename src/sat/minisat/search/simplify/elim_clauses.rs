@@ -1,7 +1,5 @@
 use std::mem;
-use crate::sat::formula::{Lit, Var};
-use crate::sat::formula::assignment::*;
-use crate::sat::formula::clause::Clause;
+use crate::sat::formula::{Lit, Var, VarMap};
 
 
 pub struct ElimClauses {
@@ -24,14 +22,15 @@ impl ElimClauses {
         self.sizes.push(1);
     }
 
-    pub fn mk_elim_clause(&mut self, v: Var, c: &Clause) {
+    pub fn mk_elim_clause(&mut self, v: Var, clause: &[Lit]) {
+        assert!(clause.len() > 1);
         let first = self.literals.len();
 
         // Copy clause to elimclauses-vector. Remember position where the
         // variable 'v' occurs:
         let mut v_pos = first;
         let mut v_found = false;
-        for &lit in c.lits() {
+        for &lit in clause {
             self.literals.push(lit);
             if lit.var() == v {
                 v_found = true;
@@ -46,39 +45,44 @@ impl ElimClauses {
         self.literals.swap(first, v_pos);
 
         // Store the length of the clause last:
-        self.sizes.push(c.len());
+        self.sizes.push(clause.len());
     }
 
-    pub fn extend(&self, assigns: &mut Assignment) {
+    pub fn extend(&self, assigns: &mut VarMap<bool>) {
         if !self.extend_model {
             return;
         }
 
         let mut i = self.literals.len();
-        let mut cl = self.sizes.len();
-        while cl > 0 && i > 0 {
-            cl -= 1;
-            let mut j = self.sizes[cl];
-            assert!(j > 0);
+        let mut c_index = self.sizes.len();
+        while c_index > 0 && i > 0 {
+            c_index -= 1;
+            let mut cur_size = self.sizes[c_index];
+            assert!(cur_size > 0);
 
             i -= 1;
             let mut skip = false;
-            while j > 1 {
-                if assigns.is_assigned_pos(self.literals[i]) {
-                    skip = true;
-                    break;
+            while cur_size > 1 {
+                let lit = self.literals[i];
+                match assigns.get(&lit.var()) {
+                    Some(sign) if *sign != lit.sign() => {
+                        skip = true;
+                        break;
+                    }
+                    _ => {}
                 }
 
-                j -= 1;
+                cur_size -= 1;
                 i -= 1;
             }
 
             if !skip {
-                assigns.rewrite_lit(self.literals[i]);
+                let lit = self.literals[i];
+                assigns.insert(&lit.var(), !lit.sign());
             }
 
-            if i > j - 1 {
-                i -= j - 1;
+            if i > cur_size - 1 {
+                i -= cur_size - 1;
             } else {
                 i = 0
             }

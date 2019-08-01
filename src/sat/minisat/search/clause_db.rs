@@ -1,8 +1,5 @@
 use std::cmp::Ordering;
-use crate::sat::formula::Lit;
-use crate::sat::formula::assignment::Assignment;
-use crate::sat::formula::clause::*;
-use crate::sat::formula::util::*;
+use crate::sat::formula::{assignment::Assignment, clause::*, util::*, Lit};
 
 
 pub struct ClauseDBSettings {
@@ -207,7 +204,7 @@ impl ClauseDB {
     ) -> bool {
         if ca.is_deleted(cr) {
             false
-        } else if satisfied_with(ca.view(cr), assigns) {
+        } else if satisfied_with(ca.view(cr).lits(), assigns) {
             notify(ca.view(cr));
             stats.del(ca.view(cr));
             ca.free(cr);
@@ -215,10 +212,10 @@ impl ClauseDB {
         } else {
             let c = ca.edit(cr);
             assert!({
-                let (c0, c1) = c.head_pair();
+                let [c0, c1] = c.head;
                 assigns.is_undef(c0.var()) && assigns.is_undef(c1.var())
             });
-            c.retain_suffix(2, |&lit| !assigns.is_assigned_neg(lit));
+            c.retain_suffix(2, |lit| !assigns.is_assigned_neg(lit));
             true
         }
     }
