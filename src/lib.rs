@@ -3,12 +3,12 @@
 extern crate log;
 use time;
 
-
 use std::{fs, io, path};
 use crate::sat::*;
 use crate::sat::minisat::budget::Budget;
 
 pub mod sat;
+pub(crate) mod util;
 
 
 pub enum SolverOptions {
@@ -96,19 +96,20 @@ pub fn solve_with<S: Solver>(mut solver: S, options: MainOptions) -> io::Result<
     };
 
     let cpu_time = time::precise_time_s() - initial_time;
+    let mem_used = util::mem_used_peak();
     match result {
         SolveRes::UnSAT(ref stats) => {
-            print_stats(stats, cpu_time);
+            print_stats(stats, cpu_time, mem_used);
             println!("UNSATISFIABLE");
         }
 
         SolveRes::Interrupted(_, ref s) => {
-            print_stats(&s.stats(), cpu_time);
+            print_stats(&s.stats(), cpu_time, mem_used);
             println!("INDETERMINATE");
         }
 
         SolveRes::SAT(ref model, ref stats) => {
-            print_stats(stats, cpu_time);
+            print_stats(stats, cpu_time, mem_used);
             println!("SATISFIABLE");
             assert!(
                 dimacs::validate_model_file(&options.in_path, &backward_subst, &model)?,
@@ -124,7 +125,7 @@ pub fn solve_with<S: Solver>(mut solver: S, options: MainOptions) -> io::Result<
     Ok(())
 }
 
-fn print_stats(stats: &Stats, cpu_time: f64) {
+fn print_stats(stats: &Stats, cpu_time: f64, mem_used: Option<usize>) {
     info!("restarts              : {:<12}", stats.restarts);
 
     {
@@ -148,7 +149,9 @@ fn print_stats(stats: &Stats, cpu_time: f64) {
         info!("conflict literals     : {:<12}   ({:4.2} % deleted)", stats.tot_literals, del_percent);
     }
 
-    info!("Memory used           : {:.2} MB", 0.0); // TODO: implement
+    if let Some(mem_used) = mem_used {
+        info!("Memory used           : {:.2} MB", mem_used);
+    }
     info!("CPU time              : {} s", cpu_time);
     info!("");
 }
