@@ -199,7 +199,7 @@ impl Solver for SimpSolver {
 
                     SearchRes::SAT(assigns, stats) => {
                         let mut model = extract_model(&assigns);
-                        self.elimclauses.extend(&mut model);
+                        self.elimclauses.extend_model(&mut model);
                         SolveRes::SAT(model.iter().map(|(v, s)| v.sign_lit(!*s)).collect(), stats)
                     }
 
@@ -229,7 +229,7 @@ impl Solver for SimpSolver {
 
                 SearchRes::SAT(assigns, stats) => {
                     let mut model = extract_model(&assigns);
-                    self.elimclauses.extend(&mut model);
+                    self.elimclauses.extend_model(&mut model);
                     SolveRes::SAT(model.iter().map(|(v, s)| v.sign_lit(!*s)).collect(), stats)
                 }
 

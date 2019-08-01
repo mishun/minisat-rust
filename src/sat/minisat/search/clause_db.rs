@@ -204,7 +204,7 @@ impl ClauseDB {
     ) -> bool {
         if ca.is_deleted(cr) {
             false
-        } else if satisfied_with(ca.view(cr).lits(), assigns) {
+        } else if satisfied_with_assignment(ca.view(cr).lits(), assigns) {
             notify(ca.view(cr));
             stats.del(ca.view(cr));
             ca.free(cr);

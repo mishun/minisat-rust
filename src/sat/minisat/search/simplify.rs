@@ -560,7 +560,7 @@ fn asymmetric_branching(search: &mut Searcher, v: Var, cr: ClauseRef) -> Option<
 
     let l = {
         let c = search.ca.view(cr);
-        if c.is_deleted() || satisfied_with(c.lits(), &search.assigns) {
+        if c.is_deleted() || satisfied_with_assignment(c.lits(), &search.assigns) {
             return None;
         }
 

@@ -1,4 +1,4 @@
-use super::{assignment::Assignment, Lit, Var};
+use super::{assignment::Assignment, Lit, Var, VarMap};
 
 
 pub fn calc_abstraction(lits: &[Lit]) -> u32 {
@@ -11,10 +11,21 @@ pub fn calc_abstraction(lits: &[Lit]) -> u32 {
 
 
 // Returns true if a clause is satisfied with assignment
-pub fn satisfied_with(clause: &[Lit], s: &Assignment) -> bool {
+pub fn satisfied_with_assignment(clause: &[Lit], assignment: &Assignment) -> bool {
     for &lit in clause {
-        if s.is_assigned_pos(lit) {
+        if assignment.is_assigned_pos(lit) {
             return true;
+        }
+    }
+    false
+}
+
+pub fn satisfied_with_model(clause: &[Lit], model: &VarMap<bool>) -> bool
+{
+    for &lit in clause {
+        match model.get(&lit.var()) {
+            Some(sign) if *sign != lit.sign() => return true,
+            _ => {}
         }
     }
     false
