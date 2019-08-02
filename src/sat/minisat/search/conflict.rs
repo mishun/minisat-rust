@@ -103,7 +103,7 @@ impl AnalyzeContext {
                         if level > GROUND_LEVEL {
                             self.seen[&v] = Seen::Source;
                             bump_var(v);
-                            if level >= assigns.decision_level() {
+                            if level >= assigns.current_level() {
                                 path_c += 1;
                             } else {
                                 out_learnt.push(q);

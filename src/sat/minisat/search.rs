@@ -401,9 +401,8 @@ impl Searcher {
     }
 
     fn decide(&mut self, assumptions: &[Lit]) -> Result<Option<Lit>, LitMap<()>> {
-        while self.assigns.decision_level().offset() < assumptions.len() {
+        while let Some(&p) = assumptions.get(self.assigns.current_level().offset()) {
             // Perform user provided assumption:
-            let p = assumptions[ self.assigns.decision_level().offset() ];
             match self.assigns.of_lit(p) {
                 LBool::True => {
                     // Dummy decision level:
@@ -536,7 +535,7 @@ impl Searcher {
     // Revert to the state at given level (keeping all assignment at 'level' but not beyond).
     fn cancel_until(&mut self, target_level: DecisionLevel) {
         let ref mut heur = self.heur;
-        let top_level = self.assigns.decision_level();
+        let top_level = self.assigns.current_level();
         self.assigns.rewind_until_level(target_level, |level, lit| {
             heur.cancel(lit, level == top_level);
         });
@@ -598,4 +597,17 @@ fn is_implied(search: &mut Searcher, c: &[Lit]) -> bool {
     let result = search.watches.propagate(&mut search.ca, &mut search.assigns).is_some();
     search.cancel_until(GROUND_LEVEL);
     return result;
+}
+
+
+fn progress_estimate(assigns: &Assignment) -> f64 {
+    let vars = 1.0 / (assigns.number_of_vars() as f64);
+    let mut progress = 0.0;
+    let mut factor = vars;
+    for level in assigns.all_levels() {
+        let level_trail = assigns.trail_at(level);
+        progress += factor * (level_trail.len() as f64);
+        factor *= vars;
+    }
+    progress
 }

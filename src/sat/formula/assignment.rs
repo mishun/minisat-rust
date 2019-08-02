@@ -2,14 +2,37 @@ use std::{cmp, fmt};
 use super::{clause, LBool, Lit, Var};
 
 
+type LevelIndex = usize;
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
-pub struct DecisionLevel(usize);
+pub struct DecisionLevel(LevelIndex);
 
 pub const GROUND_LEVEL: DecisionLevel = DecisionLevel(0);
 
 impl DecisionLevel {
     pub fn offset(&self) -> usize {
-        self.0
+        self.0 as usize
+    }
+}
+
+
+pub struct DecisionLevelUpIter {
+    current: LevelIndex,
+    bound: LevelIndex
+}
+
+impl Iterator for DecisionLevelUpIter {
+    type Item = DecisionLevel;
+
+    #[inline]
+    fn next(&mut self) -> Option<DecisionLevel> {
+        if self.current <= self.bound {
+            let result = DecisionLevel(self.current);
+            self.current += 1;
+            Some(result)
+        } else {
+            None
+        }
     }
 }
 
@@ -93,15 +116,18 @@ impl Assignment {
     }
 
 
-    #[inline]
-    pub fn decision_level(&self) -> DecisionLevel {
+    pub fn current_level(&self) -> DecisionLevel {
         DecisionLevel(self.lim.len())
     }
 
-    #[inline]
     pub fn is_ground_level(&self) -> bool {
         self.lim.is_empty()
     }
+
+    pub fn all_levels(&self) -> DecisionLevelUpIter {
+        DecisionLevelUpIter { current: 0, bound: self.lim.len() }
+    }
+
 
     #[inline]
     pub fn new_decision_level(&mut self) {
@@ -245,49 +271,19 @@ impl Assignment {
 
 impl fmt::Debug for Assignment {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for level in 0..1 + self.lim.len() {
-            let l = if level > 0 { self.lim[level - 1] } else { 0 };
-            let r = if level < self.lim.len() {
-                self.lim[level]
-            } else {
-                self.trail.len()
-            };
-
-            if r > l {
-                write!(f, "[{}:", level)?;
-                for lit in self.trail[l..r].iter() {
+        for level in self.all_levels() {
+            let level_trail = self.trail_at(level);
+            if level_trail.len() > 0 {
+                write!(f, "[{}:", level.offset())?;
+                for lit in level_trail {
                     write!(f, " {:?}", lit)?;
                 }
                 write!(f, " ]")?;
             }
         }
-
         Ok(())
     }
 }
-
-
-pub fn progress_estimate(assigns: &Assignment) -> f64 {
-    let f = 1.0 / (assigns.number_of_vars() as f64);
-    let mut progress = 0.0;
-
-    let cl = assigns.lim.len();
-    for level in 0..cl + 1 {
-        let l = if level == 0 {
-            0
-        } else {
-            assigns.lim[level - 1]
-        };
-        let r = if level == cl {
-            assigns.trail.len()
-        } else {
-            assigns.lim[level]
-        };
-        progress += f.powi(level as i32) * ((r - l) as f64);
-    }
-    progress * f
-}
-
 
 pub fn try_assign_lit(assigns: &mut Assignment, p: Lit, from: Option<clause::ClauseRef>) -> bool {
     match assigns.of_lit(p) {
