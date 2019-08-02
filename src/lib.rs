@@ -150,7 +150,7 @@ fn print_stats(stats: &Stats, cpu_time: f64, mem_used: Option<usize>) {
     }
 
     if let Some(mem_used) = mem_used {
-        info!("Memory used           : {:.2} MB", mem_used);
+        info!("Memory used           : {:.2} MB", mem_used as f32 / 1024f32);
     }
     info!("CPU time              : {} s", cpu_time);
     info!("");
