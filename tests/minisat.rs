@@ -8,27 +8,57 @@ use minisat_rust::sat::{dimacs, minisat, SolveRes, Solver, Stats};
 use minisat_rust::sat::minisat::budget::Budget;
 
 
+// TODO: come up with something better?
 #[test]
-#[ignore]
-fn compare_with_minisat() {
-    walk().expect("IO Error");
+fn compare_with_minisat_easy_0of4() {
+    walk("./tests/cnf", 4, 0).expect("IO Error");
+}
+
+#[test]
+fn compare_with_minisat_easy_1of4() {
+    walk("./tests/cnf", 4, 1).expect("IO Error");
+}
+
+#[test]
+fn compare_with_minisat_easy_2of4() {
+    walk("./tests/cnf", 4, 2).expect("IO Error");
+}
+
+#[test]
+fn compare_with_minisat_easy_3of4() {
+    walk("./tests/cnf", 4, 3).expect("IO Error");
 }
 
 
-fn walk() -> io::Result<()> {
-    let mut sat = 0;
-    let mut unsat = 0;
+#[test]
+#[ignore]
+fn compare_with_minisat_hard() {
+    walk("./tests/cnf-hard", 1, 0).expect("IO Error");
+}
 
-    for _entry in fs::read_dir("./tests/cnf")? {
-        let entry = _entry?;
-        if entry.file_type()?.is_file() {
-            let ref path = entry.path();
-            let outcome = test_file(path.as_path())?;
-            if outcome {
-                sat += 1;
-            } else {
-                unsat += 1;
+
+fn walk(dir_path: &str, bins: usize, bin: usize) -> io::Result<()> {
+    let paths = {
+        let mut paths = Vec::new();
+        for _entry in fs::read_dir(dir_path)? {
+            let entry = _entry?;
+            if entry.file_type()?.is_file() {
+                let path = entry.path();
+                paths.push(path);
             }
+        }
+        paths.sort();
+        paths
+    };
+
+    let mut sat = 0u64;
+    let mut unsat = 0u64;
+    for (_, path) in paths.iter().enumerate().filter(|(i, _)| i % bins == bin) {
+        let outcome = test_file(path.as_path())?;
+        if outcome {
+            sat += 1;
+        } else {
+            unsat += 1;
         }
     }
 
