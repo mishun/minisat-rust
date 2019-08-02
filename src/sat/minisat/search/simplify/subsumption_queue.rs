@@ -1,5 +1,5 @@
 use std::collections::vec_deque::VecDeque;
-use crate::sat::formula::{assignment::Assignment, clause::*, Lit};
+use crate::sat::formula::{assignment::*, clause::*, Lit};
 
 
 pub struct SubsumptionQueue {
@@ -21,14 +21,15 @@ impl SubsumptionQueue {
     }
 
     pub fn pop(&mut self, ca: &ClauseAllocator, assigns: &Assignment) -> Option<SubsumptionJob> {
+        let trail = assigns.trail_at(GROUND_LEVEL);
         loop {
             match self.subsumption_queue.pop_front() {
                 Some(cr) => if !ca.is_deleted(cr) {
                     return Some(SubsumptionJob::Clause(cr));
-                },
+                }
 
-                None if self.bwdsub_assigns < assigns.number_of_ground_assigns() => {
-                    let lit = assigns.assign_at(self.bwdsub_assigns);
+                None if self.bwdsub_assigns < trail.len() => {
+                    let lit = trail[self.bwdsub_assigns];
                     self.bwdsub_assigns += 1;
                     return Some(SubsumptionJob::Assign(lit));
                 }

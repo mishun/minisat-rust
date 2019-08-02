@@ -32,6 +32,15 @@ pub fn satisfied_with_model(clause: &[Lit], model: &VarMap<bool>) -> bool
 }
 
 
+pub fn extract_model(assigns: &Assignment) -> VarMap<bool> {
+    let mut model = VarMap::new();
+    for lit in assigns.trail() {
+        model.insert(&lit.var(), !lit.sign());
+    }
+    model
+}
+
+
 // Returns None if clause is always satisfied
 pub fn merge(v: Var, _ps: &[Lit], _qs: &[Lit]) -> Option<Vec<Lit>> {
     let (ps, qs) = if _ps.len() < _qs.len() { (_qs, _ps) } else { (_ps, _qs) };

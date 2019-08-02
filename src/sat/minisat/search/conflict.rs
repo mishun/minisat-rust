@@ -89,11 +89,14 @@ impl AnalyzeContext {
         {
             let mut confl = confl0;
             let mut path_c = 0;
-            let mut index = assigns.number_of_assigns();
+
+            let trail = assigns.trail();
+            let mut index = trail.len();
             loop {
                 bump_cla(ca, confl);
 
-                for &q in &ca.view(confl).lits()[(if confl == confl0 { 0 } else { 1 })..] {
+                let base = if confl == confl0 { 0 } else { 1 };
+                for &q in &ca.view(confl).lits()[base..] {
                     let v = q.var();
                     if self.seen[&v] == Seen::Undef {
                         let level = assigns.vardata(q).level;
@@ -113,11 +116,11 @@ impl AnalyzeContext {
                 let pl = {
                     loop {
                         index -= 1;
-                        if self.seen[&assigns.assign_at(index).var()] != Seen::Undef {
+                        if self.seen[ &trail[index].var() ] != Seen::Undef {
                             break;
                         }
                     }
-                    assigns.assign_at(index)
+                    trail[index]
                 };
 
                 self.seen[&pl.var()] = Seen::Undef;
@@ -253,7 +256,7 @@ impl AnalyzeContext {
         let mut out_conflict = LitMap::new();
         out_conflict.insert(&p, ());
 
-        assigns.inspect_until_level(GROUND_LEVEL, |lit| {
+        for &lit in assigns.trail_above(GROUND_LEVEL).iter().rev() {
             if self.seen[&lit.var()] != Seen::Undef {
                 match assigns.vardata(lit).reason {
                     None => {
@@ -270,7 +273,7 @@ impl AnalyzeContext {
                     }
                 }
             }
-        });
+        }
 
         out_conflict
     }

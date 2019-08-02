@@ -1,6 +1,5 @@
 use crate::sat::{SolveRes, Solver, Stats};
-use crate::sat::formula::{Lit, Var};
-use crate::sat::formula::assignment::*;
+use crate::sat::formula::{util, Lit, Var};
 use self::search::clause_db::ClauseDBSettings;
 pub use self::search::conflict::CCMinMode;
 use self::search::decision_heuristic::DecisionHeuristicSettings;
@@ -65,7 +64,7 @@ impl Solver for CoreSolver {
                 SearchRes::UnSAT(stats) => SolveRes::UnSAT(stats),
 
                 SearchRes::SAT(assigns, stats) => {
-                    let model = extract_model(&assigns);
+                    let model = util::extract_model(&assigns);
                     SolveRes::SAT(model.iter().map(|(v, s)| v.sign_lit(!*s)).collect(), stats)
                 }
 
@@ -198,7 +197,7 @@ impl Solver for SimpSolver {
                     SearchRes::UnSAT(stats) => SolveRes::UnSAT(stats),
 
                     SearchRes::SAT(assigns, stats) => {
-                        let mut model = extract_model(&assigns);
+                        let mut model = util::extract_model(&assigns);
                         self.elimclauses.extend_model(&mut model);
                         SolveRes::SAT(model.iter().map(|(v, s)| v.sign_lit(!*s)).collect(), stats)
                     }
@@ -228,7 +227,7 @@ impl Solver for SimpSolver {
                 SearchRes::UnSAT(stats) => SolveRes::UnSAT(stats),
 
                 SearchRes::SAT(assigns, stats) => {
-                    let mut model = extract_model(&assigns);
+                    let mut model = util::extract_model(&assigns);
                     self.elimclauses.extend_model(&mut model);
                     SolveRes::SAT(model.iter().map(|(v, s)| v.sign_lit(!*s)).collect(), stats)
                 }

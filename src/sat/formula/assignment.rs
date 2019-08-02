@@ -1,5 +1,5 @@
 use std::{cmp, fmt};
-use super::{clause, LBool, Lit, Var, VarMap};
+use super::{clause, LBool, Lit, Var};
 
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
@@ -122,12 +122,10 @@ impl Assignment {
     }
 
     #[inline]
-    pub fn rewind_until_level<F: FnMut(DecisionLevel, Lit) -> ()>(
-        &mut self,
-        DecisionLevel(target_level): DecisionLevel,
-        mut f: F,
-    ) {
-        while self.lim.len() > target_level {
+    pub fn rewind_until_level<F>(&mut self, target_level: DecisionLevel, mut f: F)
+        where F: FnMut(DecisionLevel, Lit) -> ()
+    {
+        while self.lim.len() > target_level.0 {
             let level = self.trail.len();
             let bottom = self.lim.pop().unwrap();
             while self.trail.len() > bottom {
@@ -142,19 +140,6 @@ impl Assignment {
         }
 
         self.qhead = cmp::min(self.qhead, self.trail.len());
-    }
-
-    #[inline]
-    pub fn inspect_until_level<F: FnMut(Lit) -> ()>(
-        &self,
-        DecisionLevel(target_level): DecisionLevel,
-        mut f: F,
-    ) {
-        if self.lim.len() > target_level {
-            for &lit in self.trail[self.lim[target_level]..].iter().rev() {
-                f(lit);
-            }
-        }
     }
 
 
@@ -174,10 +159,30 @@ impl Assignment {
         }
     }
 
-    // TODO: bad style
-    #[inline]
-    pub fn assign_at(&self, index: usize) -> Lit {
-        self.trail[index]
+
+    pub fn trail(&self) -> &[Lit] {
+        &self.trail[..]
+    }
+
+    pub fn trail_at(&self, level: DecisionLevel) -> &[Lit] {
+        assert!(level.0 <= self.lim.len());
+
+        let head = if level.0 == 0 { 0 } else { self.lim[level.0 - 1] };
+        if level.0 < self.lim.len() {
+            let tail = self.lim[level.0];
+            &self.trail[head..tail]
+        } else {
+            &self.trail[head..]
+        }
+    }
+
+    pub fn trail_above(&self, level: DecisionLevel) -> &[Lit] {
+        if level.0 < self.lim.len() {
+            let head = self.lim[level.0];
+            &self.trail[head..]
+        } else {
+            &[]
+        }
     }
 
 
@@ -293,13 +298,4 @@ pub fn try_assign_lit(assigns: &mut Assignment, p: Lit, from: Option<clause::Cla
             true
         }
     }
-}
-
-
-pub fn extract_model(assigns: &Assignment) -> VarMap<bool> {
-    let mut model = VarMap::new();
-    for lit in assigns.trail.iter() {
-        model.insert(&lit.var(), !lit.sign());
-    }
-    model
 }

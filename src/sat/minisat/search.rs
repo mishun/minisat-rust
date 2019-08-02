@@ -2,7 +2,7 @@ use crate::sat;
 use crate::sat::formula::{assignment::*, clause::*, LBool, Lit, LitMap, Var};
 use self::conflict::{AnalyzeContext, CCMinMode, Conflict};
 use self::decision_heuristic::{DecisionHeuristic, DecisionHeuristicSettings};
-use super::budget;
+use super::budget::Budget;
 
 pub mod conflict;
 pub mod clause_db;
@@ -260,19 +260,19 @@ impl Searcher {
             ps
         };
 
-        match ps.len() {
-            0 => AddClauseRes::UnSAT,
+        match &ps[..] {
+            [] => { AddClauseRes::UnSAT }
 
-            1 => {
-                self.assigns.assign_lit(ps[0], None);
+            [unit] => {
+                self.assigns.assign_lit(*unit, None);
                 match self.watches.propagate(&mut self.ca, &mut self.assigns) {
                     None => AddClauseRes::Consumed,
                     Some(_) => AddClauseRes::UnSAT,
                 }
             }
 
-            _ => {
-                let (c, cr) = self.db.add_clause(&mut self.ca, &ps[..]);
+            lits => {
+                let (c, cr) = self.db.add_clause(&mut self.ca, lits);
                 self.watches.watch_clause(c, cr);
                 AddClauseRes::Added(c, cr)
             }
@@ -281,24 +281,26 @@ impl Searcher {
 
     pub fn preprocess(&mut self) -> bool {
         if let None = self.watches.propagate(&mut self.ca, &mut self.assigns) {
-            self.simplify();
+            self.try_simplify();
             true
         } else {
             false
         }
     }
 
-    pub fn search(
-        mut self,
-        ss: &SearchSettings,
-        budget: &budget::Budget,
-        assumptions: &[Lit],
-    ) -> SearchRes {
+    pub fn search(self, ss: &SearchSettings, budget: &Budget, assumptions: &[Lit]) -> SearchRes {
         info!("============================[ Search Statistics ]==============================");
         info!("| Conflicts |          ORIGINAL         |          LEARNT          | Progress |");
         info!("|           |    Vars  Clauses Literals |    Limit  Clauses Lit/Cl |          |");
         info!("===============================================================================");
 
+        let res = self.search_internal(ss, budget, assumptions);
+
+        info!("===============================================================================");
+        res
+    }
+
+    fn search_internal(mut self, ss: &SearchSettings, budget: &Budget, assumptions: &[Lit]) -> SearchRes {
         self.stats.solves += 1;
         let mut learnt = LearningGuard::new(ss.learn);
         learnt.reset(self.db.stats.num_clauses);
@@ -312,26 +314,22 @@ impl Searcher {
                 }
 
                 LoopRes::SAT => {
-                    info!("===============================================================================");
                     let stats = self.stats();
                     return SearchRes::SAT(self.assigns, stats);
                 }
 
                 LoopRes::UnSAT => {
-                    info!("===============================================================================");
                     return SearchRes::UnSAT(self.stats());
                 }
 
                 LoopRes::AssumpsConfl(_) => {
                     // TODO: implement properly
                     self.cancel_until(GROUND_LEVEL);
-                    info!("===============================================================================");
                     return SearchRes::UnSAT(self.stats());
                 }
 
                 LoopRes::Interrupted(c) => {
                     self.cancel_until(GROUND_LEVEL);
-                    info!("===============================================================================");
                     return SearchRes::Interrupted(c, self);
                 }
             }
@@ -349,7 +347,7 @@ impl Searcher {
     fn search_loop(
         &mut self,
         nof_conflicts: u64,
-        budget: &budget::Budget,
+        budget: &Budget,
         learnt: &mut LearningGuard,
         assumptions: &[Lit],
     ) -> LoopRes {
@@ -373,10 +371,9 @@ impl Searcher {
             }
 
             // Simplify the set of problem clauses:
-            self.simplify();
+            self.try_simplify();
 
-            if (self.db.learnts() as f64)
-                >= learnt.border() + (self.assigns.number_of_assigns() as f64)
+            if (self.db.learnts() as f64) >= learnt.border() + (self.assigns.number_of_assigns() as f64)
             {
                 // Reduce the set of learnt clauses:
                 {
@@ -391,45 +388,40 @@ impl Searcher {
                 }
             }
 
-            let next = {
-                let mut next = None;
-                while self.assigns.decision_level().offset() < assumptions.len() {
-                    // Perform user provided assumption:
-                    let p = assumptions[self.assigns.decision_level().offset()];
-                    match self.assigns.of_lit(p) {
-                        LBool::True => {
-                            // Dummy decision level:
-                            self.assigns.new_decision_level();
-                        }
-                        LBool::False => {
-                            let conflict = self.analyze.analyze_final(&self.ca, &self.assigns, !p);
-                            return LoopRes::AssumpsConfl(conflict);
-                        }
-                        LBool::Undef => {
-                            next = Some(p);
-                            break;
-                        }
-                    }
+            match self.decide(assumptions) {
+                Err(confl) => { return LoopRes::AssumpsConfl(confl) }
+                Ok(None) => { return LoopRes::SAT } // Model found:
+                Ok(Some(next)) => {
+                    // Increase decision level and enqueue 'next'
+                    self.assigns.new_decision_level();
+                    self.assigns.assign_lit(next, None);
                 }
-
-                if let None = next {
-                    // New variable decision:
-                    self.stats.decisions += 1;
-                    match self.heur.pick_branch_lit(&self.assigns) {
-                        Some(n) => next = Some(n),
-                        None => {
-                            return LoopRes::SAT;
-                        } // Model found:
-                    };
-                }
-
-                next.unwrap()
-            };
-
-            // Increase decision level and enqueue 'next'
-            self.assigns.new_decision_level();
-            self.assigns.assign_lit(next, None);
+            }
         }
+    }
+
+    fn decide(&mut self, assumptions: &[Lit]) -> Result<Option<Lit>, LitMap<()>> {
+        while self.assigns.decision_level().offset() < assumptions.len() {
+            // Perform user provided assumption:
+            let p = assumptions[ self.assigns.decision_level().offset() ];
+            match self.assigns.of_lit(p) {
+                LBool::True => {
+                    // Dummy decision level:
+                    self.assigns.new_decision_level();
+                }
+                LBool::False => {
+                    let conflict = self.analyze.analyze_final(&self.ca, &self.assigns, !p);
+                    return Err(conflict);
+                }
+                LBool::Undef => {
+                    return Ok(Some(p));
+                }
+            }
+        }
+
+        // New variable decision:
+        self.stats.decisions += 1;
+        Ok(self.heur.pick_branch_lit(&self.assigns))
     }
 
     fn propagate_learn_backtrack(&mut self, learnt: &mut LearningGuard) -> bool {
@@ -490,10 +482,9 @@ impl Searcher {
     // Description:
     //   Simplify the clause database according to the current top-level assigment. Currently, the only
     //   thing done here is the removal of satisfied clauses, but more things can be put here.
-    fn simplify(&mut self) {
+    fn try_simplify(&mut self) {
         if !self.assigns.is_ground_level()
-            || self.simp
-                .skip(self.assigns.number_of_assigns(), self.watches.propagations)
+            || self.simp.skip(self.assigns.number_of_assigns(), self.watches.propagations)
         {
             return;
         }
