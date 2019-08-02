@@ -13,7 +13,7 @@ edition = "2018"
 clap = "2"
 env_logger = "0.6.2"
 flate2 = "1"
-log = "0.4.6"
+log = "0.4.8"
 time = "0.1"
 vec_map = "0.8"
 
