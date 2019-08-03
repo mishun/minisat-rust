@@ -169,7 +169,7 @@ impl ClauseDB {
 
                 let remove = {
                     let c = ca.view(cr);
-                    let remove = c.len() > 2 && !assigns.is_locked(ca, cr)
+                    let remove = c.len() > 2 && !assigns.is_reason_for(cr, c.head[0])
                         && (i < index_lim || c.activity() < extra_lim);
 
                     if remove {

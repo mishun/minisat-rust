@@ -84,6 +84,24 @@ impl Lit {
         ((self.0 as u8) & 1) == (val as u8)
     }
 
+    #[inline]
+    pub fn apply_sign(self, val: LBool) -> LBool {
+        unsafe {
+            let off = (((self.0 & 1) as u8) << 3) | ((val as u8) << 1);
+            mem::transmute(((0x2124 >> off) & 3) as u8)
+        }
+    }
+
+    #[inline]
+    pub fn pos_assignment(self) -> LBool {
+        unsafe { mem::transmute((!self.0 & 1) as u8) }
+    }
+
+    #[inline]
+    pub fn neg_assignment(self) -> LBool {
+        unsafe { mem::transmute((self.0 & 1) as u8) }
+    }
+
 
     #[inline]
     fn abstraction(self) -> u32 {
@@ -94,11 +112,6 @@ impl Lit {
     #[inline]
     fn var_index(self) -> usize {
         (self.0 >> 1) as usize
-    }
-
-    #[inline]
-    fn sign_index(self) -> usize {
-        (self.0 & 1) as usize
     }
 }
 
@@ -170,15 +183,17 @@ mod tests {
     #[test]
     fn test_lits() {
         let v = Var::from_index(31337);
+
+
         let pv = v.pos_lit();
-        let nv = v.neg_lit();
-
-        assert_eq!(pv, v.sign_lit(false));
-        assert_eq!(nv, v.sign_lit(true));
-
-        assert_ne!(pv, nv);
         assert_eq!(v, pv.var());
-        assert_eq!(v, nv.var());
+        assert_eq!(pv, v.sign_lit(false));
+        assert_eq!(pv.pos_assignment(), LBool::True);
+        assert_eq!(pv.neg_assignment(), LBool::False);
+
+        assert_eq!(pv.apply_sign(LBool::False), LBool::False);
+        assert_eq!(pv.apply_sign(LBool::True), LBool::True);
+        assert_eq!(pv.apply_sign(LBool::Undef), LBool::Undef);
 
         assert!(!pv.is_pos_at(LBool::False));
         assert!(pv.is_pos_at(LBool::True));
@@ -187,12 +202,25 @@ mod tests {
         assert!(!pv.is_neg_at(LBool::True));
         assert!(!pv.is_neg_at(LBool::Undef));
 
+
+        let nv = v.neg_lit();
+        assert_eq!(v, nv.var());
+        assert_eq!(nv, v.sign_lit(true));
+        assert_eq!(nv.pos_assignment(), LBool::False);
+        assert_eq!(nv.neg_assignment(), LBool::True);
+
+        assert_eq!(nv.apply_sign(LBool::False), LBool::True);
+        assert_eq!(nv.apply_sign(LBool::True), LBool::False);
+        assert_eq!(nv.apply_sign(LBool::Undef), LBool::Undef);
+
         assert!(nv.is_pos_at(LBool::False));
         assert!(!nv.is_pos_at(LBool::True));
         assert!(!nv.is_pos_at(LBool::Undef));
         assert!(!nv.is_neg_at(LBool::False));
         assert!(nv.is_neg_at(LBool::True));
         assert!(!nv.is_neg_at(LBool::Undef));
+
+        assert_ne!(pv, nv);
     }
 
     #[test]

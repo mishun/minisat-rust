@@ -212,7 +212,7 @@ impl SearchCtx {
     }
 
     pub fn decide(&mut self, assigns: &mut Assignment, ca: &ClauseAllocator, assumptions: &[Lit]) -> Result<Option<Lit>, LitMap<()>> {
-        while let Some(&p) = assumptions.get(assigns.current_level().offset()) {
+        while let Some(&p) = assumptions.get(assigns.current_level().offset_from_ground()) {
             // Perform user provided assumption:
             match assigns.of_lit(p) {
                 LBool::True => {
@@ -250,7 +250,7 @@ impl SearchCtx {
 
     fn cancel_until(&mut self, assigns: &Assignment, level: DecisionLevel) {
         let top_level = assigns.current_level();
-        for (level, trail) in assigns.trail_above_by_level(level) {
+        for (level, trail) in assigns.levels_above_rev(level) {
             for &lit in trail.iter().rev() {
                 self.heur.cancel(lit, level == top_level);
             }
@@ -638,8 +638,7 @@ fn progress_estimate(assigns: &Assignment) -> f64 {
     let vars = 1.0 / (assigns.number_of_vars() as f64);
     let mut progress = 0.0;
     let mut factor = vars;
-    for level in assigns.all_levels() {
-        let level_trail = assigns.trail_at(level);
+    for (_, level_trail) in assigns.all_levels_dir() {
         progress += factor * (level_trail.len() as f64);
         factor *= vars;
     }
