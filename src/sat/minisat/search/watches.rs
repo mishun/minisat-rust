@@ -1,4 +1,4 @@
-use std::mem;
+use std::{mem, ptr};
 use crate::sat::formula::{assignment::Assignment, clause::*, Lit, LitVec, Var};
 
 
@@ -62,10 +62,8 @@ impl Watches {
     //   Post-conditions:
     //     * the propagation queue is empty, even if there was a conflict.
     pub fn propagate(&mut self, ca: &mut ClauseAllocator, assigns: &mut Assignment) -> Option<ClauseRef> {
-        let mut confl = None;
         while let Some(p) = assigns.dequeue() {
             self.propagations += 1;
-            let false_lit = !p;
 
             {
                 let ref mut line = self.watches[p];
@@ -76,14 +74,15 @@ impl Watches {
             }
 
             unsafe {
+                let not_p = !p;
                 let p_watches = &mut self.watches[p].watchers as *mut Vec<Watcher>;
 
-                let begin = (*p_watches).as_mut_ptr();
-                let end = begin.add((*p_watches).len());
+                let watch_l = (*p_watches).as_mut_ptr();
+                let watch_r = watch_l.add((*p_watches).len());
 
-                let mut head = begin;
-                let mut tail = begin;
-                while head < end {
+                let mut head = watch_l;
+                let mut tail = watch_l;
+                'next_watch: while head < watch_r {
                     let pwi = *head;
                     head = head.offset(1);
 
@@ -93,17 +92,18 @@ impl Watches {
                         continue;
                     }
 
-                    let c = ca.edit(pwi.cref);
-                    if c.head[0] == false_lit {
-                        c.head.swap(0, 1);
+                    let clause = ca.edit(pwi.cref);
+                    //if clause.is_deleted() {
+                    //    continue;
+                    //}
+
+                    if clause.head[0] == not_p {
+                        clause.head.swap(0, 1);
                     }
-                    //assert!(c.head[1] == false_lit);
+                    //assert!(clause.head[1] == not_p);
 
                     // If 0th watch is true, then clause is already satisfied.
-                    let cw = Watcher {
-                        cref: pwi.cref,
-                        blocker: c.head[0],
-                    };
+                    let cw = Watcher { cref: pwi.cref, blocker: clause.head[0] };
                     if cw.blocker != pwi.blocker && assigns.is_assigned_pos(cw.blocker) {
                         *tail = cw;
                         tail = tail.offset(1);
@@ -111,39 +111,40 @@ impl Watches {
                     }
 
                     // Look for new watch:
-                    match c.pull_literal(1, |lit| !assigns.is_assigned_neg(lit)) {
-                        Some(lit) => {
-                            self.watches[!lit].watchers.push(cw);
-                        }
-
-                        // Did not find watch -- clause is unit under assignment:
-                        None => {
-                            *tail = cw;
-                            tail = tail.offset(1);
-
-                            if assigns.is_assigned_neg(cw.blocker) {
-                                assigns.dequeue_all();
-
-                                // Copy the remaining watches:
-                                while head < end {
-                                    *tail = *head;
-                                    head = head.offset(1);
-                                    tail = tail.offset(1);
-                                }
-
-                                confl = Some(cw.cref);
-                            } else {
-                                assigns.assign_lit(cw.blocker, Some(cw.cref));
+                    {
+                        let (clause_l, clause_r) = clause.ptr_range();
+                        let mut plit = clause_l.offset(2);
+                        while plit < clause_r {
+                            if !assigns.is_assigned_neg(*plit) {
+                                self.watches[!*plit].watchers.push(cw);
+                                ptr::swap(clause_l.offset(1), plit);
+                                continue 'next_watch;
                             }
+                            plit = plit.offset(1);
                         }
+                    }
+
+                    // Did not find watch -- clause is unit under assignment:
+                    *tail = cw;
+                    tail = tail.offset(1);
+                    if assigns.is_assigned_neg(cw.blocker) {
+                        let copied = ptr_diff(watch_l, tail);
+                        let remaining = ptr_diff(head, watch_r);
+                        ptr::copy(head, tail, remaining);
+                        (*p_watches).truncate(copied + remaining);
+
+                        return Some(cw.cref);
+                    } else {
+                        assigns.assign_lit(cw.blocker, Some(cw.cref));
                     }
                 }
 
-                (*p_watches).truncate(((tail as usize) - (begin as usize)) / mem::size_of::<Watcher>());
+                let copied = ptr_diff(watch_l, tail);
+                (*p_watches).truncate(copied);
             }
         }
 
-        confl
+        None
     }
 
     pub fn reloc_gc(&mut self, from: &mut ClauseAllocator, to: &mut ClauseAllocator) {
@@ -155,4 +156,11 @@ impl Watches {
             }
         }
     }
+}
+
+
+// TODO: replace it with future std function
+#[inline]
+fn ptr_diff<T>(a: *mut T, b: *mut T) -> usize {
+    ((b as usize) - (a as usize)) / mem::size_of::<T>()
 }

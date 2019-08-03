@@ -102,23 +102,6 @@ impl Clause {
         }
     }
 
-    #[inline]
-    pub fn pull_literal<F: FnMut(Lit) -> bool>(&mut self, place: usize, mut f: F) -> Option<Lit> {
-        unsafe {
-            let (p, end) = self.ptr_range();
-            let src = p.add(place);
-            let mut ptr = src.offset(1);
-            while ptr < end {
-                if f(*ptr) {
-                    ptr::swap(ptr, src);
-                    return Some(*src);
-                }
-                ptr = ptr.offset(1);
-            }
-            None
-        }
-    }
-
     pub fn strengthen(&mut self, p: Lit) {
         assert!(self.header.has_extra);
         unsafe {
