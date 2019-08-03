@@ -147,11 +147,13 @@ impl Solver for SimpSolver {
         match self.simp {
             None => self.core.add_clause(ps),
             Some(ref mut simp) => {
-                let res = simp.add_clause(&mut self.core.search, ps);
-                if !res {
-                    self.core.ok = false;
+                match simp.add_clause(&mut self.core.search, ps) {
+                    Ok(()) => { true }
+                    Err(()) => {
+                        self.core.ok = false;
+                        false
+                    }
                 }
-                res
             }
         }
     }
@@ -162,19 +164,23 @@ impl Solver for SimpSolver {
         }
 
         let turn_off_elim = true;
-        let result = if let Some(ref mut simp) = self.simp {
-            let result = simp.eliminate(&mut self.core.search, budget, &mut self.elimclauses);
-            if !result {
-                self.core.ok = false;
-            }
-            // TODO:
-            //                if !turn_off_elim && self.core.search.db.ca.checkGarbage(self.core.search.settings.garbage_frac) {
-            //                    simp.garbage_collect(&mut self.core.search);
-            //                }
-            result
-        } else {
-            return true;
-        };
+        let result =
+            if let Some(ref mut simp) = self.simp {
+                match simp.eliminate(&mut self.core.search, budget, &mut self.elimclauses) {
+                    Ok(()) => { true }
+                    Err(()) => {
+                        self.core.ok = false;
+                        false
+                    }
+                }
+
+                // TODO:
+                //                if !turn_off_elim && self.core.search.db.ca.checkGarbage(self.core.search.settings.garbage_frac) {
+                //                    simp.garbage_collect(&mut self.core.search);
+                //                }
+            } else {
+                return true;
+            };
 
         if turn_off_elim {
             self.simp_off();

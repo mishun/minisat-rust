@@ -3,6 +3,7 @@ use crate::sat::formula::{assignment::*, clause::*, LBool, Lit, LitMap, Var};
 use self::backtrack::BacktrackableFormula;
 use self::conflict::{AnalyzeContext, CCMinMode, Conflict};
 use self::decision_heuristic::{DecisionHeuristic, DecisionHeuristicSettings};
+use self::util::*;
 use super::budget::Budget;
 
 mod backtrack;
@@ -12,6 +13,7 @@ pub mod decision_heuristic;
 mod luby;
 pub mod simplify;
 mod random;
+mod util;
 mod watches;
 
 
@@ -252,7 +254,8 @@ impl SearchCtx {
         let top_level = assigns.current_level();
         for (level, trail) in assigns.levels_above_rev(level) {
             for &lit in trail.iter().rev() {
-                self.heur.cancel(lit, level == top_level);
+                self.heur.save_phase(lit, level == top_level);
+                self.heur.try_return_var(lit.var());
             }
         }
     }
@@ -338,7 +341,7 @@ impl Searcher {
 
     pub fn add_clause(&mut self, clause: &[Lit]) -> AddClauseRes {
         // TODO: it should be here to work identical to original MiniSat. Probably not the best place.
-        if self.settings.use_rcheck && is_implied(self, &clause) {
+        if self.settings.use_rcheck && is_implied(&mut self.bt, &mut self.ctx.heur, &clause) {
             return AddClauseRes::Consumed;
         }
 
@@ -517,7 +520,7 @@ impl Searcher {
     //   Simplify the clause database according to the current top-level assigment. Currently, the only
     //   thing done here is the removal of satisfied clauses, but more things can be put here.
     fn try_simplify(&mut self) {
-        if !self.bt.assigns.is_ground_level()
+        if !self.bt.is_ground_level()
             || self.ctx.simp.skip(self.bt.assigns.number_of_assigns(), self.bt.propagations())
         {
             return;
@@ -608,39 +611,4 @@ impl Searcher {
             del_literals: self.ctx.analyze.max_literals - self.ctx.analyze.tot_literals,
         }
     }
-}
-
-
-fn is_implied(search: &mut Searcher, c: &[Lit]) -> bool {
-    assert!(search.bt.assigns.is_ground_level());
-
-    search.bt.assigns.new_decision_level();
-    for &lit in c.iter() {
-        match search.bt.assigns.of_lit(lit) {
-            LBool::True => {
-                search.cancel_until(GROUND_LEVEL);
-                return true;
-            }
-            LBool::Undef => {
-                search.bt.assigns.assign_lit(!lit, None);
-            }
-            LBool::False => {}
-        }
-    }
-
-    let result = search.bt.propagate().is_some();
-    search.cancel_until(GROUND_LEVEL);
-    return result;
-}
-
-
-fn progress_estimate(assigns: &Assignment) -> f64 {
-    let vars = 1.0 / (assigns.number_of_vars() as f64);
-    let mut progress = 0.0;
-    let mut factor = vars;
-    for (_, level_trail) in assigns.all_levels_dir() {
-        progress += factor * (level_trail.len() as f64);
-        factor *= vars;
-    }
-    progress
 }

@@ -6,6 +6,10 @@ use crate::sat::formula::util::*;
 use super::{SearchRes, SearchSettings, Searcher};
 use super::super::budget::Budget;
 use self::subsumption_queue::*;
+use super::util::*;
+use crate::sat::minisat::search::backtrack::BacktrackableFormula;
+use crate::sat::minisat::search::clause_db::ClauseDB;
+use crate::sat::minisat::search::decision_heuristic::DecisionHeuristic;
 
 pub mod elim_clauses;
 mod elim_queue;
@@ -34,23 +38,59 @@ impl Default for SimplificatorSettings {
     }
 }
 
+impl SimplificatorSettings {
+    pub fn validate_resolvent_len(&self, len: usize) -> bool {
+        self.clause_lim == -1 || ((len as i32) <= self.clause_lim)
+    }
+
+    pub fn validate_subsumption_len(&self, len: usize) -> bool {
+        self.subsumption_lim == -1 || ((len as i32) < self.subsumption_lim)
+    }
+}
+
 
 #[derive(Default)]
 struct Stats {
-    merges: u64,
     asymm_lits: u64,
     eliminated_vars: u64,
+}
+
+
+pub struct Touched {
+    touched: VarMap<i8>,
+    n_touched: usize,
+}
+
+impl Touched {
+    pub fn new() -> Self {
+        Touched {
+            touched: VarMap::new(),
+            n_touched: 0
+        }
+    }
+
+    pub fn count(&self) -> usize {
+        self.n_touched
+    }
+
+    pub fn init_var(&mut self, v: Var) {
+        self.touched.insert(&v, 0);
+    }
+
+    pub fn add_clause(&mut self, lits: &[Lit]) {
+        for &lit in lits {
+            self.touched[&lit.var()] = 1;
+            self.n_touched += 1;
+        }
+    }
 }
 
 
 pub struct Simplificator {
     settings: SimplificatorSettings,
     stats: Stats,
-    var_status: VarMap<elim_queue::VarStatus>,
-    occurs: elim_queue::OccLists,
-    elim: elim_queue::ElimQueue,
-    touched: VarMap<i8>,
-    n_touched: usize,
+    elo: elim_queue::ElimOcc,
+    touched: Touched,
     subsumption_queue: SubsumptionQueue,
 }
 
@@ -59,38 +99,27 @@ impl Simplificator {
         Simplificator {
             settings,
             stats: Stats::default(),
-            var_status: VarMap::new(),
-            occurs: elim_queue::OccLists::new(),
-            elim: elim_queue::ElimQueue::new(),
-            touched: VarMap::new(),
-            n_touched: 0,
-            subsumption_queue: SubsumptionQueue::new(),
+            elo: elim_queue::ElimOcc::new(),
+            touched: Touched::new(),
+            subsumption_queue: SubsumptionQueue::new()
         }
     }
 
     pub fn init_var(&mut self, v: Var) {
-        self.var_status.insert(
-            &v,
-            elim_queue::VarStatus {
-                frozen: 0,
-                eliminated: 0,
-            },
-        );
-        self.occurs.init_var(&v);
-        self.touched.insert(&v, 0);
-        self.elim.init_var(v);
+        self.elo.init_var(v);
+        self.touched.init_var(v);
     }
 
-    pub fn add_clause(&mut self, search: &mut Searcher, ps: &[Lit]) -> bool {
+    pub fn add_clause(&mut self, search: &mut Searcher, ps: &[Lit]) -> Result<(), ()> {
         //#ifndef NDEBUG
         for l in ps.iter() {
-            assert_eq!(self.var_status[&l.var()].eliminated, 0);
+            assert_eq!(self.elo.var_status[&l.var()].eliminated, 0);
         }
         //#endif
 
         match search.add_clause(ps) {
-            super::AddClauseRes::UnSAT => false,
-            super::AddClauseRes::Consumed => true,
+            super::AddClauseRes::UnSAT => Err(()),
+            super::AddClauseRes::Consumed => Ok(()),
             super::AddClauseRes::Added(cr) => {
                 // NOTE: the clause is added to the queue immediately and then
                 // again during 'gather_touched_clauses()'. If nothing happens
@@ -99,13 +128,10 @@ impl Simplificator {
                 // consequence of how backward subsumption is used to mimic
                 // forward subsumption.
                 self.subsumption_queue.push(cr);
-                for &lit in search.bt.ca.literals(cr) {
-                    self.occurs.push_occ(&lit.var(), cr);
-                    self.touched[&lit.var()] = 1;
-                    self.n_touched += 1;
-                    self.elim.bump_lit_occ(&lit, 1);
-                }
-                true
+                let lits = search.bt.ca.literals(cr);
+                self.elo.add_clause(cr, lits);
+                self.touched.add_clause(lits);
+                Ok(())
             }
         }
     }
@@ -122,7 +148,7 @@ impl Simplificator {
 
         // Assumptions must be temporarily frozen to run variable elimination:
         for lit in assumptions.iter() {
-            let ref mut st = self.var_status[&lit.var()];
+            let ref mut st = self.elo.var_status[&lit.var()];
 
             // If an assumption has been eliminated, remember it.
             assert_eq!(st.eliminated, 0);
@@ -133,13 +159,13 @@ impl Simplificator {
             }
         }
 
-        if search.preprocess() && self.eliminate(&mut search, budget, elimclauses) {
+        if search.preprocess() && self.eliminate(&mut search, budget, elimclauses).is_ok() {
             match search.search(ss, budget, assumptions) {
                 SearchRes::Interrupted(prog, ns) => {
                     // Unfreeze the assumptions that were frozen:
                     for &v in extra_frozen.iter() {
-                        self.var_status[&v].frozen = 0;
-                        self.elim.update_elim_heap(v, &self.var_status, &ns.bt.assigns);
+                        self.elo.var_status[&v].frozen = 0;
+                        self.elo.elim.update_elim_heap(v, &self.elo.var_status, &ns.bt.assigns);
                     }
 
                     SearchRes::Interrupted(prog, ns)
@@ -157,54 +183,46 @@ impl Simplificator {
         search: &mut Searcher,
         budget: &Budget,
         elimclauses: &mut elim_clauses::ElimClauses,
-    ) -> bool {
+    ) -> Result<(), ()> {
         // Main simplification loop:
-        while self.n_touched > 0 || self.subsumption_queue.assigns_left(&search.bt.assigns) > 0
-            || self.elim.len() > 0
+        while self.touched.count() > 0 || self.subsumption_queue.assigns_left(&search.bt.assigns) > 0
+            || self.elo.elim.len() > 0
         {
             self.gather_touched_clauses(&mut search.bt.ca);
-
-            if !self.backward_subsumption_check(search, budget, true) {
-                return false;
-            }
+            self.backward_subsumption_check(&mut search.bt, &mut search.ctx.db, budget, true)?;
 
             // Empty elim_heap and return immediately on user-interrupt:
             if budget.interrupted() {
                 assert_eq!(self.subsumption_queue.assigns_left(&search.bt.assigns), 0);
                 assert!(self.subsumption_queue.is_empty());
-                assert_eq!(self.n_touched, 0);
-                self.elim.clear();
-                return true;
+                assert_eq!(self.touched.count(), 0);
+                self.elo.elim.clear();
+                break;
             }
 
-            trace!("ELIM: vars = {}", self.elim.len());
+            trace!("ELIM: vars = {}", self.elo.elim.len());
             let mut cnt = 0;
-            while let Some(var) = self.elim.pop() {
+            while let Some(var) = self.elo.elim.pop() {
                 if budget.interrupted() {
                     break;
                 }
-                if self.var_status[&var].eliminated == 0 && search.bt.assigns.is_undef(var) {
+                if self.elo.var_status[&var].eliminated == 0 && search.bt.assigns.is_undef(var) {
                     if cnt % 100 == 0 {
-                        trace!("elimination left: {:10}", self.elim.len());
+                        trace!("elimination left: {:10}", self.elo.elim.len());
                     }
 
                     if self.settings.use_asymm {
                         // Temporarily freeze variable. Otherwise, it would immediately end up on the queue again:
-                        let was_frozen = self.var_status[&var].frozen;
-                        self.var_status[&var].frozen = 1;
-                        if !self.asymm_var(search, budget, var) {
-                            return false;
-                        }
-                        self.var_status[&var].frozen = was_frozen;
+                        let was_frozen = self.elo.var_status[&var].frozen;
+                        self.elo.var_status[&var].frozen = 1;
+                        self.asymm_var(&mut search.bt, &mut search.ctx.db, &mut search.ctx.heur, budget, var)?;
+                        self.elo.var_status[&var].frozen = was_frozen;
                     }
 
                     // At this point, the variable may have been set by asymmetric branching, so check it
                     // again. Also, don't eliminate frozen variables:
-                    if self.settings.use_elim && search.bt.assigns.is_undef(var)
-                        && self.var_status[&var].frozen == 0
-                        && !self.eliminate_var(search, budget, elimclauses, var)
-                    {
-                        return false;
+                    if self.settings.use_elim && search.bt.assigns.is_undef(var) && self.elo.var_status[&var].frozen == 0 {
+                        self.eliminate_var(search, budget, elimclauses, var)?;
                     }
 
                     if search.bt.ca.check_garbage(self.settings.simp_garbage_frac) {
@@ -218,14 +236,14 @@ impl Simplificator {
             assert!(self.subsumption_queue.is_empty());
         }
 
-        true
+        Ok(())
     }
 
-    fn asymm_var(&mut self, search: &mut Searcher, budget: &Budget, v: Var) -> bool {
+    fn asymm_var(&mut self, bt: &mut BacktrackableFormula, db: &mut ClauseDB, heur: &mut DecisionHeuristic, budget: &Budget, v: Var) -> Result<(), ()> {
         let cls = {
-            let cls = self.occurs.lookup(&v, &search.bt.ca);
-            if !search.bt.assigns.is_undef(v) || cls.len() == 0 {
-                return true;
+            let cls = self.elo.occurs.lookup(&bt.ca, v);
+            if !bt.assigns.is_undef(v) || cls.len() == 0 {
+                return Ok(());
             }
             cls.clone()
         };
@@ -238,60 +256,55 @@ impl Simplificator {
                 continue;
             }
 
-            if let Some(l) = asymmetric_branching(search, v, cr) {
-                if search.bt.ca.view(cr).len() > 2 {
+            if let Some(l) = asymmetric_branching(bt, heur, v, cr) {
+                if bt.ca.view(cr).len() > 2 {
                     bug = true;
                 }
 
                 self.stats.asymm_lits += 1;
-                if !self.strengthen_clause(search, cr, l) {
-                    return false;
-                }
+                self.strengthen_clause(bt, db, cr, l)?;
             }
         }
 
-        self.backward_subsumption_check(search, budget, false)
+        self.backward_subsumption_check(bt, db, budget, false)
     }
 
-    fn remove_clause(&mut self, search: &mut Searcher, cr: ClauseRef) {
-        for &lit in search.bt.ca.view(cr).lits() {
-            self.elim.bump_lit_occ(&lit, -1);
-            self.elim.update_elim_heap(lit.var(), &self.var_status, &search.bt.assigns);
-            self.occurs.smudge(&lit.var());
-        }
-
-        search.bt.lazy_detach(cr);
-        search.ctx.db.remove_clause(&mut search.bt.ca, cr);
+    fn remove_clause(&mut self, bt: &mut BacktrackableFormula, db: &mut ClauseDB, cr: ClauseRef) {
+        self.elo.remove_clause(&bt.assigns, bt.ca.literals(cr));
+        bt.lazy_detach(cr);
+        db.remove_clause(&mut bt.ca, cr);
     }
 
-    fn strengthen_clause(&mut self, search: &mut Searcher, cr: ClauseRef, l: Lit) -> bool {
-        assert!(search.bt.assigns.is_ground_level());
+    fn strengthen_clause(&mut self, bt: &mut BacktrackableFormula, db: &mut ClauseDB, cr: ClauseRef, l: Lit) -> Result<(), ()> {
+        assert!(bt.is_ground_level());
 
         // FIX: this is too inefficient but would be nice to have (properly implemented)
         // if (!find(subsumption_queue, &c))
         self.subsumption_queue.push(cr);
 
-        let len = search.bt.ca.view(cr).len();
+        let len = bt.ca.view(cr).len();
         if len == 2 {
-            self.remove_clause(search, cr);
+            self.remove_clause(bt, db, cr);
             let unit = {
-                let c = search.bt.ca.edit(cr);
+                let c = bt.ca.edit(cr);
                 c.strengthen(l);
                 c.head[0]
             }; // TODO: it produces clauses of length 1. Not good.
-            try_assign_lit(&mut search.bt.assigns, unit, None) && search.bt.propagate().is_none()
+            if try_assign_lit(&mut bt.assigns, unit, None) && bt.propagate().is_none() {
+                Ok(())
+            } else {
+                Err(())
+            }
         } else {
-            search.bt.force_detach(cr);
-            search.ctx.db.edit_clause(&mut search.bt.ca, cr, |c| {
+            bt.force_detach(cr);
+            db.edit_clause(&mut bt.ca, cr, |c| {
                 c.strengthen(l);
                 assert_eq!(c.len(), len - 1);
             });
-            search.bt.attach(cr);
+            bt.attach(cr);
 
-            self.occurs.remove_occ(&l.var(), cr);
-            self.elim.bump_lit_occ(&l, -1);
-            self.elim.update_elim_heap(l.var(), &self.var_status, &search.bt.assigns);
-            true
+            self.elo.remove_lit(&bt.assigns, l, cr);
+            Ok(())
         }
     }
 
@@ -301,50 +314,55 @@ impl Simplificator {
         budget: &Budget,
         elimclauses: &mut elim_clauses::ElimClauses,
         v: Var,
-    ) -> bool {
+    ) -> Result<(), ()> {
         assert!({
-            let ref st = self.var_status[&v];
+            let ref st = self.elo.var_status[&v];
             st.frozen == 0 && st.eliminated == 0
         });
         assert!(search.bt.assigns.is_undef(v));
 
+        let cls = self.elo.occurs.lookup(&search.bt.ca, v).clone();
+
         // Split the occurrences into positive and negative:
-        let cls = self.occurs.lookup(&v, &search.bt.ca).clone();
-        let mut pos = Vec::new();
-        let mut neg = Vec::new();
-        for &cr in cls.iter() {
-            for l in search.bt.ca.view(cr).lits() {
-                if l.var() == v {
-                    if l.sign() {
-                        neg.push(cr);
-                    } else {
-                        pos.push(cr);
+        let (pos, neg) = {
+            let mut pos = Vec::new();
+            let mut neg = Vec::new();
+            for &cr in cls.iter() {
+                for l in search.bt.ca.view(cr).lits() {
+                    if l.var() == v {
+                        if l.sign() {
+                            neg.push(cr);
+                        } else {
+                            pos.push(cr);
+                        }
+                        break;
                     }
-                    break;
                 }
             }
-        }
+            (pos, neg)
+        };
 
         // Check wether the increase in number of clauses stays within the allowed ('grow'). Moreover, no
         // clause must exceed the limit on the maximal clause size (if it is set):
-        let mut cnt = 0;
-        for &pr in pos.iter() {
-            for &nr in neg.iter() {
-                self.stats.merges += 1;
-                if let Some(resolvent) = merge(v, search.bt.ca.literals(pr), search.bt.ca.literals(nr)) {
-                    cnt += 1;
-                    if cnt > cls.len() + self.settings.grow
-                        || (self.settings.clause_lim != -1
-                            && (resolvent.len() as i32) > self.settings.clause_lim)
-                    {
-                        return true;
+        let resolvents = {
+            let max_resolvents = self.settings.grow + pos.len() + neg.len();
+            let mut resolvents = Vec::with_capacity(max_resolvents + 1);
+            for &pr in pos.iter() {
+                for &nr in neg.iter() {
+                    if let Some(resolvent) = merge(v, search.bt.ca.literals(pr), search.bt.ca.literals(nr)) {
+                        let len = resolvent.len();
+                        resolvents.push(resolvent);
+                        if resolvents.len() > max_resolvents || !self.settings.validate_resolvent_len(len) {
+                            return Ok(());
+                        }
                     }
                 }
             }
-        }
+            resolvents
+        };
 
         // Delete and store old clauses:
-        self.var_status[&v].eliminated = 1;
+        self.elo.var_status[&v].eliminated = 1;
         search.ctx.heur.set_decision_var(v, false);
         self.stats.eliminated_vars += 1;
 
@@ -361,44 +379,38 @@ impl Simplificator {
         }
 
         for &cr in cls.iter() {
-            self.remove_clause(search, cr);
+            self.remove_clause(&mut search.bt, &mut search.ctx.db, cr);
         }
 
         // Produce clauses in cross product:
-        for &pr in pos.iter() {
-            for &nr in neg.iter() {
-                self.stats.merges += 1;
-                if let Some(resolvent) = merge(v, search.bt.ca.literals(pr), search.bt.ca.literals(nr)) {
-                    if !self.add_clause(search, &resolvent[..]) {
-                        return false;
-                    }
-                }
-            }
+        for resolvent in resolvents.iter() {
+            self.add_clause(search, resolvent.as_slice())?
         }
 
         // Free occurs list for this variable:
-        self.occurs.clear_var(&v);
+        self.elo.occurs.clear_var(&v);
 
         // Free watchers lists for this variable, if possible:
         search.bt.try_clear_var(v);
 
-        self.backward_subsumption_check(search, budget, false)
+        self.backward_subsumption_check(&mut search.bt, &mut search.ctx.db, budget, false)
     }
 
     // Backward subsumption + backward subsumption resolution
     fn backward_subsumption_check(
         &mut self,
-        search: &mut Searcher,
+        bt: &mut BacktrackableFormula,
+        db: &mut ClauseDB,
         budget: &Budget,
         verbose: bool,
-    ) -> bool {
-        assert!(search.bt.assigns.is_ground_level());
+    ) -> Result<(), ()> {
+        assert!(bt.is_ground_level());
 
         if verbose {
             trace!(
                 "BWD-SUB: queue = {}, trail = {}",
                 self.subsumption_queue.len(),
-                self.subsumption_queue.assigns_left(&search.bt.assigns)
+                self.subsumption_queue.assigns_left(&bt.assigns)
             );
         }
 
@@ -406,10 +418,10 @@ impl Simplificator {
         let mut subsumed = 0u64;
         let mut deleted_literals = 0u64;
 
-        while let Some(job) = self.subsumption_queue.pop(&search.bt.ca, &search.bt.assigns) {
+        while let Some(job) = self.subsumption_queue.pop(&bt.ca, &bt.assigns) {
             // Empty subsumption queue and return immediately on user-interrupt:
             if budget.interrupted() {
-                self.subsumption_queue.clear(&search.bt.assigns);
+                self.subsumption_queue.clear(&bt.assigns);
                 break;
             }
 
@@ -425,70 +437,67 @@ impl Simplificator {
 
             match job {
                 SubsumptionJob::Assign(unit) => {
-                    for &cj in self.occurs.lookup(&unit.var(), &search.bt.ca).clone().iter() {
-                        if {
-                            let c = search.bt.ca.view(cj);
-                            !c.is_deleted()
-                                && (self.settings.subsumption_lim == -1
-                                    || (c.len() as i32) < self.settings.subsumption_lim)
-                        } {
-                            match unit_subsumes(unit, search.bt.ca.view(cj)) {
-                                Subsumes::Different => {}
+                    for &cj in self.elo.occurs.lookup(&bt.ca, unit.var()).clone().iter() {
+                        let c = bt.ca.view(cj);
+                        if c.is_deleted() || !self.settings.validate_subsumption_len(c.len()) {
+                            continue;
+                        }
 
-                                Subsumes::Exact => {
-                                    subsumed += 1;
-                                    self.remove_clause(search, cj);
-                                }
+                        match unit_subsumes(unit, c) {
+                            Subsumes::Different => {}
 
-                                Subsumes::LitSign(l) => {
-                                    deleted_literals += 1;
-                                    if !self.strengthen_clause(search, cj, !l) {
-                                        return false;
-                                    }
-                                }
+                            Subsumes::Exact => {
+                                subsumed += 1;
+                                self.remove_clause(bt, db, cj);
+                            }
+
+                            Subsumes::LitSign(l) => {
+                                deleted_literals += 1;
+                                self.strengthen_clause(bt, db, cj, !l)?;
                             }
                         }
                     }
                 }
 
-                SubsumptionJob::Clause(cr) => {
+                SubsumptionJob::Clause(sub_cr) => {
                     let best = {
-                        let c = search.bt.ca.view(cr);
+                        let c = bt.ca.view(sub_cr);
                         let mut best = c.head[0].var();
                         for &lit in &c.lits()[1..] {
                             // TODO: why not use n_occ?
-                            if self.occurs.occs_dirty(lit.var()) < self.occurs.occs_dirty(best) {
+                            if self.elo.occurs.occs_dirty(lit.var()) < self.elo.occurs.occs_dirty(best) {
                                 best = lit.var();
                             }
                         }
                         best
                     };
 
-                    for &cj in self.occurs.lookup(&best, &search.bt.ca).clone().iter() {
-                        if search.bt.ca.is_deleted(cr) {
+                    for &cj in self.elo.occurs.lookup(&bt.ca, best).clone().iter() {
+                        let sub_c = bt.ca.view(sub_cr);
+                        if sub_c.is_deleted() {
                             break;
                         }
 
-                        if cj != cr && {
-                            let c = search.bt.ca.view(cj);
-                            !c.is_deleted()
-                                && (self.settings.subsumption_lim == -1
-                                    || (c.len() as i32) < self.settings.subsumption_lim)
-                        } {
-                            match subsumes(search.bt.ca.view(cr), search.bt.ca.view(cj)) {
-                                Subsumes::Different => {}
+                        if cj == sub_cr {
+                            continue;
+                        }
 
-                                Subsumes::Exact => {
-                                    subsumed += 1;
-                                    self.remove_clause(search, cj);
-                                }
+                        let c = bt.ca.view(cj);
+                        if c.is_deleted() || !self.settings.validate_subsumption_len(c.len()) {
+                            continue;
+                        }
 
-                                Subsumes::LitSign(l) => {
-                                    deleted_literals += 1;
-                                    if !self.strengthen_clause(search, cj, !l) {
-                                        return false;
-                                    }
-                                }
+                        match subsumes(sub_c, c) {
+                            Subsumes::Different => {}
+
+                            Subsumes::Exact => {
+                                subsumed += 1;
+                                self.remove_clause(bt, db, cj);
+                            }
+
+                            Subsumes::LitSign(l) => {
+                                deleted_literals += 1;
+                                self.strengthen_clause(bt, db, cj, !l)?;
                             }
                         }
                     }
@@ -496,19 +505,21 @@ impl Simplificator {
             }
         }
 
-        true
+        Ok(())
     }
 
     fn gather_touched_clauses(&mut self, ca: &mut ClauseAllocator) {
-        if self.n_touched == 0 {
+        if self.touched.count() == 0 {
             return;
         }
 
-        self.subsumption_queue.remark_touched(ca, false);
+        for &cr in self.subsumption_queue.iter() {
+            ca.edit(cr).set_touched(true);
+        }
 
-        for (v, touched) in self.touched.iter_mut() {
-            if *touched != 0 && self.var_status[&v].eliminated == 0 {
-                for &cr in self.occurs.lookup(&v, ca) {
+        for (v, touched) in self.touched.touched.iter_mut() {
+            if *touched != 0 && self.elo.var_status[&v].eliminated == 0 {
+                for &cr in self.elo.occurs.lookup(ca, v) {
                     let c = ca.edit(cr);
                     if !c.is_touched() {
                         self.subsumption_queue.push(cr);
@@ -519,8 +530,11 @@ impl Simplificator {
             }
         }
 
-        self.subsumption_queue.remark_touched(ca, true);
-        self.n_touched = 0;
+        for &cr in self.subsumption_queue.iter() {
+            ca.edit(cr).set_touched(false);
+        }
+
+        self.touched.n_touched = 0;
     }
 
     fn garbage_collect(&mut self, search: &mut Searcher) {
@@ -530,9 +544,10 @@ impl Simplificator {
     }
 
     fn reloc_gc(&mut self, from: &mut ClauseAllocator, to: &mut ClauseAllocator) {
-        self.occurs.reloc_gc(from, to);
+        self.elo.occurs.reloc_gc(from, to);
         self.subsumption_queue.reloc_gc(from, to);
     }
+
 
     // TODO: remove
     pub fn off(search: &mut Searcher) {
@@ -548,33 +563,4 @@ impl Simplificator {
         search.bt.ca.set_extra_clause_field(true);
         search.ctx.db.settings.remove_satisfied = false;
     }
-}
-
-
-fn asymmetric_branching(search: &mut Searcher, v: Var, cr: ClauseRef) -> Option<Lit> {
-    assert!(search.bt.assigns.is_ground_level());
-
-    let l = {
-        let c = search.bt.ca.view(cr);
-        if c.is_deleted() || satisfied_with_assignment(c.lits(), &search.bt.assigns) {
-            return None;
-        }
-
-        search.bt.assigns.new_decision_level();
-
-        let mut vl = None;
-        for &lit in c.lits() {
-            if v == lit.var() {
-                vl = Some(lit);
-            } else if search.bt.assigns.is_undef(lit.var()) {
-                search.bt.assigns.assign_lit(!lit, None);
-            }
-        }
-
-        vl.unwrap()
-    };
-
-    let res = search.bt.propagate();
-    search.cancel_until(GROUND_LEVEL);
-    res.map(|_| l)
 }

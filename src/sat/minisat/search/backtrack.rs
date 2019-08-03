@@ -51,6 +51,10 @@ impl BacktrackableFormula {
     }
 
 
+    pub fn is_ground_level(&self) -> bool {
+        self.assigns.current_level().is_ground()
+    }
+
     pub fn push_decision(&mut self, next: Lit) {
         // Increase decision level and enqueue 'next'
         self.assigns.new_decision_level();

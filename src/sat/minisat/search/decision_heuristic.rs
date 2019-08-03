@@ -101,7 +101,8 @@ impl DecisionHeuristic {
         }
     }
 
-    pub fn cancel(&mut self, lit: Lit, top_level: bool) {
+    #[inline]
+    pub fn save_phase(&mut self, lit: Lit, top_level: bool) {
         let ref mut ln = self.var[&lit.var()];
         match self.settings.phase_saving {
             PhaseSaving::Full => {
@@ -112,9 +113,13 @@ impl DecisionHeuristic {
             }
             _ => {}
         }
+    }
+
+    pub fn try_return_var(&mut self, var: Var) {
+        let ref mut ln = self.var[&var];
         if ln.decision {
             let ref act = self.activity;
-            self.queue.insert(lit.var(), |a, b| act[a] > act[b]);
+            self.queue.insert(var, |a, b| act[a] > act[b]);
         }
     }
 

@@ -1,9 +1,9 @@
-use std::collections::vec_deque::VecDeque;
+use std::collections::vec_deque;
 use crate::sat::formula::{assignment::*, clause::*, Lit};
 
 
 pub struct SubsumptionQueue {
-    subsumption_queue: VecDeque<ClauseRef>,
+    subsumption_queue: vec_deque::VecDeque<ClauseRef>,
     bwdsub_assigns: usize,
 }
 
@@ -15,7 +15,7 @@ pub enum SubsumptionJob {
 impl SubsumptionQueue {
     pub fn new() -> Self {
         SubsumptionQueue {
-            subsumption_queue: VecDeque::new(),
+            subsumption_queue: vec_deque::VecDeque::new(),
             bwdsub_assigns: 0,
         }
     }
@@ -62,13 +62,8 @@ impl SubsumptionQueue {
         self.bwdsub_assigns = assigns.number_of_ground_assigns();
     }
 
-    pub fn remark_touched(&mut self, ca: &mut ClauseAllocator, src: bool) {
-        for &cr in self.subsumption_queue.iter() {
-            let c = ca.edit(cr);
-            if c.is_touched() == src {
-                c.set_touched(!src);
-            }
-        }
+    pub fn iter(&self) -> vec_deque::Iter<ClauseRef> {
+        self.subsumption_queue.iter()
     }
 
     pub fn reloc_gc(&mut self, from: &mut ClauseAllocator, to: &mut ClauseAllocator) {

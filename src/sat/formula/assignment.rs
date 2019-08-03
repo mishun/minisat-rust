@@ -171,7 +171,7 @@ impl Assignment {
         DirIter {
             assign: self,
             target: self.lim.len(),
-            level: 0
+            level: 1
         }
     }
 
