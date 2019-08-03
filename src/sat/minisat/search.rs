@@ -1,9 +1,11 @@
 use crate::sat;
 use crate::sat::formula::{assignment::*, clause::*, LBool, Lit, LitMap, Var};
+use self::backtrack::BacktrackableFormula;
 use self::conflict::{AnalyzeContext, CCMinMode, Conflict};
 use self::decision_heuristic::{DecisionHeuristic, DecisionHeuristicSettings};
 use super::budget::Budget;
 
+mod backtrack;
 pub mod conflict;
 pub mod clause_db;
 pub mod decision_heuristic;
@@ -147,10 +149,10 @@ pub struct SearchSettings {
 }
 
 
-pub enum AddClauseRes<'c> {
+pub enum AddClauseRes {
     UnSAT,
     Consumed,
-    Added(&'c Clause, ClauseRef),
+    Added(ClauseRef),
 }
 
 
@@ -185,16 +187,125 @@ enum LoopRes {
 }
 
 
-pub struct Searcher {
-    settings: SearcherSettings,
+pub struct SearchCtx {
     stats: Stats,
-    ca: ClauseAllocator,
     db: clause_db::ClauseDB,
-    assigns: Assignment,       // The current assignments.
-    watches: watches::Watches, // 'watches[lit]' is a list of constraints watching 'lit' (will go there if literal becomes true).
     heur: DecisionHeuristic,
     analyze: AnalyzeContext,
     simp: SimplifyGuard,
+}
+
+impl SearchCtx {
+    pub fn new(db_set: clause_db::ClauseDBSettings, heur_set: DecisionHeuristicSettings, ccmin_mode: CCMinMode) -> Self {
+        SearchCtx {
+            stats: Stats::default(),
+            db: clause_db::ClauseDB::new(db_set),
+            heur: DecisionHeuristic::new(heur_set),
+            analyze: AnalyzeContext::new(ccmin_mode),
+            simp: SimplifyGuard::new(),
+        }
+    }
+
+    pub fn init_var(&mut self, v: Var, upol: Option<bool>, dvar: bool) {
+        self.heur.init_var(v, upol, dvar);
+        self.analyze.init_var(v);
+    }
+
+    pub fn decide(&mut self, assigns: &mut Assignment, ca: &ClauseAllocator, assumptions: &[Lit]) -> Result<Option<Lit>, LitMap<()>> {
+        while let Some(&p) = assumptions.get(assigns.current_level().offset()) {
+            // Perform user provided assumption:
+            match assigns.of_lit(p) {
+                LBool::True => {
+                    // Dummy decision level:
+                    assigns.new_decision_level();
+                }
+                LBool::False => {
+                    let conflict = self.analyze.analyze_final(ca, assigns, !p);
+                    return Err(conflict);
+                }
+                LBool::Undef => {
+                    return Ok(Some(p));
+                }
+            }
+        }
+
+        // New variable decision:
+        self.stats.decisions += 1;
+        Ok(self.heur.pick_branch_lit(assigns))
+    }
+
+    fn analyze(&mut self, assigns: &Assignment, ca: &mut ClauseAllocator, confl: ClauseRef) -> conflict::Conflict {
+        self.analyze.analyze(assigns, ca,
+            confl,
+            {
+                let heur = &mut self.heur;
+                move |v| heur.bump_activity(&v)
+            },
+            {
+                let db = &mut self.db;
+                move |ca, c| db.bump_activity(ca, c)
+            }
+        )
+    }
+
+    fn cancel_until(&mut self, assigns: &Assignment, level: DecisionLevel) {
+        let top_level = assigns.current_level();
+        for (level, trail) in assigns.trail_above_by_level(level) {
+            for &lit in trail.iter().rev() {
+                self.heur.cancel(lit, level == top_level);
+            }
+        }
+    }
+
+    fn handle_conflict(&mut self, learnt: &mut LearningGuard, bt: &mut BacktrackableFormula, confl: ClauseRef)
+        -> Option<(DecisionLevel, Lit, Option<ClauseRef>)>
+    {
+        self.stats.conflicts += 1;
+
+        let res =
+            match self.analyze(&bt.assigns, &mut bt.ca, confl) {
+                Conflict::Ground => {
+                    return None;
+                }
+
+                Conflict::Unit(level, unit) => {
+                    self.cancel_until(&bt.assigns, level);
+                    (level, unit, None)
+                }
+
+                Conflict::Learned(level, lit, clause) => {
+                    self.cancel_until(&bt.assigns, level);
+                    let cr = self.db.learn_clause(&mut bt.ca, &clause[..]);
+                    (level, lit, Some(cr))
+                }
+            };
+
+        self.heur.decay_activity();
+        self.db.decay_activity();
+
+        if learnt.bump() {
+            info!(
+                "| {:9} | {:7} {:8} {:8} | {:8} {:8} {:6.0} | {:6.3} % |",
+                self.stats.conflicts,
+                self.heur.dec_vars - bt.assigns.number_of_ground_assigns(),
+                self.db.stats.num_clauses,
+                self.db.stats.clauses_literals,
+                learnt.border() as u64,
+                self.db.stats.num_learnts,
+                (self.db.stats.learnts_literals as f64) / (self.db.stats.num_learnts as f64),
+                progress_estimate(&bt.assigns) * 100.0
+            );
+        }
+
+        Some(res)
+    }
+}
+
+
+pub struct Searcher {
+    settings: SearcherSettings,
+    bt: backtrack::BacktrackableFormula,
+    ctx: SearchCtx
 }
 
 impl Searcher {
@@ -206,30 +317,22 @@ impl Searcher {
     ) -> Self {
         Searcher {
             settings,
-            stats: Stats::default(),
-            ca: ClauseAllocator::new_empty(),
-            db: clause_db::ClauseDB::new(db_set),
-            assigns: Assignment::new(),
-            watches: watches::Watches::new(),
-            heur: DecisionHeuristic::new(heur_set),
-            analyze: AnalyzeContext::new(ccmin_mode),
-            simp: SimplifyGuard::new(),
+            bt: backtrack::BacktrackableFormula::new(),
+            ctx: SearchCtx::new(db_set, heur_set, ccmin_mode)
         }
     }
 
     pub fn number_of_vars(&self) -> usize {
-        self.assigns.number_of_vars()
+        self.bt.assigns.number_of_vars()
     }
 
     pub fn number_of_clauses(&self) -> usize {
-        self.db.stats.num_clauses
+        self.ctx.db.stats.num_clauses
     }
 
     pub fn new_var(&mut self, upol: Option<bool>, dvar: bool) -> Var {
-        let v = self.assigns.new_var();
-        self.watches.init_var(v);
-        self.heur.init_var(v, upol, dvar);
-        self.analyze.init_var(v);
+        let v = self.bt.new_var();
+        self.ctx.init_var(v, upol, dvar);
         v
     }
 
@@ -245,12 +348,12 @@ impl Searcher {
             // Check if clause is satisfied and remove false/duplicate literals:
             ps.sort();
             ps.dedup();
-            ps.retain(|&lit| !self.assigns.is_assigned_neg(lit));
+            ps.retain(|&lit| !self.bt.assigns.is_assigned_neg(lit));
 
             {
                 let mut prev = None;
                 for &lit in ps.iter() {
-                    if self.assigns.is_assigned_pos(lit) || prev == Some(!lit) {
+                    if self.bt.assigns.is_assigned_pos(lit) || prev == Some(!lit) {
                         return AddClauseRes::Consumed;
                     }
                     prev = Some(lit);
@@ -264,23 +367,23 @@ impl Searcher {
             [] => { AddClauseRes::UnSAT }
 
             [unit] => {
-                self.assigns.assign_lit(*unit, None);
-                match self.watches.propagate(&mut self.ca, &mut self.assigns) {
+                self.bt.assigns.assign_lit(*unit, None);
+                match self.bt.propagate() {
                     None => AddClauseRes::Consumed,
                     Some(_) => AddClauseRes::UnSAT,
                 }
             }
 
             lits => {
-                let (c, cr) = self.db.add_clause(&mut self.ca, lits);
-                self.watches.watch_clause(c, cr);
-                AddClauseRes::Added(c, cr)
+                let cr = self.ctx.db.add_clause(&mut self.bt.ca, lits);
+                self.bt.attach(cr);
+                AddClauseRes::Added(cr)
             }
         }
     }
 
     pub fn preprocess(&mut self) -> bool {
-        if let None = self.watches.propagate(&mut self.ca, &mut self.assigns) {
+        if let None = self.bt.propagate() {
             self.try_simplify();
             true
         } else {
@@ -301,9 +404,9 @@ impl Searcher {
     }
 
     fn search_internal(mut self, ss: &SearchSettings, budget: &Budget, assumptions: &[Lit]) -> SearchRes {
-        self.stats.solves += 1;
+        self.ctx.stats.solves += 1;
         let mut learnt = LearningGuard::new(ss.learn);
-        learnt.reset(self.db.stats.num_clauses);
+        learnt.reset(self.ctx.db.stats.num_clauses);
 
         let mut curr_restarts = 0;
         loop {
@@ -315,7 +418,7 @@ impl Searcher {
 
                 LoopRes::SAT => {
                     let stats = self.stats();
-                    return SearchRes::SAT(self.assigns, stats);
+                    return SearchRes::SAT(self.bt.assigns, stats);
                 }
 
                 LoopRes::UnSAT => {
@@ -329,7 +432,6 @@ impl Searcher {
                 }
 
                 LoopRes::Interrupted(c) => {
-                    self.cancel_until(GROUND_LEVEL);
                     return SearchRes::Interrupted(c, self);
                 }
             }
@@ -351,21 +453,21 @@ impl Searcher {
         learnt: &mut LearningGuard,
         assumptions: &[Lit],
     ) -> LoopRes {
-        self.stats.starts += 1;
+        self.ctx.stats.starts += 1;
 
-        let confl_limit = self.stats.conflicts + nof_conflicts;
+        let confl_limit = self.ctx.stats.conflicts + nof_conflicts;
         loop {
             if !self.propagate_learn_backtrack(learnt) {
                 return LoopRes::UnSAT;
             }
 
-            if !budget.within(self.stats.conflicts, self.watches.propagations) {
-                let progress_estimate = progress_estimate(&self.assigns);
+            if !budget.within(self.ctx.stats.conflicts, self.bt.propagations()) {
+                let progress_estimate = progress_estimate(&self.bt.assigns);
                 self.cancel_until(GROUND_LEVEL);
                 return LoopRes::Interrupted(progress_estimate);
             }
 
-            if self.stats.conflicts >= confl_limit {
+            if self.ctx.stats.conflicts >= confl_limit {
                 self.cancel_until(GROUND_LEVEL);
                 return LoopRes::Restart;
             }
@@ -373,108 +475,41 @@ impl Searcher {
             // Simplify the set of problem clauses:
             self.try_simplify();
 
-            if (self.db.learnts() as f64) >= learnt.border() + (self.assigns.number_of_assigns() as f64)
-            {
+            if (self.ctx.db.number_of_learnts() as f64) >= learnt.border() + (self.bt.assigns.number_of_assigns() as f64) {
                 // Reduce the set of learnt clauses:
                 {
-                    let watches = &mut self.watches;
-                    self.db.reduce(&mut self.ca, &mut self.assigns, move |c| {
+                    let watches = &mut self.bt.watches;
+                    self.ctx.db.reduce(&mut self.bt.ca, &self.bt.assigns, move |c| {
                         watches.unwatch_clause_lazy(c);
                     });
                 }
 
-                if self.ca.check_garbage(self.settings.garbage_frac) {
-                    self.garbage_collect();
-                }
+                self.try_garbage_collect();
             }
 
-            match self.decide(assumptions) {
+            match self.ctx.decide(&mut self.bt.assigns, &self.bt.ca, assumptions) {
                 Err(confl) => { return LoopRes::AssumpsConfl(confl) }
                 Ok(None) => { return LoopRes::SAT } // Model found:
                 Ok(Some(next)) => {
-                    // Increase decision level and enqueue 'next'
-                    self.assigns.new_decision_level();
-                    self.assigns.assign_lit(next, None);
+                    self.bt.push_decision(next);
                 }
             }
         }
-    }
-
-    fn decide(&mut self, assumptions: &[Lit]) -> Result<Option<Lit>, LitMap<()>> {
-        while let Some(&p) = assumptions.get(self.assigns.current_level().offset()) {
-            // Perform user provided assumption:
-            match self.assigns.of_lit(p) {
-                LBool::True => {
-                    // Dummy decision level:
-                    self.assigns.new_decision_level();
-                }
-                LBool::False => {
-                    let conflict = self.analyze.analyze_final(&self.ca, &self.assigns, !p);
-                    return Err(conflict);
-                }
-                LBool::Undef => {
-                    return Ok(Some(p));
-                }
-            }
-        }
-
-        // New variable decision:
-        self.stats.decisions += 1;
-        Ok(self.heur.pick_branch_lit(&self.assigns))
     }
 
     fn propagate_learn_backtrack(&mut self, learnt: &mut LearningGuard) -> bool {
-        while let Some(confl) = self.watches.propagate(&mut self.ca, &mut self.assigns) {
-            self.stats.conflicts += 1;
-
-            match self.analyze.analyze(
-                &self.assigns,
-                &mut self.ca,
-                confl,
-                {
-                    let heur = &mut self.heur;
-                    move |v| heur.bump_activity(&v)
-                },
-                {
-                    let db = &mut self.db;
-                    move |ca, c| db.bump_activity(ca, c)
-                },
-            ) {
-                Conflict::Ground => {
-                    return false;
+        while let Some(confl) = self.bt.propagate() {
+            match self.ctx.handle_conflict(learnt, &mut self.bt, confl) {
+                None => { return false; }
+                Some((level, lit, reason)) => {
+                    self.bt.assigns.backtrack_to(level);
+                    self.bt.assigns.assign_lit(lit, reason);
+                    for &cr in reason.iter() {
+                        self.bt.attach(cr);
+                    }
                 }
-
-                Conflict::Unit(level, unit) => {
-                    self.cancel_until(level);
-                    self.assigns.assign_lit(unit, None);
-                }
-
-                Conflict::Learned(level, lit, clause) => {
-                    self.cancel_until(level);
-                    let (c, cr) = self.db.learn_clause(&mut self.ca, &clause[..]);
-                    self.watches.watch_clause(c, cr);
-                    self.assigns.assign_lit(lit, Some(cr));
-                }
-            }
-
-            self.heur.decay_activity();
-            self.db.decay_activity();
-
-            if learnt.bump() {
-                info!(
-                    "| {:9} | {:7} {:8} {:8} | {:8} {:8} {:6.0} | {:6.3} % |",
-                    self.stats.conflicts,
-                    self.heur.dec_vars - self.assigns.number_of_ground_assigns(),
-                    self.db.stats.num_clauses,
-                    self.db.stats.clauses_literals,
-                    learnt.border() as u64,
-                    self.db.stats.num_learnts,
-                    (self.db.stats.learnts_literals as f64) / (self.db.stats.num_learnts as f64),
-                    progress_estimate(&self.assigns) * 100.0
-                );
             }
         }
-
         true
     }
 
@@ -482,18 +517,17 @@ impl Searcher {
     //   Simplify the clause database according to the current top-level assigment. Currently, the only
     //   thing done here is the removal of satisfied clauses, but more things can be put here.
     fn try_simplify(&mut self) {
-        if !self.assigns.is_ground_level()
-            || self.simp.skip(self.assigns.number_of_assigns(), self.watches.propagations)
+        if !self.bt.assigns.is_ground_level()
+            || self.ctx.simp.skip(self.bt.assigns.number_of_assigns(), self.bt.propagations())
         {
             return;
         }
 
         {
-            let watches = &mut self.watches;
-            self.db
-                .remove_satisfied(&mut self.ca, &mut self.assigns, move |c| {
-                    watches.unwatch_clause_lazy(c);
-                });
+            let watches = &mut self.bt.watches;
+            self.ctx.db.remove_satisfied(&mut self.bt.ca, &self.bt.assigns, move |c| {
+                watches.unwatch_clause_lazy(c);
+            });
         }
 
         //        // TODO: why if?
@@ -520,81 +554,81 @@ impl Searcher {
         //            self.released_vars.clear();
         //        }
 
-        if self.ca.check_garbage(self.settings.garbage_frac) {
-            self.garbage_collect();
-        }
+        self.try_garbage_collect();
 
-        self.heur.rebuild_order_heap(&self.assigns);
-        self.simp.set_next(
-            self.assigns.number_of_assigns(),
-            self.watches.propagations,
-            self.db.stats.clauses_literals + self.db.stats.learnts_literals,
+        self.ctx.heur.rebuild_order_heap(&self.bt.assigns);
+        self.ctx.simp.set_next(
+            self.bt.assigns.number_of_assigns(),
+            self.bt.propagations(),
+            self.ctx.db.stats.clauses_literals + self.ctx.db.stats.learnts_literals,
         ); // (shouldn't depend on stats really, but it will do for now)
     }
 
     // Revert to the state at given level (keeping all assignment at 'level' but not beyond).
     fn cancel_until(&mut self, target_level: DecisionLevel) {
-        let ref mut heur = self.heur;
-        let top_level = self.assigns.current_level();
-        self.assigns.rewind_until_level(target_level, |level, lit| {
-            heur.cancel(lit, level == top_level);
-        });
+        self.ctx.cancel_until(&self.bt.assigns, target_level);
+        self.bt.assigns.backtrack_to(target_level);
+    }
+
+
+    fn try_garbage_collect(&mut self) {
+        if self.bt.ca.check_garbage(self.settings.garbage_frac) {
+            self.garbage_collect();
+        }
     }
 
     fn garbage_collect(&mut self) {
         // Initialize the next region to a size corresponding to the estimated utilization degree. This
         // is not precise but should avoid some unnecessary reallocations for the new region:
-
-        let to = ClauseAllocator::new_for_gc(&self.ca);
+        let to = ClauseAllocator::new_for_gc(&self.bt.ca);
         self.reloc_gc(to);
     }
 
     fn reloc_gc(&mut self, mut to: ClauseAllocator) {
-        self.watches.reloc_gc(&mut self.ca, &mut to);
-        self.assigns.reloc_gc(&mut self.ca, &mut to);
-        self.db.reloc_gc(&mut self.ca, &mut to);
+        self.bt.reloc_gc(&mut to);
+        self.ctx.db.reloc_gc(&mut self.bt.ca, &mut to);
 
         debug!(
             "|  Garbage collection:   {:12} bytes => {:12} bytes             |",
-            self.ca.size(),
-            to.size()
+            self.bt.ca.size(), to.size()
         );
-        self.ca = to;
+        self.bt.ca = to;
     }
+
 
     pub fn stats(&self) -> sat::Stats {
         sat::Stats {
-            solves: self.stats.solves,
-            restarts: self.stats.starts,
-            decisions: self.stats.decisions,
-            rnd_decisions: self.heur.rnd_decisions,
-            conflicts: self.stats.conflicts,
-            propagations: self.watches.propagations,
-            tot_literals: self.analyze.tot_literals,
-            del_literals: self.analyze.max_literals - self.analyze.tot_literals,
+            solves: self.ctx.stats.solves,
+            restarts: self.ctx.stats.starts,
+            decisions: self.ctx.stats.decisions,
+            rnd_decisions: self.ctx.heur.rnd_decisions,
+            conflicts: self.ctx.stats.conflicts,
+            propagations: self.bt.propagations(),
+            tot_literals: self.ctx.analyze.tot_literals,
+            del_literals: self.ctx.analyze.max_literals - self.ctx.analyze.tot_literals,
         }
     }
 }
 
 
 fn is_implied(search: &mut Searcher, c: &[Lit]) -> bool {
-    assert!(search.assigns.is_ground_level());
+    assert!(search.bt.assigns.is_ground_level());
 
-    search.assigns.new_decision_level();
+    search.bt.assigns.new_decision_level();
     for &lit in c.iter() {
-        match search.assigns.of_lit(lit) {
+        match search.bt.assigns.of_lit(lit) {
             LBool::True => {
                 search.cancel_until(GROUND_LEVEL);
                 return true;
             }
             LBool::Undef => {
-                search.assigns.assign_lit(!lit, None);
+                search.bt.assigns.assign_lit(!lit, None);
             }
             LBool::False => {}
         }
     }
 
-    let result = search.watches.propagate(&mut search.ca, &mut search.assigns).is_some();
+    let result = search.bt.propagate().is_some();
     search.cancel_until(GROUND_LEVEL);
     return result;
 }

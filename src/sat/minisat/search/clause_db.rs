@@ -67,23 +67,19 @@ impl ClauseDB {
         }
     }
 
-    pub fn add_clause<'c>(&mut self, ca: &'c mut ClauseAllocator, literals: &[Lit]) -> (&'c Clause, ClauseRef) {
+    pub fn add_clause<'c>(&mut self, ca: &'c mut ClauseAllocator, literals: &[Lit]) -> ClauseRef {
         let (c, cr) = ca.alloc(literals, false);
         self.stats.add(c);
         self.clauses.push(cr);
-        (c, cr)
+        cr
     }
 
-    pub fn learn_clause<'c>(&mut self, ca: &'c mut ClauseAllocator, literals: &[Lit]) -> (&'c Clause, ClauseRef) {
-        let cr = {
-            let (c, cr) = ca.alloc(literals, true);
-            self.stats.add(c);
-            cr
-        };
-
+    pub fn learn_clause<'c>(&mut self, ca: &mut ClauseAllocator, literals: &[Lit]) -> ClauseRef {
+        let (c, cr) = ca.alloc(literals, true);
+        self.stats.add(c);
         self.learnts.push(cr);
         self.bump_activity(ca, cr);
-        (ca.view(cr), cr)
+        cr
     }
 
     pub fn remove_clause(&mut self, ca: &mut ClauseAllocator, cr: ClauseRef) {
@@ -129,7 +125,7 @@ impl ClauseDB {
         self.cla_inc *= 1.0 / self.settings.clause_decay;
     }
 
-    pub fn learnts(&self) -> usize {
+    pub fn number_of_learnts(&self) -> usize {
         self.learnts.len()
     }
 
@@ -139,7 +135,7 @@ impl ClauseDB {
     pub fn reduce<F: FnMut(&Clause) -> ()>(
         &mut self,
         ca: &mut ClauseAllocator,
-        assigns: &mut Assignment,
+        assigns: &Assignment,
         mut notify: F,
     ) {
         self.learnts.sort_by(|&rx, &ry| {
@@ -198,7 +194,7 @@ impl ClauseDB {
     fn retain_clause<F: FnMut(&Clause) -> ()>(
         stats: &mut Stats,
         ca: &mut ClauseAllocator,
-        assigns: &mut Assignment,
+        assigns: &Assignment,
         notify: &mut F,
         cr: ClauseRef,
     ) -> bool {
@@ -220,12 +216,9 @@ impl ClauseDB {
         }
     }
 
-    pub fn remove_satisfied<F: FnMut(&Clause) -> ()>(
-        &mut self,
-        ca: &mut ClauseAllocator,
-        assigns: &mut Assignment,
-        mut notify: F,
-    ) {
+    pub fn remove_satisfied<F>(&mut self, ca: &mut ClauseAllocator, assigns: &Assignment, mut notify: F)
+        where F: FnMut(&Clause) -> ()
+    {
         // Remove satisfied clauses:
         let stats = &mut self.stats;
         self.learnts.retain(|&cr| {

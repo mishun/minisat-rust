@@ -37,6 +37,35 @@ impl Iterator for DecisionLevelUpIter {
 }
 
 
+pub struct BacktrackingIter<'a> {
+    assign: &'a Assignment,
+    target: usize,
+    level: usize
+}
+
+impl<'a> Iterator for BacktrackingIter<'a> {
+    type Item = (DecisionLevel, &'a[Lit]);
+
+    #[inline]
+    fn next(&mut self) -> Option<(DecisionLevel, &'a[Lit])> {
+        if self.level > self.target {
+            let level = self.level;
+            self.level -= 1;
+
+            let head = if level == 0 { 0 } else { self.assign.lim[level - 1] };
+            if level < self.assign.lim.len() {
+                let tail = self.assign.lim[level];
+                Some((DecisionLevel(level), &self.assign.trail[head..tail]))
+            } else {
+                Some((DecisionLevel(level), &self.assign.trail[head..]))
+            }
+        } else {
+            None
+        }
+    }
+}
+
+
 pub struct VarData {
     pub reason: Option<clause::ClauseRef>,
     pub level: DecisionLevel,
@@ -147,22 +176,19 @@ impl Assignment {
         self.trail.push(lit);
     }
 
-    #[inline]
-    pub fn rewind_until_level<F>(&mut self, target_level: DecisionLevel, mut f: F)
-        where F: FnMut(DecisionLevel, Lit) -> ()
-    {
-        while self.lim.len() > target_level.0 {
-            let level = self.trail.len();
-            let bottom = self.lim.pop().unwrap();
-            while self.trail.len() > bottom {
-                let lit = self.trail.pop().unwrap();
 
-                f(DecisionLevel(level), lit);
-
+    // Revert to the state at given level (keeping all assignment at 'level' but not beyond).
+    pub fn backtrack_to(&mut self, target_level: DecisionLevel) {
+        if target_level.0 < self.lim.len() {
+            let target = self.lim[target_level.0];
+            for &lit in &self.trail[target..] {
                 let ref mut line = self.assignment[lit.var_index()];
                 line.assign = [LBool::Undef, LBool::Undef];
                 line.vd.reason = None;
             }
+
+            self.trail.truncate(target);
+            self.lim.truncate(target_level.0);
         }
 
         self.qhead = cmp::min(self.qhead, self.trail.len());
@@ -208,6 +234,15 @@ impl Assignment {
             &self.trail[head..]
         } else {
             &[]
+        }
+    }
+
+    #[inline]
+    pub fn trail_above_by_level(&self, target_level: DecisionLevel) -> BacktrackingIter {
+        BacktrackingIter {
+            assign: self,
+            target: target_level.0,
+            level: self.lim.len()
         }
     }
 
