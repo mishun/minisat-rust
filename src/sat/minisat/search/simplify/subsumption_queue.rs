@@ -45,6 +45,12 @@ impl SubsumptionQueue {
         self.subsumption_queue.push_back(cr);
     }
 
+    pub fn try_push(&mut self, cr: ClauseRef) {
+        // FIX: this is too inefficient but would be nice to have (properly implemented)
+        // if (!find(subsumption_queue, &c))
+        self.push(cr);
+    }
+
     pub fn len(&self) -> usize {
         self.subsumption_queue.len()
     }

@@ -246,8 +246,12 @@ impl Assignment {
 impl fmt::Debug for Assignment {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for (level, level_trail) in self.all_levels_dir() {
-            if level_trail.len() > 0 {
-                write!(f, "[{}:", level.offset_from_ground())?;
+            if level.is_ground() || level_trail.len() > 0 {
+                if level.is_ground() {
+                    write!(f, "[GROUND:")?;
+                } else {
+                    write!(f, "[{}:", level.offset_from_ground())?;
+                }
                 for lit in level_trail {
                     write!(f, " {:?}", lit)?;
                 }
@@ -255,17 +259,6 @@ impl fmt::Debug for Assignment {
             }
         }
         Ok(())
-    }
-}
-
-pub fn try_assign_lit(assigns: &mut Assignment, p: Lit, from: Option<ClauseRef>) -> bool {
-    match assigns.of_lit(p) {
-        LBool::True => true,
-        LBool::False => false,
-        LBool::Undef => {
-            assigns.assign_lit(p, from);
-            true
-        }
     }
 }
 

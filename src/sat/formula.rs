@@ -5,7 +5,6 @@ mod allocator;
 pub mod assignment;
 pub mod clause;
 mod index_map;
-pub mod subsumes;
 pub mod util;
 
 
@@ -104,7 +103,7 @@ impl Lit {
 
 
     #[inline]
-    fn abstraction(self) -> u32 {
+    pub fn abstraction(self) -> u32 {
         1 << ((self.0 >> 1) & 31)
     }
 

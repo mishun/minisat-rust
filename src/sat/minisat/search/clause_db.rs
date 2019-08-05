@@ -26,23 +26,23 @@ pub struct Stats {
 }
 
 impl Stats {
-    fn add(&mut self, c: &Clause) {
-        if c.is_learnt() {
+    fn add(&mut self, clause: &Clause) {
+        if clause.header.learnt {
             self.num_learnts += 1;
-            self.learnts_literals += c.len() as u64;
+            self.learnts_literals += clause.len() as u64;
         } else {
             self.num_clauses += 1;
-            self.clauses_literals += c.len() as u64;
+            self.clauses_literals += clause.len() as u64;
         }
     }
 
-    fn del(&mut self, c: &Clause) {
-        if c.is_learnt() {
+    fn del(&mut self, clause: &Clause) {
+        if clause.header.learnt {
             self.num_learnts -= 1;
-            self.learnts_literals -= c.len() as u64;
+            self.learnts_literals -= clause.len() as u64;
         } else {
             self.num_clauses -= 1;
-            self.clauses_literals -= c.len() as u64;
+            self.clauses_literals -= clause.len() as u64;
         }
     }
 }
@@ -68,14 +68,28 @@ impl ClauseDB {
     }
 
     pub fn add_clause<'c>(&mut self, ca: &'c mut ClauseAllocator, literals: &[Lit]) -> ClauseRef {
-        let (c, cr) = ca.alloc(literals, false);
+        let header = ClauseHeader {
+            learnt: false,
+            has_extra: ca.extra_clause_field,
+            activity: 0.0,
+            abstraction: if ca.extra_clause_field { calc_abstraction(literals) } else { 0 }
+        };
+
+        let (c, cr) = ca.alloc(literals, header);
         self.stats.add(c);
         self.clauses.push(cr);
         cr
     }
 
     pub fn learn_clause<'c>(&mut self, ca: &mut ClauseAllocator, literals: &[Lit]) -> ClauseRef {
-        let (c, cr) = ca.alloc(literals, true);
+        let header = ClauseHeader {
+            learnt: true,
+            has_extra: true,
+            activity: 0.0,
+            abstraction: 0
+        };
+
+        let (c, cr) = ca.alloc(literals, header);
         self.stats.add(c);
         self.learnts.push(cr);
         self.bump_activity(ca, cr);
@@ -102,12 +116,12 @@ impl ClauseDB {
     pub fn bump_activity(&mut self, ca: &mut ClauseAllocator, cr: ClauseRef) {
         let new = {
             let c = ca.edit(cr);
-            if !c.is_learnt() {
+            if !c.header.learnt {
                 return;
             }
 
-            let new = c.activity() + self.cla_inc;
-            c.set_activity(new);
+            let new = c.header.activity as f64 + self.cla_inc;
+            c.header.activity = new as f32;
             new
         };
 
@@ -115,8 +129,8 @@ impl ClauseDB {
             self.cla_inc *= 1e-20;
             for &cri in self.learnts.iter() {
                 let c = ca.edit(cri);
-                let scaled = c.activity() * 1e-20;
-                c.set_activity(scaled);
+                let scaled = (c.header.activity as f64) * 1e-20;
+                c.header.activity = scaled as f32;
             }
         }
     }
@@ -149,7 +163,7 @@ impl ClauseDB {
             } else if y.len() == 2 {
                 Ordering::Less
             } else {
-                x.activity().partial_cmp(&y.activity()).unwrap()
+                x.header.activity.partial_cmp(&y.header.activity).unwrap()
             }
         });
 
@@ -170,7 +184,7 @@ impl ClauseDB {
                 let remove = {
                     let c = ca.view(cr);
                     let remove = c.len() > 2 && !assigns.is_reason_for(cr, c.head[0])
-                        && (i < index_lim || c.activity() < extra_lim);
+                        && (i < index_lim || (c.header.activity as f64) < extra_lim);
 
                     if remove {
                         notify(c);
@@ -206,12 +220,8 @@ impl ClauseDB {
             ca.free(cr);
             false
         } else {
-            let c = ca.edit(cr);
-            assert!({
-                let [c0, c1] = c.head;
-                assigns.is_undef(c0.var()) && assigns.is_undef(c1.var())
-            });
-            c.retain_suffix(2, |lit| !assigns.is_assigned_neg(lit));
+            let clause = ca.edit(cr);
+            retain_clause(clause, assigns);
             true
         }
     }
@@ -257,6 +267,28 @@ impl ClauseDB {
                 }
             }
             self.clauses.truncate(j);
+        }
+    }
+}
+
+fn retain_clause(clause: &mut Clause, assigns: &Assignment) {
+    assert!({
+        let [c0, c1] = clause.head;
+        assigns.is_undef(c0.var()) && assigns.is_undef(c1.var())
+    });
+
+    unsafe {
+        let (mut l, mut r) = clause.ptr_range();
+        l = l.add(2);
+
+        while l < r {
+            if !assigns.is_assigned_neg(*l) {
+                l = l.offset(1);
+            } else {
+                clause.shrink_by(1);
+                r = r.offset(-1);
+                *l = *r;
+            }
         }
     }
 }

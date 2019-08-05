@@ -5,8 +5,8 @@ use crate::sat::formula::clause::*;
 
 #[derive(Debug)]
 pub struct VarStatus {
-    pub frozen: i8,
-    pub eliminated: i8,
+    pub frozen: bool,
+    pub eliminated: bool,
 }
 
 
@@ -52,9 +52,7 @@ impl ElimQueue {
         let ref n_occ = self.n_occ;
         if self.heap.contains(&v) {
             self.heap.update(&v, move |a, b| Self::before(n_occ, a, b));
-        } else if var_status[&v].frozen == 0 && var_status[&v].eliminated == 0
-            && assigns.is_undef(v)
-        {
+        } else if !var_status[&v].frozen && !var_status[&v].eliminated && assigns.is_undef(v) {
             self.heap.insert(v, move |a, b| Self::before(n_occ, a, b));
         }
     }
@@ -168,7 +166,7 @@ impl ElimOcc {
     }
 
     pub fn init_var(&mut self, v: Var) {
-        self.var_status.insert(&v, VarStatus { frozen: 0, eliminated: 0 });
+        self.var_status.insert(&v, VarStatus { frozen: false, eliminated: false });
         self.occurs.init_var(&v);
         self.elim.init_var(v);
     }
@@ -180,7 +178,7 @@ impl ElimOcc {
         }
     }
 
-    pub fn remove_clause(&mut self, assigns: &Assignment, lits: &[Lit]) {
+    pub fn smudge_clause(&mut self, assigns: &Assignment, lits: &[Lit]) {
         for &lit in lits {
             self.elim.bump_lit_occ(&lit, -1);
             self.elim.update_elim_heap(lit.var(), &self.var_status, assigns);
@@ -189,8 +187,16 @@ impl ElimOcc {
     }
 
     pub fn remove_lit(&mut self, assigns: &Assignment, l: Lit, cr: ClauseRef) {
-        self.occurs.remove_occ(&l.var(), cr);
         self.elim.bump_lit_occ(&l, -1);
         self.elim.update_elim_heap(l.var(), &self.var_status, assigns);
+        self.occurs.remove_occ(&l.var(), cr);
+    }
+
+    pub fn is_eliminated(&self, var: Var) -> bool {
+        self.var_status[&var].eliminated
+    }
+
+    pub fn is_frozen(&self, var: Var) -> bool {
+        self.var_status[&var].frozen
     }
 }

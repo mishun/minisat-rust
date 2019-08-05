@@ -1,5 +1,4 @@
-use super::Lit;
-use super::clause::*;
+use crate::formula::{clause::*, Lit};
 
 
 pub enum Subsumes {
@@ -9,10 +8,10 @@ pub enum Subsumes {
 }
 
 pub fn subsumes(this: &Clause, other: &Clause) -> Subsumes {
-    assert!(!this.is_learnt());
-    assert!(!other.is_learnt());
+    assert!(!this.header.learnt);
+    assert!(!other.header.learnt);
 
-    if other.len() < this.len() || (this.abstraction() & !other.abstraction()) != 0 {
+    if other.len() < this.len() || (this.header.abstraction & !other.header.abstraction) != 0 {
         return Subsumes::Different;
     }
 
@@ -45,9 +44,9 @@ pub fn subsumes(this: &Clause, other: &Clause) -> Subsumes {
 }
 
 pub fn unit_subsumes(unit: Lit, c: &Clause) -> Subsumes {
-    assert!(!c.is_learnt());
+    assert!(!c.header.learnt);
 
-    if unit.abstraction() & !c.abstraction() != 0 {
+    if unit.abstraction() & !c.header.abstraction != 0 {
         return Subsumes::Different;
     }
 

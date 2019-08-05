@@ -1,22 +1,22 @@
 use std::{fmt, ptr, slice};
-use super::{allocator, util, Lit};
+use super::{allocator, Lit};
 
 
 pub const MIN_CLAUSE_SIZE : usize = 2;
 
 
 #[derive(Clone, Copy)]
-struct ClauseHeader {
-    mark: u32,
-    learnt: bool,
-    has_extra: bool,
-    data_act: f32,
-    data_abs: u32,
-    reloced: Option<ClauseRef>,
+pub struct ClauseHeader {
+    pub learnt: bool,
+    pub has_extra: bool,
+    pub activity: f32,
+    pub abstraction: u32
 }
 
 pub struct Clause {
-    header: ClauseHeader,
+    mark: u32,
+    pub header: ClauseHeader,
+    reloced: Option<ClauseRef>,
     len: u32,
     pub head: [Lit; MIN_CLAUSE_SIZE]
 }
@@ -25,6 +25,11 @@ impl Clause {
     #[inline]
     pub fn len(&self) -> usize {
         self.len as usize
+    }
+
+    #[inline]
+    pub fn shrink_by(&mut self, shrink: usize) {
+        self.len -= shrink as u32;
     }
 
     #[inline]
@@ -46,80 +51,22 @@ impl Clause {
 
 
     pub fn is_deleted(&self) -> bool {
-        (self.header.mark & 1) != 0
+        (self.mark & 1) != 0
     }
 
     fn mark_deleted(&mut self) {
-        self.header.mark |= 1;
+        self.mark |= 1;
     }
 
     pub fn is_touched(&self) -> bool {
-        (self.header.mark & 2) != 0
+        (self.mark & 2) != 0
     }
 
     pub fn set_touched(&mut self, b: bool) {
         if b {
-            self.header.mark |= 2;
+            self.mark |= 2;
         } else {
-            self.header.mark &= !2;
-        }
-    }
-
-    pub fn is_learnt(&self) -> bool {
-        self.header.learnt
-    }
-
-    pub fn activity(&self) -> f64 {
-        assert!(self.header.has_extra);
-        self.header.data_act as f64
-    }
-
-    pub fn set_activity(&mut self, act: f64) {
-        assert!(self.header.has_extra);
-        self.header.data_act = act as f32;
-    }
-
-    pub fn abstraction(&self) -> u32 {
-        assert!(self.header.has_extra);
-        self.header.data_abs
-    }
-
-
-    #[inline]
-    pub fn retain_suffix<F: Fn(Lit) -> bool>(&mut self, base: usize, f: F) {
-        unsafe {
-            let (mut l, mut r) = self.ptr_range();
-            l = l.add(base);
-            while l < r {
-                if f(*l) {
-                    l = l.offset(1);
-                } else {
-                    self.len -= 1;
-                    r = r.offset(-1);
-                    *l = *r;
-                }
-            }
-        }
-    }
-
-    pub fn strengthen(&mut self, p: Lit) {
-        assert!(self.header.has_extra);
-        unsafe {
-            let (mut l, r) = self.ptr_range();
-            while l < r {
-                if *l == p {
-                    l = l.offset(1);
-                    while l < r {
-                        *l.offset(-1) = *l;
-                        l = l.offset(1);
-                    }
-
-                    self.len -= 1;
-                    self.header.data_abs = util::calc_abstraction(self.lits());
-                    return;
-                }
-                l = l.offset(1);
-            }
+            self.mark &= !2;
         }
     }
 }
@@ -150,7 +97,7 @@ pub struct ClauseRef(allocator::Ref);
 pub struct ClauseAllocator {
     ra: allocator::RegionAllocator<Clause>,
     lc: LegacyCounter,
-    extra_clause_field: bool,
+    pub extra_clause_field: bool,
 }
 
 impl ClauseAllocator {
@@ -170,30 +117,17 @@ impl ClauseAllocator {
         }
     }
 
-    pub fn alloc(&mut self, literals: &[Lit], learnt: bool) -> (&Clause, ClauseRef) {
+    pub fn alloc(&mut self, literals: &[Lit], header: ClauseHeader) -> (&Clause, ClauseRef) {
         let len = literals.len();
         assert!(len >= MIN_CLAUSE_SIZE);
         unsafe {
             let (clause, cref) = self.ra.allocate_with_extra::<Lit>(len - MIN_CLAUSE_SIZE);
 
-            clause.header = ClauseHeader {
-                mark: 0,
-                learnt,
-                has_extra: learnt | self.extra_clause_field,
-                data_act: 0.0,
-                data_abs: 0,
-                reloced: None,
-            };
+            clause.mark = 0;
+            clause.header = header;
+            clause.reloced = None;
             clause.len = len as u32;
             ptr::copy_nonoverlapping(literals.as_ptr(), clause.head.as_mut_ptr(), len);
-
-            if clause.header.has_extra {
-                if clause.header.learnt {
-                    clause.header.data_act = 0.0;
-                } else {
-                    clause.header.data_abs = util::calc_abstraction(clause.lits());
-                }
-            }
 
             self.lc.add(clause);
             (clause, ClauseRef(cref))
@@ -206,8 +140,9 @@ impl ClauseAllocator {
         unsafe {
             let (clause, cref) = self.ra.allocate_with_extra::<Lit>(len - MIN_CLAUSE_SIZE);
 
+            clause.mark = src.mark;
             clause.header = src.header;
-            clause.header.has_extra |= self.extra_clause_field;
+            clause.reloced = None;
             clause.len = src.len;
             ptr::copy_nonoverlapping(src.head.as_ptr(), clause.head.as_mut_ptr(), len);
 
@@ -221,10 +156,10 @@ impl ClauseAllocator {
         if c.is_deleted() {
             None
         } else {
-            if let None = c.header.reloced {
-                c.header.reloced = Some(to.reloc(c));
+            if let None = c.reloced {
+                c.reloced = Some(to.reloc(c));
             }
-            c.header.reloced
+            c.reloced
         }
     }
 
