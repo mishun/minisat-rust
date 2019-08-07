@@ -62,9 +62,11 @@ impl BacktrackableFormula {
     }
 
 
-    pub fn reloc_gc(&mut self, to: &mut ClauseAllocator) {
-        self.watches.reloc_gc(&mut self.ca, to);
-        self.assigns.reloc_gc(&mut self.ca, to);
+    pub fn gc(&mut self) -> ClauseGC {
+        let mut gc = self.ca.gc();
+        self.watches.gc(&mut gc);
+        self.assigns.gc(&mut gc);
+        gc
     }
 
 /*

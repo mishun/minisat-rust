@@ -135,16 +135,17 @@ impl OccLists {
         }
     }
 
-    pub fn reloc_gc(&mut self, from: &mut ClauseAllocator, to: &mut ClauseAllocator) {
+    pub fn gc(&mut self, gc: &mut ClauseGC) {
         for (_, ol) in self.occs.iter_mut() {
-            if ol.dirty {
-                ol.occs.retain(|&cr| !from.is_deleted(cr));
-                ol.dirty = false;
+            let mut j = 0;
+            for i in 0..ol.occs.len() {
+                if let Some(cr) = gc.relocate(ol.occs[i]) {
+                    ol.occs[j] = cr;
+                    j += 1;
+                }
             }
-
-            for occ in ol.occs.iter_mut() {
-                *occ = from.reloc_to(to, *occ).unwrap();
-            }
+            ol.occs.truncate(j);
+            ol.dirty = false;
         }
     }
 }

@@ -576,26 +576,14 @@ impl Searcher {
 
     fn try_garbage_collect(&mut self) {
         if self.bt.ca.check_garbage(self.settings.garbage_frac) {
-            self.garbage_collect();
+            self.gc();
         }
     }
 
-    fn garbage_collect(&mut self) {
-        // Initialize the next region to a size corresponding to the estimated utilization degree. This
-        // is not precise but should avoid some unnecessary reallocations for the new region:
-        let to = ClauseAllocator::new_for_gc(&self.bt.ca);
-        self.reloc_gc(to);
-    }
-
-    fn reloc_gc(&mut self, mut to: ClauseAllocator) {
-        self.bt.reloc_gc(&mut to);
-        self.ctx.db.reloc_gc(&mut self.bt.ca, &mut to);
-
-        debug!(
-            "|  Garbage collection:   {:12} bytes => {:12} bytes             |",
-            self.bt.ca.size(), to.size()
-        );
-        self.bt.ca = to;
+    fn gc(&mut self) -> ClauseGC {
+        let mut gc = self.bt.gc();
+        self.ctx.db.gc(&mut gc);
+        gc
     }
 
 

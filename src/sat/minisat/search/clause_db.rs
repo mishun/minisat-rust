@@ -244,12 +244,12 @@ impl ClauseDB {
         }
     }
 
-    pub fn reloc_gc(&mut self, from: &mut ClauseAllocator, to: &mut ClauseAllocator) {
+    pub fn gc(&mut self, gc: &mut ClauseGC) {
         // All learnt:
         {
             let mut j = 0;
             for i in 0..self.learnts.len() {
-                if let Some(cr) = from.reloc_to(to, self.learnts[i]) {
+                if let Some(cr) = gc.relocate(self.learnts[i]) {
                     self.learnts[j] = cr;
                     j += 1;
                 }
@@ -261,7 +261,7 @@ impl ClauseDB {
         {
             let mut j = 0;
             for i in 0..self.clauses.len() {
-                if let Some(cr) = from.reloc_to(to, self.clauses[i]) {
+                if let Some(cr) = gc.relocate(self.clauses[i]) {
                     self.clauses[j] = cr;
                     j += 1;
                 }

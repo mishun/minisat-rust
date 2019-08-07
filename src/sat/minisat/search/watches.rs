@@ -65,20 +65,12 @@ impl Watches {
         while let Some(p) = assigns.dequeue() {
             self.propagations += 1;
 
-            {
-                let ref mut line = self.watches[p];
-                if line.dirty {
-                    line.watchers.retain(|w| !ca.is_deleted(w.cref));
-                    line.dirty = false;
-                }
-            }
-
             unsafe {
                 let not_p = !p;
-                let p_watches = &mut self.watches[p].watchers as *mut Vec<Watcher>;
+                let p_watches = &mut self.watches[p] as *mut WatchesLine;
 
-                let watch_l = (*p_watches).as_mut_ptr();
-                let watch_r = watch_l.add((*p_watches).len());
+                let watch_l = (*p_watches).watchers.as_mut_ptr();
+                let watch_r = watch_l.add((*p_watches).watchers.len());
 
                 let mut head = watch_l;
                 let mut tail = watch_l;
@@ -86,16 +78,16 @@ impl Watches {
                     let pwi = *head;
                     head = head.offset(1);
 
+                    let clause = ca.edit(pwi.cref);
+                    if clause.is_deleted() {
+                        continue;
+                    }
+
                     if assigns.is_assigned_pos(pwi.blocker) {
                         *tail = pwi;
                         tail = tail.offset(1);
                         continue;
                     }
-
-                    let clause = ca.edit(pwi.cref);
-                    //if clause.is_deleted() {
-                    //    continue;
-                    //}
 
                     if clause.head[0] == not_p {
                         clause.head.swap(0, 1);
@@ -128,10 +120,22 @@ impl Watches {
                     *tail = cw;
                     tail = tail.offset(1);
                     if assigns.is_assigned_neg(cw.blocker) {
-                        let copied = ptr_diff(watch_l, tail);
-                        let remaining = ptr_diff(head, watch_r);
-                        ptr::copy(head, tail, remaining);
-                        (*p_watches).truncate(copied + remaining);
+                        if (*p_watches).dirty {
+                            while head < watch_r {
+                                if !ca.is_deleted((*head).cref) {
+                                    *tail = *head;
+                                    tail = tail.offset(1);
+                                }
+                                head = head.offset(1);
+                            }
+
+                            (*p_watches).dirty = false;
+                            (*p_watches).watchers.truncate(ptr_diff(watch_l, tail));
+                        } else {
+                            let remaining = ptr_diff(head, watch_r);
+                            ptr::copy(head, tail, remaining);
+                            (*p_watches).watchers.truncate(ptr_diff(watch_l, tail) + remaining);
+                        }
 
                         return Some(cw.cref);
                     } else {
@@ -139,21 +143,28 @@ impl Watches {
                     }
                 }
 
-                let copied = ptr_diff(watch_l, tail);
-                (*p_watches).truncate(copied);
+                (*p_watches).dirty = false;
+                (*p_watches).watchers.truncate(ptr_diff(watch_l, tail));
             }
         }
 
         None
     }
 
-    pub fn reloc_gc(&mut self, from: &mut ClauseAllocator, to: &mut ClauseAllocator) {
+    pub fn gc(&mut self, gc: &mut ClauseGC) {
         for line in self.watches.iter_mut() {
             line.dirty = false;
-            line.watchers.retain(|w| !from.is_deleted(w.cref));
-            for w in line.watchers.iter_mut() {
-                w.cref = from.reloc_to(to, w.cref).unwrap();
+            let ref mut ws = line.watchers;
+
+            let mut j = 0;
+            for i in 0..ws.len() {
+                if let Some(cr) = gc.relocate(ws[i].cref) {
+                    ws[j] = ws[i];
+                    ws[j].cref = cr;
+                    j += 1;
+                }
             }
+            ws.truncate(j);
         }
     }
 }

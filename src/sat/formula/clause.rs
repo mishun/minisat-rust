@@ -1,4 +1,4 @@
-use std::{fmt, ptr, slice};
+use std::{fmt, mem, ptr, slice};
 use super::{allocator, Lit};
 
 
@@ -16,7 +16,6 @@ pub struct ClauseHeader {
 pub struct Clause {
     mark: u32,
     pub header: ClauseHeader,
-    reloced: Option<ClauseRef>,
     len: u32,
     pub head: [Lit; MIN_CLAUSE_SIZE]
 }
@@ -103,18 +102,19 @@ pub struct ClauseAllocator {
 impl ClauseAllocator {
     pub fn new_empty() -> ClauseAllocator {
         ClauseAllocator {
-            ra: allocator::RegionAllocator::new(),
+            ra: allocator::RegionAllocator::with_capacity(1024 * 1024),
             lc: LegacyCounter::new(),
             extra_clause_field: false,
         }
     }
 
-    pub fn new_for_gc(old: &ClauseAllocator) -> ClauseAllocator {
-        ClauseAllocator {
-            ra: allocator::RegionAllocator::with_capacity(old.lc.size - old.lc.wasted),
+    pub fn gc(&mut self) -> ClauseGC {
+        let dst = ClauseAllocator {
+            ra: allocator::RegionAllocator::with_capacity(self.lc.size - self.lc.wasted),
             lc: LegacyCounter::new(),
-            extra_clause_field: old.extra_clause_field,
-        }
+            extra_clause_field: self.extra_clause_field,
+        };
+        ClauseGC { src: self, dst }
     }
 
     pub fn alloc(&mut self, literals: &[Lit], header: ClauseHeader) -> (&Clause, ClauseRef) {
@@ -125,7 +125,6 @@ impl ClauseAllocator {
 
             clause.mark = 0;
             clause.header = header;
-            clause.reloced = None;
             clause.len = len as u32;
             ptr::copy_nonoverlapping(literals.as_ptr(), clause.head.as_mut_ptr(), len);
 
@@ -135,31 +134,18 @@ impl ClauseAllocator {
     }
 
     fn reloc(&mut self, src: &Clause) -> ClauseRef {
-        let len = src.len as usize;
+        let len = src.len();
         assert!(len >= MIN_CLAUSE_SIZE);
         unsafe {
             let (clause, cref) = self.ra.allocate_with_extra::<Lit>(len - MIN_CLAUSE_SIZE);
 
             clause.mark = src.mark;
             clause.header = src.header;
-            clause.reloced = None;
             clause.len = src.len;
             ptr::copy_nonoverlapping(src.head.as_ptr(), clause.head.as_mut_ptr(), len);
 
             self.lc.add(clause);
             ClauseRef(cref)
-        }
-    }
-
-    pub fn reloc_to(&mut self, to: &mut ClauseAllocator, src: ClauseRef) -> Option<ClauseRef> {
-        let c = self.edit(src);
-        if c.is_deleted() {
-            None
-        } else {
-            if let None = c.reloced {
-                c.reloced = Some(to.reloc(c));
-            }
-            c.reloced
         }
     }
 
@@ -177,10 +163,6 @@ impl ClauseAllocator {
     }
 
 
-    pub fn size(&self) -> usize {
-        self.lc.size
-    }
-
     pub fn check_garbage(&mut self, gf: f64) -> bool {
         (self.lc.wasted as f64) > (self.lc.size as f64) * gf
     }
@@ -191,18 +173,48 @@ impl ClauseAllocator {
 
 
     #[inline]
-    pub fn view(&self, ClauseRef(cr): ClauseRef) -> &Clause {
-        self.ra.get(cr)
+    pub fn view(&self, cref: ClauseRef) -> &Clause {
+        self.ra.get(cref.0)
     }
 
     #[inline]
-    pub fn edit(&mut self, ClauseRef(cr): ClauseRef) -> &mut Clause {
-        self.ra.get_mut(cr)
+    pub fn edit(&mut self, cref: ClauseRef) -> &mut Clause {
+        self.ra.get_mut(cref.0)
     }
 
     #[inline]
     pub fn literals(&self, cref: ClauseRef) -> &[Lit] {
         self.view(cref).lits()
+    }
+}
+
+
+pub struct ClauseGC<'a> {
+    src: &'a mut ClauseAllocator,
+    dst: ClauseAllocator
+}
+
+impl Drop for ClauseGC<'_> {
+    fn drop(&mut self) {
+        debug!("|  Garbage collection:   {:12} bytes => {:12} bytes             |",
+               self.src.lc.size, self.dst.lc.size);
+        mem::swap(self.src, &mut self.dst);
+    }
+}
+
+impl<'a> ClauseGC<'a> {
+    pub fn relocate(&mut self, cref: ClauseRef) -> Option<ClauseRef> {
+        let c = self.src.edit(cref);
+        if c.is_deleted() {
+            None
+        } else if (c.mark & 0x80) == 0 {
+            let reloced = self.dst.reloc(c);
+            unsafe { ptr::write(c.head.as_mut_ptr() as *mut ClauseRef, reloced); }
+            c.mark |= 0x80;
+            Some(reloced)
+        } else {
+            Some(unsafe { ptr::read(c.head.as_ptr() as *const ClauseRef) })
+        }
     }
 }
 

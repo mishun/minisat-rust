@@ -264,9 +264,7 @@ impl Simplificator {
                     self.backward_subsumption_check(&mut search.bt, &mut search.ctx.db, budget, false)?;
                 }
 
-                if search.bt.ca.check_garbage(self.settings.simp_garbage_frac) {
-                    self.garbage_collect(search);
-                }
+                self.try_garbage_collect(search);
             }
 
             assert!(self.subsumption_queue.is_empty());
@@ -525,15 +523,12 @@ impl Simplificator {
     }
 
 
-    fn garbage_collect(&mut self, search: &mut Searcher) {
-        let mut to = ClauseAllocator::new_for_gc(&search.bt.ca);
-        self.reloc_gc(&mut search.bt.ca, &mut to);
-        search.reloc_gc(to);
-    }
-
-    fn reloc_gc(&mut self, from: &mut ClauseAllocator, to: &mut ClauseAllocator) {
-        self.elo.occurs.reloc_gc(from, to);
-        self.subsumption_queue.reloc_gc(from, to);
+    fn try_garbage_collect(&mut self, search: &mut Searcher) {
+        if search.bt.ca.check_garbage(self.settings.simp_garbage_frac) {
+            let mut gc = search.gc();
+            self.elo.occurs.gc(&mut gc);
+            self.subsumption_queue.gc(&mut gc);
+        }
     }
 
 
@@ -544,7 +539,8 @@ impl Simplificator {
 
         // Force full cleanup (this is safe and desirable since it only happens once):
         search.ctx.heur.rebuild_order_heap(&search.bt.assigns);
-        search.garbage_collect();
+
+        search.gc();
     }
 
     pub fn on(search: &mut Searcher) {

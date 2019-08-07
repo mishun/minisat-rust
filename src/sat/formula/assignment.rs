@@ -233,11 +233,11 @@ impl Assignment {
     }
 
 
-    pub fn reloc_gc(&mut self, from: &mut ClauseAllocator, to: &mut ClauseAllocator) {
+    pub fn gc(&mut self, gc: &mut ClauseGC) {
         unsafe {
             for lit in self.trail.iter() {
                 let ref mut reason = self.vd.get_unchecked_mut(lit.var_index()).reason;
-                *reason = reason.and_then(|cr| from.reloc_to(to, cr));
+                *reason = reason.and_then(|cr| gc.relocate(cr));
             }
         }
     }

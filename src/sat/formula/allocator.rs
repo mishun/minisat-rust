@@ -12,10 +12,6 @@ pub struct RegionAllocator<T> {
 }
 
 impl<T> RegionAllocator<T> {
-    pub fn new() -> Self {
-        Self::with_capacity(1024 * 1024)
-    }
-
     pub fn with_capacity(capacity: usize) -> Self {
         let mut ra = RegionAllocator {
             memory: ptr::null_mut(),

@@ -20,8 +20,7 @@ pub fn satisfied_with_assignment(clause: &[Lit], assignment: &Assignment) -> boo
     false
 }
 
-pub fn satisfied_with_model(clause: &[Lit], model: &VarMap<bool>) -> bool
-{
+pub fn satisfied_with_model(clause: &[Lit], model: &VarMap<bool>) -> bool {
     for &lit in clause {
         match model.get(&lit.var()) {
             Some(sign) if *sign != lit.sign() => return true,
@@ -45,7 +44,7 @@ pub fn extract_model(assigns: &Assignment) -> VarMap<bool> {
 pub fn merge(v: Var, _ps: &[Lit], _qs: &[Lit]) -> Option<Vec<Lit>> {
     let (ps, qs) = if _ps.len() < _qs.len() { (_qs, _ps) } else { (_ps, _qs) };
 
-    let mut res = Vec::new();
+    let mut res = Vec::with_capacity(ps.len() + qs.len());
     for &qsi in qs {
         if qsi.var() != v {
             let mut ok = true;

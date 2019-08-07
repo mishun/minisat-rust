@@ -72,10 +72,14 @@ impl SubsumptionQueue {
         self.subsumption_queue.iter()
     }
 
-    pub fn reloc_gc(&mut self, from: &mut ClauseAllocator, to: &mut ClauseAllocator) {
-        self.subsumption_queue.retain(|&cr| !from.is_deleted(cr));
-        for cr in self.subsumption_queue.iter_mut() {
-            *cr = from.reloc_to(to, *cr).unwrap();
+    pub fn gc(&mut self, gc: &mut ClauseGC) {
+        let mut j = 0;
+        for i in 0..self.subsumption_queue.len() {
+            if let Some(cr) = gc.relocate(self.subsumption_queue[i]) {
+                self.subsumption_queue[j] = cr;
+                j += 1;
+            }
         }
+        self.subsumption_queue.truncate(j);
     }
 }
