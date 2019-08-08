@@ -8,11 +8,16 @@ pub enum Subsumes {
 }
 
 pub fn subsumes(this: &Clause, other: &Clause) -> Subsumes {
-    assert!(!this.header.learnt);
-    assert!(!other.header.learnt);
-
-    if other.len() < this.len() || (this.header.abstraction & !other.header.abstraction) != 0 {
+    if other.len() < this.len() {
         return Subsumes::Different;
+    }
+
+    if let ClauseHeader::Clause { abstraction: Some(this_abs) } = this.header {
+        if let ClauseHeader::Clause { abstraction: Some(other_abs) } = other.header {
+            if (this_abs & !other_abs) != 0 {
+                return Subsumes::Different;
+            }
+        }
     }
 
     let mut ret = Subsumes::Exact;
@@ -43,14 +48,14 @@ pub fn subsumes(this: &Clause, other: &Clause) -> Subsumes {
     return ret;
 }
 
-pub fn unit_subsumes(unit: Lit, c: &Clause) -> Subsumes {
-    assert!(!c.header.learnt);
-
-    if unit.abstraction() & !c.header.abstraction != 0 {
-        return Subsumes::Different;
+pub fn unit_subsumes(unit: Lit, clause: &Clause) -> Subsumes {
+    if let ClauseHeader::Clause { abstraction: Some(abs) } = clause.header {
+        if (unit.abstraction() & !abs) != 0 {
+            return Subsumes::Different;
+        }
     }
 
-    for &cur in c.lits() {
+    for &cur in clause.lits() {
         if unit == cur {
             return Subsumes::Exact;
         } else if unit == !cur {

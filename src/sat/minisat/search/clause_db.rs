@@ -27,22 +27,30 @@ pub struct Stats {
 
 impl Stats {
     fn add(&mut self, clause: &Clause) {
-        if clause.header.learnt {
-            self.num_learnts += 1;
-            self.learnts_literals += clause.len() as u64;
-        } else {
-            self.num_clauses += 1;
-            self.clauses_literals += clause.len() as u64;
+        match clause.header {
+            ClauseHeader::Learnt { activity: _ } => {
+                self.num_learnts += 1;
+                self.learnts_literals += clause.len() as u64;
+            }
+
+            ClauseHeader::Clause { abstraction: _ } => {
+                self.num_clauses += 1;
+                self.clauses_literals += clause.len() as u64;
+            }
         }
     }
 
     fn del(&mut self, clause: &Clause) {
-        if clause.header.learnt {
-            self.num_learnts -= 1;
-            self.learnts_literals -= clause.len() as u64;
-        } else {
-            self.num_clauses -= 1;
-            self.clauses_literals -= clause.len() as u64;
+        match clause.header {
+            ClauseHeader::Learnt { activity: _ } => {
+                self.num_learnts -= 1;
+                self.learnts_literals -= clause.len() as u64;
+            }
+
+            ClauseHeader::Clause { abstraction: _ } => {
+                self.num_clauses -= 1;
+                self.clauses_literals -= clause.len() as u64;
+            }
         }
     }
 }
@@ -68,13 +76,14 @@ impl ClauseDB {
     }
 
     pub fn add_clause<'c>(&mut self, ca: &'c mut ClauseAllocator, literals: &[Lit]) -> ClauseRef {
-        let header = ClauseHeader {
-            learnt: false,
-            has_extra: ca.extra_clause_field,
-            activity: 0.0,
-            abstraction: if ca.extra_clause_field { calc_abstraction(literals) } else { 0 }
+        let header = ClauseHeader::Clause {
+            abstraction:
+                if ca.extra_clause_field {
+                    Some(calc_abstraction(literals))
+                } else {
+                    None
+                }
         };
-
         let (c, cr) = ca.alloc(literals, header);
         self.stats.add(c);
         self.clauses.push(cr);
@@ -82,13 +91,7 @@ impl ClauseDB {
     }
 
     pub fn learn_clause<'c>(&mut self, ca: &mut ClauseAllocator, literals: &[Lit]) -> ClauseRef {
-        let header = ClauseHeader {
-            learnt: true,
-            has_extra: true,
-            activity: 0.0,
-            abstraction: 0
-        };
-
+        let header = ClauseHeader::Learnt { activity: 0.0 };
         let (c, cr) = ca.alloc(literals, header);
         self.stats.add(c);
         self.learnts.push(cr);
@@ -116,21 +119,25 @@ impl ClauseDB {
     pub fn bump_activity(&mut self, ca: &mut ClauseAllocator, cr: ClauseRef) {
         let new = {
             let c = ca.edit(cr);
-            if !c.header.learnt {
+            if let ClauseHeader::Learnt { ref mut activity } = c.header {
+                let new = *activity as f64 + self.cla_inc;
+                *activity = new as f32;
+                new
+            } else {
                 return;
             }
-
-            let new = c.header.activity as f64 + self.cla_inc;
-            c.header.activity = new as f32;
-            new
         };
 
         if new > 1e20 {
             self.cla_inc *= 1e-20;
             for &cri in self.learnts.iter() {
                 let c = ca.edit(cri);
-                let scaled = (c.header.activity as f64) * 1e-20;
-                c.header.activity = scaled as f32;
+                if let ClauseHeader::Learnt { ref mut activity } = c.header {
+                    let scaled = (*activity as f64) * 1e-20;
+                    *activity = scaled as f32;
+                } else {
+                    panic!("Expected learnt");
+                }
             }
         }
     }
@@ -163,7 +170,9 @@ impl ClauseDB {
             } else if y.len() == 2 {
                 Ordering::Less
             } else {
-                x.header.activity.partial_cmp(&y.header.activity).unwrap()
+                let x_activity = x.header.activity();
+                let y_activity = y.header.activity();
+                x_activity.partial_cmp(&y_activity).unwrap()
             }
         });
 
@@ -184,7 +193,7 @@ impl ClauseDB {
                 let remove = {
                     let c = ca.view(cr);
                     let remove = c.len() > 2 && !assigns.is_reason_for(cr, c.head[0])
-                        && (i < index_lim || (c.header.activity as f64) < extra_lim);
+                        && (i < index_lim || (c.header.activity() as f64) < extra_lim);
 
                     if remove {
                         notify(c);

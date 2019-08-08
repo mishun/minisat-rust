@@ -70,6 +70,10 @@ impl<T> RegionAllocator<T> {
         (self.get_mut(reference), reference)
     }
 
+    pub fn allocated_bytes(&self) -> usize {
+        self.offset
+    }
+
     #[inline]
     pub fn get(&self, reference: Ref) -> &T {
         assert!((reference as usize) < self.offset);

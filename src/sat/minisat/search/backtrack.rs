@@ -11,7 +11,7 @@ pub struct BacktrackableFormula {
 impl BacktrackableFormula {
     pub fn new() -> Self {
         BacktrackableFormula {
-            ca: ClauseAllocator::new_empty(),
+            ca: ClauseAllocator::with_capacity(1024 * 1024),
             assigns: Assignment::new(),
             watches: Watches::new()
         }

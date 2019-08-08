@@ -6,12 +6,21 @@ pub const MIN_CLAUSE_SIZE : usize = 2;
 
 
 #[derive(Clone, Copy)]
-pub struct ClauseHeader {
-    pub learnt: bool,
-    pub has_extra: bool,
-    pub activity: f32,
-    pub abstraction: u32
+pub enum ClauseHeader {
+    Clause { abstraction: Option<u32> },
+    Learnt { activity: f32 }
 }
+
+impl ClauseHeader {
+    pub fn activity(&self) -> f32 {
+        if let ClauseHeader::Learnt { activity } = self {
+            *activity
+        } else {
+            panic!("Learnt expected");
+        }
+    }
+}
+
 
 pub struct Clause {
     mark: u32,
@@ -96,13 +105,13 @@ pub struct ClauseRef(allocator::Ref);
 pub struct ClauseAllocator {
     ra: allocator::RegionAllocator<Clause>,
     lc: LegacyCounter,
-    pub extra_clause_field: bool,
+    pub extra_clause_field: bool
 }
 
 impl ClauseAllocator {
-    pub fn new_empty() -> ClauseAllocator {
+    pub fn with_capacity(capacity: usize) -> ClauseAllocator {
         ClauseAllocator {
-            ra: allocator::RegionAllocator::with_capacity(1024 * 1024),
+            ra: allocator::RegionAllocator::with_capacity(capacity),
             lc: LegacyCounter::new(),
             extra_clause_field: false,
         }
@@ -124,7 +133,7 @@ impl ClauseAllocator {
             let (clause, cref) = self.ra.allocate_with_extra::<Lit>(len - MIN_CLAUSE_SIZE);
 
             clause.mark = 0;
-            clause.header = header;
+            ptr::write(&mut clause.header as &mut ClauseHeader, header);
             clause.len = len as u32;
             ptr::copy_nonoverlapping(literals.as_ptr(), clause.head.as_mut_ptr(), len);
 
@@ -140,9 +149,15 @@ impl ClauseAllocator {
             let (clause, cref) = self.ra.allocate_with_extra::<Lit>(len - MIN_CLAUSE_SIZE);
 
             clause.mark = src.mark;
-            clause.header = src.header;
+            ptr::write(&mut clause.header as &mut ClauseHeader, src.header);
             clause.len = src.len;
             ptr::copy_nonoverlapping(src.head.as_ptr(), clause.head.as_mut_ptr(), len);
+
+            if !self.extra_clause_field {
+                if let ClauseHeader::Clause { ref mut abstraction} = clause.header {
+                    *abstraction = None;
+                }
+            }
 
             self.lc.add(clause);
             ClauseRef(cref)
@@ -165,10 +180,6 @@ impl ClauseAllocator {
 
     pub fn check_garbage(&mut self, gf: f64) -> bool {
         (self.lc.wasted as f64) > (self.lc.size as f64) * gf
-    }
-
-    pub fn set_extra_clause_field(&mut self, new_value: bool) {
-        self.extra_clause_field = new_value;
     }
 
 
@@ -196,8 +207,12 @@ pub struct ClauseGC<'a> {
 
 impl Drop for ClauseGC<'_> {
     fn drop(&mut self) {
-        debug!("|  Garbage collection:   {:12} bytes => {:12} bytes             |",
-               self.src.lc.size, self.dst.lc.size);
+        debug!("|  Garbage collection:   {:12} bytes => {:12} bytes ({} -> {})            |",
+            self.src.lc.size,
+            self.dst.lc.size,
+            self.src.ra.allocated_bytes(),
+            self.dst.ra.allocated_bytes()
+        );
         mem::swap(self.src, &mut self.dst);
     }
 }
@@ -225,8 +240,12 @@ struct LegacyCounter {
 }
 
 impl LegacyCounter {
-    fn clause_size(size: usize, has_extra: bool) -> usize {
-        4 * (1 + size + (has_extra as usize))
+    fn clause_size(clause: &Clause) -> usize {
+        if let ClauseHeader::Clause { abstraction: None } = clause.header {
+            4 * (1 + clause.len())
+        } else {
+            4 * (2 + clause.len())
+        }
     }
 
     pub fn new() -> LegacyCounter {
@@ -234,10 +253,10 @@ impl LegacyCounter {
     }
 
     pub fn add(&mut self, clause: &Clause) {
-        self.size += Self::clause_size(clause.len as usize, clause.header.has_extra);
+        self.size += Self::clause_size(clause);
     }
 
     pub fn sub(&mut self, clause: &Clause) {
-        self.wasted += Self::clause_size(clause.len as usize, clause.header.has_extra);
+        self.wasted += Self::clause_size(clause);
     }
 }

@@ -170,7 +170,7 @@ impl Simplificator {
         elimclauses: &mut ElimClauses,
         assumptions: &[Lit],
     ) -> SearchRes {
-        let mut extra_frozen: Vec<Var> = Vec::new();
+        let mut extra_frozen: Vec<Var> = Vec::with_capacity(assumptions.len());
 
         // Assumptions must be temporarily frozen to run variable elimination:
         for lit in assumptions.iter() {
@@ -346,8 +346,8 @@ impl Simplificator {
 
         // Split the occurrences into positive and negative:
         let (pos, neg) = {
-            let mut pos = Vec::new();
-            let mut neg = Vec::new();
+            let mut pos = Vec::with_capacity(cls.len());
+            let mut neg = Vec::with_capacity(cls.len());
             for &cr in cls.iter() {
                 for l in search.bt.ca.view(cr).lits() {
                     if l.var() == v {
@@ -535,7 +535,7 @@ impl Simplificator {
     // TODO: remove
     pub fn off(search: &mut Searcher) {
         search.ctx.db.settings.remove_satisfied = true;
-        search.bt.ca.set_extra_clause_field(false);
+        search.bt.ca.extra_clause_field = false;
 
         // Force full cleanup (this is safe and desirable since it only happens once):
         search.ctx.heur.rebuild_order_heap(&search.bt.assigns);
@@ -544,7 +544,7 @@ impl Simplificator {
     }
 
     pub fn on(search: &mut Searcher) {
-        search.bt.ca.set_extra_clause_field(true);
+        search.bt.ca.extra_clause_field = true;
         search.ctx.db.settings.remove_satisfied = false;
     }
 }
@@ -565,8 +565,7 @@ fn try_propagate(bt: &mut BacktrackableFormula, p: Lit, reason: Option<ClauseRef
 }
 
 fn strengthen(clause: &mut Clause, p: Lit) {
-    assert!(clause.header.has_extra);
-    assert!(clause.len() > 2);
+    assert!(clause.len() > 2, "Clause is too short");
     unsafe {
         let (mut l, r) = clause.ptr_range();
         while l < r {
@@ -576,9 +575,12 @@ fn strengthen(clause: &mut Clause, p: Lit) {
                     *l.offset(-1) = *l;
                     l = l.offset(1);
                 }
-
                 clause.shrink_by(1);
-                clause.header.abstraction = calc_abstraction(clause.lits());
+
+                let new_abstraction = calc_abstraction(clause.lits());
+                if let ClauseHeader::Clause { ref mut abstraction } = clause.header {
+                    *abstraction = Some(new_abstraction);
+                }
                 return;
             }
             l = l.offset(1);
