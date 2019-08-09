@@ -4,6 +4,7 @@ pub use self::index_map::*;
 mod allocator;
 pub mod assignment;
 pub mod clause;
+pub mod clause_header;
 mod index_map;
 pub mod util;
 

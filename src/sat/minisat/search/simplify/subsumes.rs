@@ -14,7 +14,7 @@ pub fn subsumes(this: &Clause, other: &Clause) -> Subsumes {
 
     if let ClauseHeader::Clause { abstraction: Some(this_abs) } = this.header {
         if let ClauseHeader::Clause { abstraction: Some(other_abs) } = other.header {
-            if (this_abs & !other_abs) != 0 {
+            if (this_abs.get() & !other_abs.get()) != 0 {
                 return Subsumes::Different;
             }
         }
@@ -50,7 +50,7 @@ pub fn subsumes(this: &Clause, other: &Clause) -> Subsumes {
 
 pub fn unit_subsumes(unit: Lit, clause: &Clause) -> Subsumes {
     if let ClauseHeader::Clause { abstraction: Some(abs) } = clause.header {
-        if (unit.abstraction() & !abs) != 0 {
+        if (unit.abstraction() & !abs.get()) != 0 {
             return Subsumes::Different;
         }
     }

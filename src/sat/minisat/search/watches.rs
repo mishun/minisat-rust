@@ -38,19 +38,19 @@ impl Watches {
 
     pub fn watch_clause(&mut self, c: &Clause, cr: ClauseRef) {
         for i in 0..2 {
-            let w = Watcher { cref: cr, blocker: c.head[i ^ 1] };
-            self.watches[!c.head[i]].watchers.push(w);
+            let w = Watcher { cref: cr, blocker: c.prefix[i ^ 1] };
+            self.watches[!c.prefix[i]].watchers.push(w);
         }
     }
 
     pub fn unwatch_clause_strict(&mut self, c: &Clause, cr: ClauseRef) {
-        for &lit in &c.head {
+        for &lit in &c.prefix {
             self.watches[!lit].watchers.retain(|w| w.cref != cr);
         }
     }
 
     pub fn unwatch_clause_lazy(&mut self, c: &Clause) {
-        for &lit in &c.head {
+        for &lit in &c.prefix {
             self.watches[!lit].dirty = true;
         }
     }
@@ -89,13 +89,13 @@ impl Watches {
                         continue;
                     }
 
-                    if clause.head[0] == not_p {
-                        clause.head.swap(0, 1);
+                    if clause.prefix[0] == not_p {
+                        clause.prefix.swap(0, 1);
                     }
-                    //assert!(clause.head[1] == not_p);
+                    //assert!(clause.prefix[1] == not_p);
 
                     // If 0th watch is true, then clause is already satisfied.
-                    let cw = Watcher { cref: pwi.cref, blocker: clause.head[0] };
+                    let cw = Watcher { cref: pwi.cref, blocker: clause.prefix[0] };
                     if cw.blocker != pwi.blocker && assigns.is_assigned_pos(cw.blocker) {
                         *tail = cw;
                         tail = tail.offset(1);

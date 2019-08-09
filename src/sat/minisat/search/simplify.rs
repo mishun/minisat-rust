@@ -284,7 +284,7 @@ impl Simplificator {
 
             let unit = {
                 let c = bt.ca.edit(cr);
-                if l == c.head[0] { c.head[1] } else { c.head[0] }
+                if l == c.prefix[0] { c.prefix[1] } else { c.prefix[0] }
             };
 
             try_propagate(bt, unit, None)?;
@@ -464,7 +464,7 @@ impl Simplificator {
 
                     SubsumptionJob::Clause(sub_cr) => {
                         let c = bt.ca.view(sub_cr);
-                        let mut best = c.head[0].var();
+                        let mut best = c.prefix[0].var();
                         for &lit in &c.lits()[1..] {
                             // TODO: why not use n_occ?
                             if self.elo.occurs.occs_dirty(lit.var()) < self.elo.occurs.occs_dirty(best) {

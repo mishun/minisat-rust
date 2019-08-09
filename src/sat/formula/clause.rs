@@ -1,80 +1,70 @@
 use std::{fmt, mem, ptr, slice};
 use super::{allocator, Lit};
+pub use super::clause_header::*;
 
+
+const FLAG_BITS : usize = 4;
+const FLAG_DELETED : u32 = 0x01;
+const FLAG_TOUCHED : u32 = 0x02;
+const FLAG_RELOCED : u32 = 0x08;
 
 pub const MIN_CLAUSE_SIZE : usize = 2;
-
-
-#[derive(Clone, Copy)]
-pub enum ClauseHeader {
-    Clause { abstraction: Option<u32> },
-    Learnt { activity: f32 }
-}
-
-impl ClauseHeader {
-    pub fn activity(&self) -> f32 {
-        if let ClauseHeader::Learnt { activity } = self {
-            *activity
-        } else {
-            panic!("Learnt expected");
-        }
-    }
-}
+pub const MAX_CLAUSE_SIZE : usize = 0xFFFFFFFF >> FLAG_BITS;
 
 
 pub struct Clause {
     mark: u32,
     pub header: ClauseHeader,
-    len: u32,
-    pub head: [Lit; MIN_CLAUSE_SIZE]
+    pub prefix: [Lit; MIN_CLAUSE_SIZE]
 }
 
 impl Clause {
     #[inline]
     pub fn len(&self) -> usize {
-        self.len as usize
+        (self.mark >> FLAG_BITS) as usize
     }
 
     #[inline]
     pub fn shrink_by(&mut self, shrink: usize) {
-        self.len -= shrink as u32;
+        assert!(self.len() >= MIN_CLAUSE_SIZE + shrink);
+        self.mark -= (shrink << FLAG_BITS) as u32;
     }
 
     #[inline]
     pub fn lits(&self) -> &[Lit] {
-        unsafe { slice::from_raw_parts(self.head.as_ptr(), self.len as usize) }
+        unsafe { slice::from_raw_parts(self.prefix.as_ptr(), self.len()) }
     }
 
     #[inline]
     pub fn lits_mut(&mut self) -> &mut [Lit] {
-        unsafe { slice::from_raw_parts_mut(self.head.as_mut_ptr(), self.len as usize) }
+        unsafe { slice::from_raw_parts_mut(self.prefix.as_mut_ptr(), self.len()) }
     }
 
     #[inline]
     pub unsafe fn ptr_range(&mut self) -> (*mut Lit, *mut Lit) {
-        let begin = self.head.as_mut_ptr();
-        let end = begin.add(self.len as usize);
+        let begin = self.prefix.as_mut_ptr();
+        let end = begin.add(self.len());
         (begin, end)
     }
 
 
     pub fn is_deleted(&self) -> bool {
-        (self.mark & 1) != 0
+        (self.mark & FLAG_DELETED) != 0
     }
 
     fn mark_deleted(&mut self) {
-        self.mark |= 1;
+        self.mark |= FLAG_DELETED;
     }
 
     pub fn is_touched(&self) -> bool {
-        (self.mark & 2) != 0
+        (self.mark & FLAG_TOUCHED) != 0
     }
 
     pub fn set_touched(&mut self, b: bool) {
         if b {
-            self.mark |= 2;
+            self.mark |= FLAG_TOUCHED;
         } else {
-            self.mark &= !2;
+            self.mark &= !FLAG_TOUCHED;
         }
     }
 }
@@ -129,13 +119,13 @@ impl ClauseAllocator {
     pub fn alloc(&mut self, literals: &[Lit], header: ClauseHeader) -> (&Clause, ClauseRef) {
         let len = literals.len();
         assert!(len >= MIN_CLAUSE_SIZE);
+        assert!(len <= MAX_CLAUSE_SIZE);
         unsafe {
             let (clause, cref) = self.ra.allocate_with_extra::<Lit>(len - MIN_CLAUSE_SIZE);
 
-            clause.mark = 0;
-            ptr::write(&mut clause.header as &mut ClauseHeader, header);
-            clause.len = len as u32;
-            ptr::copy_nonoverlapping(literals.as_ptr(), clause.head.as_mut_ptr(), len);
+            clause.mark = (len << FLAG_BITS) as u32;
+            ptr::write(&mut clause.header, header);
+            ptr::copy_nonoverlapping(literals.as_ptr(), clause.prefix.as_mut_ptr(), len);
 
             self.lc.add(clause);
             (clause, ClauseRef(cref))
@@ -149,9 +139,8 @@ impl ClauseAllocator {
             let (clause, cref) = self.ra.allocate_with_extra::<Lit>(len - MIN_CLAUSE_SIZE);
 
             clause.mark = src.mark;
-            ptr::write(&mut clause.header as &mut ClauseHeader, src.header);
-            clause.len = src.len;
-            ptr::copy_nonoverlapping(src.head.as_ptr(), clause.head.as_mut_ptr(), len);
+            ptr::write(&mut clause.header, ptr::read(&src.header));
+            ptr::copy_nonoverlapping(src.prefix.as_ptr(), clause.prefix.as_mut_ptr(), len);
 
             if !self.extra_clause_field {
                 if let ClauseHeader::Clause { ref mut abstraction} = clause.header {
@@ -164,16 +153,16 @@ impl ClauseAllocator {
         }
     }
 
-    pub fn free(&mut self, ClauseRef(cr): ClauseRef) {
-        let clause = self.ra.get_mut(cr);
+    pub fn free(&mut self, cref: ClauseRef) {
+        let clause = self.ra.get_mut(cref.0);
         assert!(!clause.is_deleted());
         clause.mark_deleted();
         self.lc.sub(clause);
     }
 
     #[inline]
-    pub fn is_deleted(&self, ClauseRef(cr): ClauseRef) -> bool {
-        let c = self.ra.get(cr);
+    pub fn is_deleted(&self, cref: ClauseRef) -> bool {
+        let c = self.ra.get(cref.0);
         c.is_deleted()
     }
 
@@ -222,13 +211,13 @@ impl<'a> ClauseGC<'a> {
         let c = self.src.edit(cref);
         if c.is_deleted() {
             None
-        } else if (c.mark & 0x80) == 0 {
+        } else if (c.mark & FLAG_RELOCED) == 0 {
             let reloced = self.dst.reloc(c);
-            unsafe { ptr::write(c.head.as_mut_ptr() as *mut ClauseRef, reloced); }
-            c.mark |= 0x80;
+            unsafe { ptr::write(c.prefix.as_mut_ptr() as *mut ClauseRef, reloced); }
+            c.mark |= FLAG_RELOCED;
             Some(reloced)
         } else {
-            Some(unsafe { ptr::read(c.head.as_ptr() as *const ClauseRef) })
+            Some(unsafe { ptr::read(c.prefix.as_ptr() as *const ClauseRef) })
         }
     }
 }

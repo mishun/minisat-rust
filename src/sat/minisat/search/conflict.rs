@@ -84,7 +84,7 @@ impl AnalyzeContext {
         }
 
         // Generate conflict clause:
-        let mut out_learnt = Vec::new();
+        let mut out_learnt = Vec::with_capacity(assigns.number_of_assigns());
 
         {
             let mut confl = confl0;

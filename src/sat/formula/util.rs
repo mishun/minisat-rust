@@ -1,12 +1,13 @@
+use std::num;
 use super::{assignment::Assignment, Lit, Var, VarMap};
 
 
-pub fn calc_abstraction(lits: &[Lit]) -> u32 {
+pub fn calc_abstraction(lits: &[Lit]) -> num::NonZeroU32 {
     let mut abstraction: u32 = 0;
     for lit in lits {
         abstraction |= lit.abstraction();
     }
-    abstraction
+    num::NonZeroU32::new(abstraction).unwrap()
 }
 
 
@@ -42,14 +43,14 @@ pub fn extract_model(assigns: &Assignment) -> VarMap<bool> {
 
 // Returns None if clause is always satisfied
 pub fn merge(v: Var, _ps: &[Lit], _qs: &[Lit]) -> Option<Vec<Lit>> {
-    let (ps, qs) = if _ps.len() < _qs.len() { (_qs, _ps) } else { (_ps, _qs) };
+    let (longer, shorter) = if _ps.len() < _qs.len() { (_qs, _ps) } else { (_ps, _qs) };
 
-    let mut res = Vec::with_capacity(ps.len() + qs.len());
-    for &qsi in qs {
+    let mut res = Vec::with_capacity(longer.len() + shorter.len());
+    for &qsi in shorter {
         if qsi.var() != v {
             let mut ok = true;
 
-            for &psj in ps {
+            for &psj in longer {
                 if psj.var() == qsi.var() {
                     if psj == !qsi {
                         return None;
@@ -66,9 +67,9 @@ pub fn merge(v: Var, _ps: &[Lit], _qs: &[Lit]) -> Option<Vec<Lit>> {
         }
     }
 
-    for &psi in ps {
-        if psi.var() != v {
-            res.push(psi);
+    for &lit in longer {
+        if lit.var() != v {
+            res.push(lit);
         }
     }
 

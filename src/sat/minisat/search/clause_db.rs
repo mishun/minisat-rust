@@ -192,7 +192,7 @@ impl ClauseDB {
 
                 let remove = {
                     let c = ca.view(cr);
-                    let remove = c.len() > 2 && !assigns.is_reason_for(cr, c.head[0])
+                    let remove = c.len() > 2 && !assigns.is_reason_for(cr, c.prefix[0])
                         && (i < index_lim || (c.header.activity() as f64) < extra_lim);
 
                     if remove {
@@ -282,7 +282,7 @@ impl ClauseDB {
 
 fn retain_clause(clause: &mut Clause, assigns: &Assignment) {
     assert!({
-        let [c0, c1] = clause.head;
+        let [c0, c1] = clause.prefix;
         assigns.is_undef(c0.var()) && assigns.is_undef(c1.var())
     });
 
