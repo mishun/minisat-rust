@@ -89,11 +89,12 @@ impl fmt::Debug for Clause {
 
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
+#[repr(transparent)]
 pub struct ClauseRef(allocator::Ref);
 
 
 pub struct ClauseAllocator {
-    ra: allocator::RegionAllocator<Clause>,
+    ra: allocator::RegionAllocator,
     lc: LegacyCounter,
     pub extra_clause_field: bool
 }
@@ -101,7 +102,7 @@ pub struct ClauseAllocator {
 impl ClauseAllocator {
     pub fn with_capacity(capacity: usize) -> ClauseAllocator {
         ClauseAllocator {
-            ra: allocator::RegionAllocator::with_capacity(capacity),
+            ra: allocator::RegionAllocator::with_capacity(capacity, 16),
             lc: LegacyCounter::new(),
             extra_clause_field: false,
         }
@@ -109,7 +110,7 @@ impl ClauseAllocator {
 
     pub fn gc(&mut self) -> ClauseGC {
         let dst = ClauseAllocator {
-            ra: allocator::RegionAllocator::with_capacity(self.lc.size - self.lc.wasted),
+            ra: allocator::RegionAllocator::with_capacity(self.lc.size - self.lc.wasted, 16),
             lc: LegacyCounter::new(),
             extra_clause_field: self.extra_clause_field,
         };
@@ -121,7 +122,7 @@ impl ClauseAllocator {
         assert!(len >= MIN_CLAUSE_SIZE);
         assert!(len <= MAX_CLAUSE_SIZE);
         unsafe {
-            let (clause, cref) = self.ra.allocate_with_extra::<Lit>(len - MIN_CLAUSE_SIZE);
+            let (clause, cref) = self.ra.allocate_with_extra::<Clause, Lit>(len - MIN_CLAUSE_SIZE);
 
             clause.mark = (len << FLAG_BITS) as u32;
             ptr::write(&mut clause.header, header);
@@ -136,7 +137,7 @@ impl ClauseAllocator {
         let len = src.len();
         assert!(len >= MIN_CLAUSE_SIZE);
         unsafe {
-            let (clause, cref) = self.ra.allocate_with_extra::<Lit>(len - MIN_CLAUSE_SIZE);
+            let (clause, cref) = self.ra.allocate_with_extra::<Clause, Lit>(len - MIN_CLAUSE_SIZE);
 
             clause.mark = src.mark;
             ptr::write(&mut clause.header, ptr::read(&src.header));
@@ -154,16 +155,10 @@ impl ClauseAllocator {
     }
 
     pub fn free(&mut self, cref: ClauseRef) {
-        let clause = self.ra.get_mut(cref.0);
+        let clause = unsafe { self.ra.get_mut::<Clause>(cref.0) };
         assert!(!clause.is_deleted());
         clause.mark_deleted();
         self.lc.sub(clause);
-    }
-
-    #[inline]
-    pub fn is_deleted(&self, cref: ClauseRef) -> bool {
-        let c = self.ra.get(cref.0);
-        c.is_deleted()
     }
 
 
@@ -174,17 +169,22 @@ impl ClauseAllocator {
 
     #[inline]
     pub fn view(&self, cref: ClauseRef) -> &Clause {
-        self.ra.get(cref.0)
+        unsafe { self.ra.get(cref.0) }
     }
 
     #[inline]
     pub fn edit(&mut self, cref: ClauseRef) -> &mut Clause {
-        self.ra.get_mut(cref.0)
+        unsafe { self.ra.get_mut(cref.0) }
     }
 
     #[inline]
     pub fn literals(&self, cref: ClauseRef) -> &[Lit] {
         self.view(cref).lits()
+    }
+
+    #[inline]
+    pub fn is_deleted(&self, cref: ClauseRef) -> bool {
+        self.view(cref).is_deleted()
     }
 }
 
